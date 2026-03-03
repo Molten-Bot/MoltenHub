@@ -33,6 +33,7 @@ jobs:
         uses: actions/setup-go@v5
         with:
           go-version: '1.22.x'
+          cache: false
 
       - name: Run tests
         run: go test ./...
@@ -97,18 +98,33 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Trigger Prod deploy hook
+      - name: Resolve deploy hook settings
+        id: deploy_hook
         env:
+          DEPLOY_HOOK_URL: ${{ secrets.DEPLOY_HOOK_URL }}
+        run: |
+          if [ -z "$DEPLOY_HOOK_URL" ]; then
+            echo "::notice title=Deploy hook skipped::DEPLOY_HOOK_URL is not configured for environment 'prod'."
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          echo "enabled=true" >> "$GITHUB_OUTPUT"
+
+      - name: Trigger Prod deploy hook
+        if: ${{ steps.deploy_hook.outputs.enabled == 'true' }}
+        env:
+          DEPLOY_HOOK_URL: ${{ secrets.DEPLOY_HOOK_URL }}
           DEPLOY_HOOK_BEARER_TOKEN: ${{ secrets.DEPLOY_HOOK_BEARER_TOKEN }}
         run: |
           scripts/release/trigger_deploy_hook.sh \
-            "${{ secrets.DEPLOY_HOOK_URL }}" \
+            "${DEPLOY_HOOK_URL}" \
             "prod" \
             "${{ needs.build-and-push.outputs.image_ref }}" \
             "${{ github.sha }}"
 
       - name: Optional Prod health check
-        if: ${{ vars.HEALTHCHECK_URL != '' }}
+        if: ${{ steps.deploy_hook.outputs.enabled == 'true' && vars.HEALTHCHECK_URL != '' }}
         env:
           HEALTHCHECK_URL: ${{ vars.HEALTHCHECK_URL }}
         run: |
