@@ -1,117 +1,142 @@
 # statocyst
 
-Local POC backplane service for OpenClaw agents.
+Statocyst V1 company internet PoC in Go.
 
-## What This POC Does
+This version provides:
+- Organizations, humans, memberships, and agents.
+- Manual bilateral org and agent trust approvals.
+- Message authorization requiring active org trust + active agent trust.
+- Supabase-capable human auth provider interface, plus local dev auth.
+- In-memory-only runtime (single process, volatile state).
+- Built-in admin web UI.
 
-- Registers agents with client-provided IDs.
-- Issues per-agent bearer tokens.
-- Enforces explicit bilateral bonds between agents.
-- Supports HTTP publish and long-poll pull using an in-memory FIFO queue.
+## Runtime Modes
 
-Delivery model: at-most-once, best-effort, in-memory only.
+### Human auth provider
 
-## Run the Service
+- `HUMAN_AUTH_PROVIDER=dev` (default): use request headers `X-Human-Id` and `X-Human-Email`.
+- `HUMAN_AUTH_PROVIDER=supabase`: use Supabase JWT bearer token.
+  - Requires `SUPABASE_JWT_SECRET`.
+  - Optional UI config values: `SUPABASE_URL`, `SUPABASE_ANON_KEY`.
+
+### In-memory warning
+
+State resets on restart. No HA, no horizontal scaling guarantees in this phase.
+
+## Run Locally
 
 ```bash
 go run ./cmd/statocystd
 ```
 
-Optional bind address:
+Optional:
 
 ```bash
-STATOCYST_ADDR=:8080 go run ./cmd/statocystd
+STATOCYST_ADDR=:8080 HUMAN_AUTH_PROVIDER=dev go run ./cmd/statocystd
 ```
 
-## API Quick Reference
+## Endpoints
 
-### OpenAPI spec
+### Health and spec
 
 ```bash
+curl -sS http://localhost:8080/health
+curl -sS http://localhost:8080/healthz
 curl -sS http://localhost:8080/openapi.yaml
 ```
 
-### Register agent
+### Admin UI
+
+Open:
+
+```text
+http://localhost:8080/
+```
+
+UI banner explicitly states in-memory and single-instance limitations.
+
+## Quick API Flow (Dev Auth)
+
+Dev auth headers used below:
+
+```bash
+-H 'X-Human-Id: alice' -H 'X-Human-Email: alice@acme.dev'
+```
+
+### 1) Create orgs
+
+```bash
+curl -sS -X POST http://localhost:8080/v1/orgs \
+  -H 'Content-Type: application/json' \
+  -H 'X-Human-Id: alice' -H 'X-Human-Email: alice@acme.dev' \
+  -d '{"name":"Org A"}'
+
+curl -sS -X POST http://localhost:8080/v1/orgs \
+  -H 'Content-Type: application/json' \
+  -H 'X-Human-Id: bob' -H 'X-Human-Email: bob@acme.dev' \
+  -d '{"name":"Org B"}'
+```
+
+### 2) Register agents
 
 ```bash
 curl -sS -X POST http://localhost:8080/v1/agents/register \
   -H 'Content-Type: application/json' \
-  -d '{"agent_id":"agent-a"}'
+  -H 'X-Human-Id: alice' -H 'X-Human-Email: alice@acme.dev' \
+  -d '{"org_id":"<org-a-id>","agent_id":"agent-a"}'
+
+curl -sS -X POST http://localhost:8080/v1/agents/register \
+  -H 'Content-Type: application/json' \
+  -H 'X-Human-Id: bob' -H 'X-Human-Email: bob@acme.dev' \
+  -d '{"org_id":"<org-b-id>","agent_id":"agent-b"}'
 ```
 
-### Create/join bond
-
-Run this once from each side. The first call creates a pending bond, the second activates it.
+### 3) Org trust (request + bilateral approve)
 
 ```bash
-curl -sS -X POST http://localhost:8080/v1/bonds \
-  -H "Authorization: Bearer <token-for-agent-a>" \
+curl -sS -X POST http://localhost:8080/v1/org-trusts \
   -H 'Content-Type: application/json' \
-  -d '{"peer_agent_id":"agent-b"}'
+  -H 'X-Human-Id: alice' -H 'X-Human-Email: alice@acme.dev' \
+  -d '{"org_id":"<org-a-id>","peer_org_id":"<org-b-id>"}'
+
+curl -sS -X POST http://localhost:8080/v1/org-trusts/<org-trust-id>/approve \
+  -H 'X-Human-Id: bob' -H 'X-Human-Email: bob@acme.dev'
 ```
 
-### Publish
+### 4) Agent trust (request + bilateral approve)
+
+```bash
+curl -sS -X POST http://localhost:8080/v1/agent-trusts \
+  -H 'Content-Type: application/json' \
+  -H 'X-Human-Id: alice' -H 'X-Human-Email: alice@acme.dev' \
+  -d '{"org_id":"<org-a-id>","agent_id":"agent-a","peer_agent_id":"agent-b"}'
+
+curl -sS -X POST http://localhost:8080/v1/agent-trusts/<agent-trust-id>/approve \
+  -H 'X-Human-Id: bob' -H 'X-Human-Email: bob@acme.dev'
+```
+
+### 5) Publish and pull
 
 ```bash
 curl -sS -X POST http://localhost:8080/v1/messages/publish \
-  -H "Authorization: Bearer <token-for-agent-a>" \
+  -H "Authorization: Bearer <agent-a-token>" \
   -H 'Content-Type: application/json' \
   -d '{"to_agent_id":"agent-b","content_type":"text/plain","payload":"hello"}'
+
+curl -sS -i "http://localhost:8080/v1/messages/pull?timeout_ms=5000" \
+  -H "Authorization: Bearer <agent-b-token>"
 ```
 
-If no active bond exists, publish returns `202` with:
+If no valid trust path exists:
 
 ```json
-{"status":"dropped","reason":"no_active_bond"}
+{"status":"dropped","reason":"no_trust_path"}
 ```
 
-### Pull (long-poll)
+## Tests
+
+Run inside the existing `multi-agent` statocyst container:
 
 ```bash
-curl -sS -i -X GET 'http://localhost:8080/v1/messages/pull?timeout_ms=5000' \
-  -H "Authorization: Bearer <token-for-agent-b>"
+docker exec multi-agent-statocyst-1 sh -lc 'cd /app && /usr/local/go/bin/go test ./...'
 ```
-
-## Manual Two-Agent Validation Runbook
-
-1. Register `agent-a` and `agent-b`; save each token.
-2. Create the same bond from both sides:
-- `agent-a` joins with `peer_agent_id=agent-b`.
-- `agent-b` joins with `peer_agent_id=agent-a`.
-3. Start pull requests for both agents in separate terminals.
-4. Publish `agent-a -> agent-b` and verify `agent-b` receives.
-5. Publish `agent-b -> agent-a` and verify `agent-a` receives.
-6. Negative test: delete bond (`DELETE /v1/bonds/{id}`), then publish and verify dropped response.
-
-## OpenClaw Skills
-
-Project-owned skills live in:
-
-- `skills/openclaw-bind-agent`
-- `skills/openclaw-exchange-messages`
-
-Scripts:
-
-```bash
-skills/openclaw-bind-agent/scripts/bind_agent.sh
-skills/openclaw-exchange-messages/scripts/exchange_roundtrip.sh
-```
-
-## LLM-Agnostic Setup (Recommended)
-
-For real-world environments where model behavior varies, initialize agents without any LLM prompt:
-
-```bash
-./multi-agent/bootstrap_agents.sh
-```
-
-What it does:
-- Recreates `statocyst` for a clean in-memory registry.
-- Registers `crab` and `shrimp` directly via API.
-- Creates and activates a mutual bond.
-- Writes tokens to:
-  - `multi-agent-crab-1:/tmp/crab.token`
-  - `multi-agent-shrimp-1:/tmp/shrimp.token`
-- Runs a round-trip message smoke test.
-
-After this succeeds, LLM prompts are optional rather than required for bring-up.

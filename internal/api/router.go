@@ -11,6 +11,7 @@ import (
 
 	"statocyst/internal/auth"
 	"statocyst/internal/longpoll"
+	"statocyst/internal/model"
 	"statocyst/internal/store"
 )
 
@@ -22,28 +23,47 @@ const (
 var agentIDRegex = regexp.MustCompile(`^[A-Za-z0-9._:-]{1,128}$`)
 
 type Handler struct {
-	store   *store.MemoryStore
-	waiters *longpoll.Waiters
-	now     func() time.Time
+	store           *store.MemoryStore
+	waiters         *longpoll.Waiters
+	humanAuth       auth.HumanAuthProvider
+	now             func() time.Time
+	idFactory       func() (string, error)
+	supabaseURL     string
+	supabaseAnonKey string
 }
 
-func NewHandler(st *store.MemoryStore, waiters *longpoll.Waiters) *Handler {
+func NewHandler(st *store.MemoryStore, waiters *longpoll.Waiters, humanAuth auth.HumanAuthProvider, supabaseURL, supabaseAnonKey string) *Handler {
 	return &Handler{
-		store:   st,
-		waiters: waiters,
-		now:     time.Now,
+		store:           st,
+		waiters:         waiters,
+		humanAuth:       humanAuth,
+		now:             time.Now,
+		idFactory:       newUUIDv7,
+		supabaseURL:     strings.TrimSpace(supabaseURL),
+		supabaseAnonKey: strings.TrimSpace(supabaseAnonKey),
 	}
 }
 
 func NewRouter(handler *Handler) http.Handler {
 	mux := http.NewServeMux()
+	mux.HandleFunc("/health", handler.handleHealthz)
 	mux.HandleFunc("/healthz", handler.handleHealthz)
 	mux.HandleFunc("/openapi.yaml", handler.handleOpenAPIYAML)
-	mux.HandleFunc("/v1/agents/register", handler.handleRegister)
-	mux.HandleFunc("/v1/bonds", handler.handleBonds)
-	mux.HandleFunc("/v1/bonds/", handler.handleBondByID)
+	mux.HandleFunc("/v1/ui/config", handler.handleUIConfig)
+	mux.HandleFunc("/v1/me", handler.handleMe)
+	mux.HandleFunc("/v1/me/orgs", handler.handleMyOrgs)
+	mux.HandleFunc("/v1/orgs", handler.handleOrgs)
+	mux.HandleFunc("/v1/orgs/", handler.handleOrgSubroutes)
+	mux.HandleFunc("/v1/org-invites/", handler.handleOrgInvites)
+	mux.HandleFunc("/v1/agents/register", handler.handleRegisterAgent)
+	mux.HandleFunc("/v1/agents/", handler.handleAgentsSubroutes)
+	mux.HandleFunc("/v1/org-trusts", handler.handleOrgTrusts)
+	mux.HandleFunc("/v1/org-trusts/", handler.handleOrgTrustByID)
+	mux.HandleFunc("/v1/agent-trusts", handler.handleAgentTrusts)
+	mux.HandleFunc("/v1/agent-trusts/", handler.handleAgentTrustByID)
 	mux.HandleFunc("/v1/messages/publish", handler.handlePublish)
 	mux.HandleFunc("/v1/messages/pull", handler.handlePull)
+	mux.HandleFunc("/", handler.handleUI)
 	return mux
 }
 
@@ -83,27 +103,6 @@ func validateAgentID(agentID string) bool {
 	return agentIDRegex.MatchString(agentID)
 }
 
-func parseBondIDPath(path string) (string, bool) {
-	const prefix = "/v1/bonds/"
-	if !strings.HasPrefix(path, prefix) {
-		return "", false
-	}
-	trimmed := strings.TrimPrefix(path, prefix)
-	if trimmed == "" || strings.Contains(trimmed, "/") {
-		return "", false
-	}
-	return trimmed, true
-}
-
-func (h *Handler) authenticateAgent(r *http.Request) (string, error) {
-	token, err := auth.ExtractBearerToken(r.Header.Get("Authorization"))
-	if err != nil {
-		return "", err
-	}
-	tokenHash := auth.HashToken(token)
-	return h.store.AgentIDForTokenHash(tokenHash)
-}
-
 func parsePullTimeout(r *http.Request) (time.Duration, error) {
 	raw := strings.TrimSpace(r.URL.Query().Get("timeout_ms"))
 	if raw == "" {
@@ -117,4 +116,29 @@ func parsePullTimeout(r *http.Request) (time.Duration, error) {
 		return 0, errors.New("timeout_ms must be in range 0..30000")
 	}
 	return time.Duration(ms) * time.Millisecond, nil
+}
+
+func (h *Handler) authenticateHuman(r *http.Request) (model.Human, error) {
+	identity, err := h.humanAuth.Authenticate(r)
+	if err != nil {
+		return model.Human{}, err
+	}
+	return h.store.UpsertHuman(identity.Provider, identity.Subject, identity.Email, h.now().UTC(), h.idFactory)
+}
+
+func (h *Handler) authenticateAgent(r *http.Request) (string, error) {
+	token, err := auth.ExtractBearerToken(r.Header.Get("Authorization"))
+	if err != nil {
+		return "", err
+	}
+	tokenHash := auth.HashToken(token)
+	return h.store.AgentIDForTokenHash(tokenHash)
+}
+
+func splitPath(path string) []string {
+	trimmed := strings.Trim(path, "/")
+	if trimmed == "" {
+		return nil
+	}
+	return strings.Split(trimmed, "/")
 }

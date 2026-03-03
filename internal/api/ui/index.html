@@ -1,0 +1,181 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Statocyst Admin</title>
+    <style>
+      :root {
+        --bg: #f6f7f9;
+        --ink: #1f2933;
+        --muted: #52606d;
+        --panel: #ffffff;
+        --line: #d9e2ec;
+        --accent: #0b7285;
+        --warn: #b45309;
+      }
+      body {
+        margin: 0;
+        font-family: "IBM Plex Sans", "Segoe UI", sans-serif;
+        color: var(--ink);
+        background: linear-gradient(180deg, #f8fafc, #eef2f7);
+      }
+      header {
+        padding: 12px 16px;
+        border-bottom: 1px solid var(--line);
+        background: #fff;
+      }
+      main {
+        max-width: 1100px;
+        margin: 16px auto;
+        padding: 0 12px;
+      }
+      .banner {
+        padding: 10px 12px;
+        border: 1px solid #facc15;
+        background: #fef9c3;
+        color: #713f12;
+        border-radius: 8px;
+        margin-bottom: 12px;
+      }
+      .grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+        gap: 12px;
+      }
+      .panel {
+        background: var(--panel);
+        border: 1px solid var(--line);
+        border-radius: 10px;
+        padding: 12px;
+      }
+      h2 {
+        margin: 4px 0 10px;
+        font-size: 1rem;
+      }
+      input,
+      select,
+      button,
+      textarea {
+        width: 100%;
+        box-sizing: border-box;
+        margin: 5px 0;
+        padding: 8px;
+        border: 1px solid var(--line);
+        border-radius: 6px;
+        background: #fff;
+      }
+      button {
+        background: var(--accent);
+        color: #fff;
+        border-color: var(--accent);
+        font-weight: 600;
+        cursor: pointer;
+      }
+      pre {
+        background: #0f172a;
+        color: #cbd5e1;
+        border-radius: 6px;
+        padding: 8px;
+        overflow: auto;
+        max-height: 240px;
+      }
+      .muted {
+        color: var(--muted);
+        font-size: 0.9rem;
+      }
+    </style>
+  </head>
+  <body>
+    <header>
+      <strong>Statocyst Admin UI</strong>
+    </header>
+    <main>
+      <div class="banner">
+        In-memory mode only: data resets on restart. Single-instance PoC, no HA.
+      </div>
+
+      <div class="grid">
+        <section class="panel">
+          <h2>Auth</h2>
+          <div class="muted">
+            For dev auth, use X-Human headers fields below. For Supabase, paste access token.
+          </div>
+          <input id="authToken" placeholder="Supabase access token (optional)" />
+          <input id="humanId" placeholder="Dev human id (e.g. alice)" />
+          <input id="humanEmail" placeholder="Dev email (e.g. alice@acme.dev)" />
+          <button id="btnMe">Load Me</button>
+          <pre id="meOut"></pre>
+        </section>
+
+        <section class="panel">
+          <h2>Organization</h2>
+          <input id="orgName" placeholder="Org name" />
+          <button id="btnCreateOrg">Create Org</button>
+          <button id="btnListOrgs">List My Orgs</button>
+          <select id="orgSelect"></select>
+          <pre id="orgOut"></pre>
+        </section>
+
+        <section class="panel">
+          <h2>Invites & Humans</h2>
+          <input id="inviteEmail" placeholder="invite email" />
+          <select id="inviteRole">
+            <option value="admin">admin</option>
+            <option value="member">member</option>
+            <option value="viewer">viewer</option>
+          </select>
+          <button id="btnInvite">Create Invite</button>
+          <input id="inviteId" placeholder="invite id" />
+          <button id="btnAcceptInvite">Accept Invite</button>
+          <button id="btnOrgHumans">List Org Humans</button>
+          <pre id="inviteOut"></pre>
+        </section>
+
+        <section class="panel">
+          <h2>Agents</h2>
+          <input id="agentId" placeholder="agent_id" />
+          <input id="ownerHumanId" placeholder="owner_human_id (optional)" />
+          <button id="btnRegisterAgent">Register Agent</button>
+          <input id="rotateAgentId" placeholder="agent_id to rotate/revoke" />
+          <button id="btnRotateAgent">Rotate Token</button>
+          <button id="btnRevokeAgent">Revoke Agent</button>
+          <button id="btnListAgents">List Org Agents</button>
+          <pre id="agentOut"></pre>
+        </section>
+
+        <section class="panel">
+          <h2>Org Trust</h2>
+          <input id="peerOrgId" placeholder="peer_org_id" />
+          <button id="btnReqOrgTrust">Request Org Trust</button>
+          <input id="orgTrustId" placeholder="org trust edge_id" />
+          <button id="btnApproveOrgTrust">Approve Org Trust</button>
+          <button id="btnBlockOrgTrust">Block Org Trust</button>
+          <button id="btnRevokeOrgTrust">Revoke Org Trust</button>
+          <pre id="orgTrustOut"></pre>
+        </section>
+
+        <section class="panel">
+          <h2>Agent Trust</h2>
+          <input id="trustAgentId" placeholder="agent_id" />
+          <input id="trustPeerAgentId" placeholder="peer_agent_id" />
+          <button id="btnReqAgentTrust">Request Agent Trust</button>
+          <input id="agentTrustId" placeholder="agent trust edge_id" />
+          <button id="btnApproveAgentTrust">Approve Agent Trust</button>
+          <button id="btnBlockAgentTrust">Block Agent Trust</button>
+          <button id="btnRevokeAgentTrust">Revoke Agent Trust</button>
+          <pre id="agentTrustOut"></pre>
+        </section>
+
+        <section class="panel">
+          <h2>Graph & Audit</h2>
+          <button id="btnGraph">Load Trust Graph</button>
+          <button id="btnAudit">Load Audit</button>
+          <button id="btnStats">Load Stats</button>
+          <pre id="graphOut"></pre>
+        </section>
+      </div>
+    </main>
+    <script src="/app.js"></script>
+  </body>
+</html>

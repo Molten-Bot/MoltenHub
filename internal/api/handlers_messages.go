@@ -54,17 +54,17 @@ func (h *Handler) handlePublish(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := h.store.CanPublish(senderAgentID, req.ToAgentID); err != nil {
+	senderOrgID, receiverOrgID, err := h.store.CanPublish(senderAgentID, req.ToAgentID)
+	if err != nil {
 		switch {
 		case errors.Is(err, store.ErrAgentNotFound):
 			writeError(w, http.StatusNotFound, "unknown_receiver", "to_agent_id is not registered")
-		case errors.Is(err, store.ErrNoActiveBond):
+		case errors.Is(err, store.ErrNoTrustPath):
+			h.store.RecordMessageDropped(senderOrgID)
 			writeJSON(w, http.StatusAccepted, map[string]string{
 				"status": "dropped",
-				"reason": "no_active_bond",
+				"reason": "no_trust_path",
 			})
-		case errors.Is(err, store.ErrSenderUnknown):
-			writeError(w, http.StatusUnauthorized, "unauthorized", "missing or invalid bearer token")
 		default:
 			writeError(w, http.StatusInternalServerError, "store_error", "failed to authorize publish")
 		}
@@ -78,13 +78,15 @@ func (h *Handler) handlePublish(w http.ResponseWriter, r *http.Request) {
 	}
 
 	message := model.Message{
-		MessageID:   messageID,
-		FromAgentID: senderAgentID,
-		ToAgentID:   req.ToAgentID,
-		ContentType: req.ContentType,
-		Payload:     req.Payload,
-		ClientMsgID: req.ClientMsgID,
-		CreatedAt:   h.now().UTC(),
+		MessageID:     messageID,
+		FromAgentID:   senderAgentID,
+		ToAgentID:     req.ToAgentID,
+		SenderOrgID:   senderOrgID,
+		ReceiverOrgID: receiverOrgID,
+		ContentType:   req.ContentType,
+		Payload:       req.Payload,
+		ClientMsgID:   req.ClientMsgID,
+		CreatedAt:     h.now().UTC(),
 	}
 
 	if err := h.store.Enqueue(message); err != nil {
@@ -96,6 +98,7 @@ func (h *Handler) handlePublish(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	h.store.RecordMessageQueued(senderOrgID)
 	h.waiters.Notify(req.ToAgentID)
 	writeJSON(w, http.StatusAccepted, map[string]string{
 		"message_id": messageID,
@@ -172,7 +175,6 @@ func newUUIDv7() (string, error) {
 	raw[4] = byte(ts >> 8)
 	raw[5] = byte(ts)
 
-	// RFC 9562 UUIDv7 version and RFC 4122 variant bits.
 	raw[6] = (raw[6] & 0x0f) | 0x70
 	raw[8] = (raw[8] & 0x3f) | 0x80
 

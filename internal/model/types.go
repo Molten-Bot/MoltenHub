@@ -2,30 +2,115 @@ package model
 
 import "time"
 
-// Agent is a registered identity and its server-side auth state.
-type Agent struct {
-	AgentID   string    `json:"agent_id"`
-	TokenHash string    `json:"-"`
+const (
+	RoleOwner  = "owner"
+	RoleAdmin  = "admin"
+	RoleMember = "member"
+	RoleViewer = "viewer"
+
+	StatusPending = "pending"
+	StatusActive  = "active"
+	StatusBlocked = "blocked"
+	StatusRevoked = "revoked"
+)
+
+type Organization struct {
+	OrgID     string    `json:"org_id"`
+	Name      string    `json:"name"`
 	CreatedAt time.Time `json:"created_at"`
+	CreatedBy string    `json:"created_by"`
 }
 
-// Message is a queued message envelope used by the local POC.
+type Human struct {
+	HumanID      string    `json:"human_id"`
+	AuthProvider string    `json:"auth_provider"`
+	AuthSubject  string    `json:"auth_subject"`
+	Email        string    `json:"email"`
+	CreatedAt    time.Time `json:"created_at"`
+}
+
+type Membership struct {
+	MembershipID string    `json:"membership_id"`
+	OrgID        string    `json:"org_id"`
+	HumanID      string    `json:"human_id"`
+	Role         string    `json:"role"`
+	Status       string    `json:"status"`
+	CreatedAt    time.Time `json:"created_at"`
+}
+
+type Invite struct {
+	InviteID   string     `json:"invite_id"`
+	OrgID      string     `json:"org_id"`
+	Email      string     `json:"email"`
+	Role       string     `json:"role"`
+	Status     string     `json:"status"`
+	CreatedBy  string     `json:"created_by"`
+	CreatedAt  time.Time  `json:"created_at"`
+	AcceptedAt *time.Time `json:"accepted_at,omitempty"`
+}
+
+type Agent struct {
+	AgentID      string     `json:"agent_id"`
+	OrgID        string     `json:"org_id"`
+	OwnerHumanID *string    `json:"owner_human_id,omitempty"`
+	TokenHash    string     `json:"-"`
+	Status       string     `json:"status"`
+	CreatedBy    string     `json:"created_by"`
+	CreatedAt    time.Time  `json:"created_at"`
+	RevokedAt    *time.Time `json:"revoked_at,omitempty"`
+}
+
+type TrustEdge struct {
+	EdgeID        string    `json:"edge_id"`
+	EdgeType      string    `json:"edge_type"` // org | agent
+	LeftID        string    `json:"left_id"`
+	RightID       string    `json:"right_id"`
+	State         string    `json:"state"`
+	LeftApproved  bool      `json:"left_approved"`
+	RightApproved bool      `json:"right_approved"`
+	CreatedBy     string    `json:"created_by"`
+	CreatedAt     time.Time `json:"created_at"`
+	UpdatedAt     time.Time `json:"updated_at"`
+}
+
 type Message struct {
-	MessageID   string    `json:"message_id"`
-	FromAgentID string    `json:"from_agent_id"`
-	ToAgentID   string    `json:"to_agent_id"`
-	ContentType string    `json:"content_type"`
-	Payload     string    `json:"payload"`
-	ClientMsgID *string   `json:"client_msg_id,omitempty"`
-	CreatedAt   time.Time `json:"created_at"`
+	MessageID     string    `json:"message_id"`
+	FromAgentID   string    `json:"from_agent_id"`
+	ToAgentID     string    `json:"to_agent_id"`
+	SenderOrgID   string    `json:"sender_org_id"`
+	ReceiverOrgID string    `json:"receiver_org_id"`
+	ContentType   string    `json:"content_type"`
+	Payload       string    `json:"payload"`
+	ClientMsgID   *string   `json:"client_msg_id,omitempty"`
+	CreatedAt     time.Time `json:"created_at"`
 }
 
-// Bond is a bilateral communication relationship between two agents.
-type Bond struct {
-	BondID      string     `json:"bond_id"`
-	AgentAID    string     `json:"agent_a_id"`
-	AgentBID    string     `json:"agent_b_id"`
-	State       string     `json:"state"` // pending | active
-	CreatedAt   time.Time  `json:"created_at"`
-	ActivatedAt *time.Time `json:"activated_at,omitempty"`
+type OrgHumanView struct {
+	HumanID      string `json:"human_id"`
+	Email        string `json:"email"`
+	Role         string `json:"role"`
+	Status       string `json:"status"`
+	AuthProvider string `json:"auth_provider"`
+}
+
+type OrgStats struct {
+	OrgID           string `json:"org_id"`
+	QueuedMessages  int64  `json:"queued_messages"`
+	DroppedMessages int64  `json:"dropped_messages"`
+}
+
+type AuditEvent struct {
+	EventID    string         `json:"event_id"`
+	OrgID      string         `json:"org_id"`
+	ActorHuman string         `json:"actor_human_id"`
+	Category   string         `json:"category"`
+	Action     string         `json:"action"`
+	SubjectID  string         `json:"subject_id"`
+	Details    map[string]any `json:"details,omitempty"`
+	CreatedAt  time.Time      `json:"created_at"`
+}
+
+type MembershipWithOrg struct {
+	Membership Membership   `json:"membership"`
+	Org        Organization `json:"org"`
 }

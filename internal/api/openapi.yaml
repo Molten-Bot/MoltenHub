@@ -1,80 +1,259 @@
 openapi: 3.0.3
 info:
-  title: Statocyst Local Bus API
-  version: 0.2.0
-  description: In-memory local POC for bonded agent messaging.
+  title: Statocyst V1 API
+  version: 1.0.0
+  description: In-memory company internet PoC with org/human/agent trust controls.
 servers:
   - url: http://localhost:8080
 paths:
-  /healthz:
+  /health:
     get:
       summary: Health check
       responses:
         '200':
-          description: Service healthy
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  status:
-                    type: string
-                    example: ok
+          description: OK
+  /healthz:
+    get:
+      summary: Health check alias
+      responses:
+        '200':
+          description: OK
+  /openapi.yaml:
+    get:
+      summary: OpenAPI document
+      responses:
+        '200':
+          description: YAML spec
+  /v1/ui/config:
+    get:
+      summary: UI auth runtime configuration
+      responses:
+        '200':
+          description: UI config
+  /v1/me:
+    get:
+      summary: Current human identity
+      security:
+        - humanAuth: []
+      responses:
+        '200':
+          description: Human
+        '401':
+          description: Unauthorized
+  /v1/me/orgs:
+    get:
+      summary: List memberships for current human
+      security:
+        - humanAuth: []
+      responses:
+        '200':
+          description: Membership list
+  /v1/orgs:
+    post:
+      summary: Create organization
+      security:
+        - humanAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name:
+                  type: string
+      responses:
+        '201':
+          description: Organization created
+  /v1/orgs/{org_id}/invites:
+    post:
+      summary: Create invite
+      security:
+        - humanAuth: []
+      parameters:
+        - in: path
+          name: org_id
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, role]
+              properties:
+                email:
+                  type: string
+                role:
+                  type: string
+                  enum: [admin, member, viewer]
+      responses:
+        '201':
+          description: Invite created
+  /v1/org-invites/{invite_id}/accept:
+    post:
+      summary: Accept invite
+      security:
+        - humanAuth: []
+      parameters:
+        - in: path
+          name: invite_id
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Invite accepted
+  /v1/orgs/{org_id}/humans:
+    get:
+      summary: List humans in org
+      security:
+        - humanAuth: []
+      parameters:
+        - in: path
+          name: org_id
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Human list
+  /v1/orgs/{org_id}/agents:
+    get:
+      summary: List agents in org
+      security:
+        - humanAuth: []
+      parameters:
+        - in: path
+          name: org_id
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Agent list
+  /v1/orgs/{org_id}/trust-graph:
+    get:
+      summary: List trusted graph edges visible to org
+      security:
+        - humanAuth: []
+      parameters:
+        - in: path
+          name: org_id
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Trust edge lists
+  /v1/orgs/{org_id}/audit:
+    get:
+      summary: List audit timeline for org
+      security:
+        - humanAuth: []
+      parameters:
+        - in: path
+          name: org_id
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Audit events
+  /v1/orgs/{org_id}/stats:
+    get:
+      summary: Message stats for org
+      security:
+        - humanAuth: []
+      parameters:
+        - in: path
+          name: org_id
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Stats
   /v1/agents/register:
     post:
-      summary: Register an agent
+      summary: Register org or human-owned agent
+      security:
+        - humanAuth: []
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/RegisterRequest'
+              type: object
+              required: [org_id, agent_id]
+              properties:
+                org_id:
+                  type: string
+                agent_id:
+                  type: string
+                owner_human_id:
+                  type: string
       responses:
         '201':
-          description: Registered
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/RegisterResponse'
-        '400':
-          $ref: '#/components/responses/BadRequest'
-        '409':
-          description: Duplicate agent ID
-  /v1/bonds:
+          description: Agent created with token
+  /v1/agents/{agent_id}/rotate-token:
     post:
-      summary: Create or join a bond with a peer
+      summary: Rotate token
       security:
-        - bearerAuth: []
+        - humanAuth: []
+      parameters:
+        - in: path
+          name: agent_id
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Rotated
+  /v1/agents/{agent_id}:
+    delete:
+      summary: Revoke agent
+      security:
+        - humanAuth: []
+      parameters:
+        - in: path
+          name: agent_id
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Revoked
+  /v1/org-trusts:
+    post:
+      summary: Create or join org trust request
+      security:
+        - humanAuth: []
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/CreateBondRequest'
+              type: object
+              required: [org_id, peer_org_id]
+              properties:
+                org_id:
+                  type: string
+                peer_org_id:
+                  type: string
       responses:
         '201':
-          description: Bond created (pending)
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/BondResponse'
+          description: Trust edge created
         '200':
-          description: Existing bond joined or already active
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/BondResponse'
-        '400':
-          $ref: '#/components/responses/BadRequest'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        '404':
-          description: Peer unknown
-  /v1/bonds/{id}:
-    delete:
-      summary: Delete a bond by ID
+          description: Trust edge updated
+  /v1/org-trusts/{id}/approve:
+    post:
+      summary: Approve org trust from caller side
       security:
-        - bearerAuth: []
+        - humanAuth: []
       parameters:
         - in: path
           name: id
@@ -83,218 +262,151 @@ paths:
             type: string
       responses:
         '200':
-          description: Deleted
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  status:
-                    type: string
-                    example: ok
-                  bond_id:
-                    type: string
-                  result:
-                    type: string
-                    example: deleted
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        '403':
-          description: Caller is not a participant
-        '404':
-          description: Bond not found
-  /v1/messages/publish:
+          description: Trust updated
+  /v1/org-trusts/{id}/block:
     post:
-      summary: Publish message to an agent
+      summary: Block org trust
       security:
-        - bearerAuth: []
+        - humanAuth: []
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Trust blocked
+  /v1/org-trusts/{id}:
+    delete:
+      summary: Revoke org trust
+      security:
+        - humanAuth: []
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Trust revoked
+  /v1/agent-trusts:
+    post:
+      summary: Create or join agent trust request
+      security:
+        - humanAuth: []
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/PublishRequest'
+              type: object
+              required: [org_id, agent_id, peer_agent_id]
+              properties:
+                org_id:
+                  type: string
+                agent_id:
+                  type: string
+                peer_agent_id:
+                  type: string
+      responses:
+        '201':
+          description: Trust edge created
+        '200':
+          description: Trust edge updated
+  /v1/agent-trusts/{id}/approve:
+    post:
+      summary: Approve agent trust
+      security:
+        - humanAuth: []
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Trust updated
+  /v1/agent-trusts/{id}/block:
+    post:
+      summary: Block agent trust
+      security:
+        - humanAuth: []
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Trust blocked
+  /v1/agent-trusts/{id}:
+    delete:
+      summary: Revoke agent trust
+      security:
+        - humanAuth: []
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Trust revoked
+  /v1/messages/publish:
+    post:
+      summary: Publish message
+      security:
+        - agentAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [to_agent_id, content_type, payload]
+              properties:
+                to_agent_id:
+                  type: string
+                content_type:
+                  type: string
+                  enum: [text/plain, application/json]
+                payload:
+                  type: string
+                client_msg_id:
+                  type: string
       responses:
         '202':
-          description: Queued or dropped
-          content:
-            application/json:
-              schema:
-                oneOf:
-                  - $ref: '#/components/schemas/PublishQueuedResponse'
-                  - $ref: '#/components/schemas/PublishDroppedResponse'
-        '400':
-          $ref: '#/components/responses/BadRequest'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        '404':
-          description: Unknown receiver
+          description: queued or dropped
   /v1/messages/pull:
     get:
-      summary: Pull one message with long-poll
+      summary: Pull next message
       security:
-        - bearerAuth: []
+        - agentAuth: []
       parameters:
         - in: query
           name: timeout_ms
-          required: false
           schema:
             type: integer
             minimum: 0
             maximum: 30000
-            default: 5000
       responses:
         '200':
-          description: Message returned
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  message:
-                    $ref: '#/components/schemas/Message'
+          description: Message
         '204':
-          description: No message before timeout
-        '400':
-          $ref: '#/components/responses/BadRequest'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
+          description: No content
 components:
   securitySchemes:
-    bearerAuth:
+    humanAuth:
       type: http
       scheme: bearer
-      bearerFormat: token
-  responses:
-    BadRequest:
-      description: Invalid request
-    Unauthorized:
-      description: Missing or invalid bearer token
-  schemas:
-    RegisterRequest:
-      type: object
-      required:
-        - agent_id
-      properties:
-        agent_id:
-          type: string
-    RegisterResponse:
-      type: object
-      required:
-        - agent_id
-        - token
-      properties:
-        agent_id:
-          type: string
-        token:
-          type: string
-    CreateBondRequest:
-      type: object
-      required:
-        - peer_agent_id
-      properties:
-        peer_agent_id:
-          type: string
-    Bond:
-      type: object
-      required:
-        - bond_id
-        - agent_a_id
-        - agent_b_id
-        - state
-        - created_at
-      properties:
-        bond_id:
-          type: string
-        agent_a_id:
-          type: string
-        agent_b_id:
-          type: string
-        state:
-          type: string
-          enum: [pending, active]
-        created_at:
-          type: string
-          format: date-time
-        activated_at:
-          type: string
-          format: date-time
-          nullable: true
-    BondResponse:
-      type: object
-      required:
-        - status
-        - created
-        - bond
-      properties:
-        status:
-          type: string
-          example: ok
-        created:
-          type: boolean
-        bond:
-          $ref: '#/components/schemas/Bond'
-    PublishRequest:
-      type: object
-      required:
-        - to_agent_id
-        - content_type
-        - payload
-      properties:
-        to_agent_id:
-          type: string
-        content_type:
-          type: string
-          enum: [text/plain, application/json]
-        payload:
-          type: string
-        client_msg_id:
-          type: string
-    PublishQueuedResponse:
-      type: object
-      required:
-        - message_id
-        - status
-      properties:
-        message_id:
-          type: string
-        status:
-          type: string
-          example: queued
-    PublishDroppedResponse:
-      type: object
-      required:
-        - status
-        - reason
-      properties:
-        status:
-          type: string
-          example: dropped
-        reason:
-          type: string
-          example: no_active_bond
-    Message:
-      type: object
-      required:
-        - message_id
-        - from_agent_id
-        - to_agent_id
-        - content_type
-        - payload
-        - created_at
-      properties:
-        message_id:
-          type: string
-        from_agent_id:
-          type: string
-        to_agent_id:
-          type: string
-        content_type:
-          type: string
-        payload:
-          type: string
-        client_msg_id:
-          type: string
-        created_at:
-          type: string
-          format: date-time
+      bearerFormat: JWT or DevHeaders
+      description: Supabase JWT via Authorization bearer or dev header mode.
+    agentAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: AgentToken

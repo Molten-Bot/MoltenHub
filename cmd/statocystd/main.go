@@ -6,6 +6,7 @@ import (
 	"os"
 
 	"statocyst/internal/api"
+	"statocyst/internal/auth"
 	"statocyst/internal/longpoll"
 	"statocyst/internal/store"
 )
@@ -18,7 +19,14 @@ func main() {
 
 	st := store.NewMemoryStore()
 	waiters := longpoll.NewWaiters()
-	handler := api.NewHandler(st, waiters)
+	humanAuth := auth.NewHumanAuthProviderFromEnv()
+	handler := api.NewHandler(
+		st,
+		waiters,
+		humanAuth,
+		os.Getenv("SUPABASE_URL"),
+		os.Getenv("SUPABASE_ANON_KEY"),
+	)
 	router := api.NewRouter(handler)
 
 	server := &http.Server{

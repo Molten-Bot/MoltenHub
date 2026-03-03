@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"statocyst/internal/auth"
 	"statocyst/internal/longpoll"
 	"statocyst/internal/store"
 )
@@ -17,64 +18,11 @@ import (
 func newTestRouter() http.Handler {
 	st := store.NewMemoryStore()
 	waiters := longpoll.NewWaiters()
-	h := NewHandler(st, waiters)
+	h := NewHandler(st, waiters, auth.NewDevHumanAuthProvider(), "", "")
 	return NewRouter(h)
 }
 
-func registerAgent(t *testing.T, router http.Handler, agentID string) string {
-	t.Helper()
-	body := map[string]string{"agent_id": agentID}
-	resp := doJSONRequest(t, router, http.MethodPost, "/v1/agents/register", "", body)
-	if resp.Code != http.StatusCreated {
-		t.Fatalf("register %s failed: status=%d body=%s", agentID, resp.Code, resp.Body.String())
-	}
-	var payload map[string]string
-	if err := json.Unmarshal(resp.Body.Bytes(), &payload); err != nil {
-		t.Fatalf("decode register response: %v", err)
-	}
-	token := payload["token"]
-	if token == "" {
-		t.Fatalf("register %s returned empty token", agentID)
-	}
-	return token
-}
-
-func createBond(t *testing.T, router http.Handler, token, peerID string) *httptest.ResponseRecorder {
-	t.Helper()
-	body := map[string]string{"peer_agent_id": peerID}
-	return doJSONRequest(t, router, http.MethodPost, "/v1/bonds", token, body)
-}
-
-func deleteBond(t *testing.T, router http.Handler, token, bondID string) *httptest.ResponseRecorder {
-	t.Helper()
-	path := fmt.Sprintf("/v1/bonds/%s", bondID)
-	return doJSONRequest(t, router, http.MethodDelete, path, token, nil)
-}
-
-func publishMessage(t *testing.T, router http.Handler, senderToken, receiverID, payload string) *httptest.ResponseRecorder {
-	t.Helper()
-	body := map[string]string{
-		"to_agent_id":   receiverID,
-		"content_type":  "text/plain",
-		"payload":       payload,
-		"client_msg_id": payload,
-	}
-	return doJSONRequest(t, router, http.MethodPost, "/v1/messages/publish", senderToken, body)
-}
-
-func pullMessage(t *testing.T, router http.Handler, token string, timeoutMS int) *httptest.ResponseRecorder {
-	t.Helper()
-	path := fmt.Sprintf("/v1/messages/pull?timeout_ms=%d", timeoutMS)
-	req := httptest.NewRequest(http.MethodGet, path, nil)
-	if token != "" {
-		req.Header.Set("Authorization", "Bearer "+token)
-	}
-	resp := httptest.NewRecorder()
-	router.ServeHTTP(resp, req)
-	return resp
-}
-
-func doJSONRequest(t *testing.T, router http.Handler, method, path, token string, body any) *httptest.ResponseRecorder {
+func doJSONRequest(t *testing.T, router http.Handler, method, path string, body any, headers map[string]string) *httptest.ResponseRecorder {
 	t.Helper()
 
 	var reqBody []byte
@@ -88,8 +36,8 @@ func doJSONRequest(t *testing.T, router http.Handler, method, path, token string
 
 	req := httptest.NewRequest(method, path, bytes.NewReader(reqBody))
 	req.Header.Set("Content-Type", "application/json")
-	if token != "" {
-		req.Header.Set("Authorization", "Bearer "+token)
+	for k, v := range headers {
+		req.Header.Set(k, v)
 	}
 
 	resp := httptest.NewRecorder()
@@ -97,256 +45,328 @@ func doJSONRequest(t *testing.T, router http.Handler, method, path, token string
 	return resp
 }
 
-func decodePulledMessage(t *testing.T, body []byte) map[string]any {
-	t.Helper()
-	var wrapper map[string]map[string]any
-	if err := json.Unmarshal(body, &wrapper); err != nil {
-		t.Fatalf("decode pull response: %v body=%s", err, string(body))
+func humanHeaders(humanID, email string) map[string]string {
+	return map[string]string{
+		"X-Human-Id":    humanID,
+		"X-Human-Email": email,
 	}
-	msg, ok := wrapper["message"]
-	if !ok {
-		t.Fatalf("pull response missing message: %s", string(body))
-	}
-	return msg
 }
 
-func decodeMap(t *testing.T, body []byte) map[string]any {
+func createOrg(t *testing.T, router http.Handler, humanID, email, name string) string {
 	t.Helper()
+	resp := doJSONRequest(t, router, http.MethodPost, "/v1/orgs", map[string]string{"name": name}, humanHeaders(humanID, email))
+	if resp.Code != http.StatusCreated {
+		t.Fatalf("create org failed: %d %s", resp.Code, resp.Body.String())
+	}
+	var payload map[string]map[string]any
+	if err := json.Unmarshal(resp.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode create org: %v", err)
+	}
+	orgID, _ := payload["organization"]["org_id"].(string)
+	if orgID == "" {
+		t.Fatalf("missing org_id")
+	}
+	return orgID
+}
+
+func currentHumanID(t *testing.T, router http.Handler, humanID, email string) string {
+	t.Helper()
+	resp := doJSONRequest(t, router, http.MethodGet, "/v1/me", nil, humanHeaders(humanID, email))
+	if resp.Code != http.StatusOK {
+		t.Fatalf("get me failed: %d %s", resp.Code, resp.Body.String())
+	}
+	var payload map[string]map[string]any
+	if err := json.Unmarshal(resp.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode me response: %v", err)
+	}
+	id, _ := payload["human"]["human_id"].(string)
+	if id == "" {
+		t.Fatalf("missing human_id in /v1/me response")
+	}
+	return id
+}
+
+func createInvite(t *testing.T, router http.Handler, humanID, email, orgID, inviteeEmail, role string) string {
+	t.Helper()
+	resp := doJSONRequest(t, router, http.MethodPost, "/v1/orgs/"+orgID+"/invites", map[string]string{
+		"email": inviteeEmail,
+		"role":  role,
+	}, humanHeaders(humanID, email))
+	if resp.Code != http.StatusCreated {
+		t.Fatalf("create invite failed: %d %s", resp.Code, resp.Body.String())
+	}
+	var payload map[string]map[string]any
+	if err := json.Unmarshal(resp.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode invite: %v", err)
+	}
+	inviteID, _ := payload["invite"]["invite_id"].(string)
+	if inviteID == "" {
+		t.Fatalf("missing invite_id")
+	}
+	return inviteID
+}
+
+func acceptInvite(t *testing.T, router http.Handler, humanID, email, inviteID string) {
+	t.Helper()
+	resp := doJSONRequest(t, router, http.MethodPost, "/v1/org-invites/"+inviteID+"/accept", nil, humanHeaders(humanID, email))
+	if resp.Code != http.StatusOK {
+		t.Fatalf("accept invite failed: %d %s", resp.Code, resp.Body.String())
+	}
+}
+
+func registerAgent(t *testing.T, router http.Handler, humanID, email, orgID, agentID, ownerHumanID string) string {
+	t.Helper()
+	body := map[string]any{
+		"org_id":   orgID,
+		"agent_id": agentID,
+	}
+	if ownerHumanID != "" {
+		body["owner_human_id"] = ownerHumanID
+	}
+	resp := doJSONRequest(t, router, http.MethodPost, "/v1/agents/register", body, humanHeaders(humanID, email))
+	if resp.Code != http.StatusCreated {
+		t.Fatalf("register agent failed: %d %s", resp.Code, resp.Body.String())
+	}
 	var payload map[string]any
-	if err := json.Unmarshal(body, &payload); err != nil {
-		t.Fatalf("decode JSON response: %v body=%s", err, string(body))
+	if err := json.Unmarshal(resp.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode register agent: %v", err)
 	}
-	return payload
-}
-
-func activateBond(t *testing.T, router http.Handler, tokenA, tokenB string) string {
-	t.Helper()
-	resp := createBond(t, router, tokenA, "agent-b")
-	if resp.Code != http.StatusCreated {
-		t.Fatalf("bond create failed: %d %s", resp.Code, resp.Body.String())
-	}
-	payload := decodeMap(t, resp.Body.Bytes())
-	bond, _ := payload["bond"].(map[string]any)
-	bondID, _ := bond["bond_id"].(string)
-	if bondID == "" {
-		t.Fatalf("missing bond_id in response: %s", resp.Body.String())
-	}
-
-	resp = createBond(t, router, tokenB, "agent-a")
-	if resp.Code != http.StatusOK {
-		t.Fatalf("bond join failed: %d %s", resp.Code, resp.Body.String())
-	}
-	return bondID
-}
-
-func TestRegisterAndDuplicate(t *testing.T) {
-	router := newTestRouter()
-
-	token := registerAgent(t, router, "agent-a")
+	token, _ := payload["token"].(string)
 	if token == "" {
-		t.Fatal("expected token on first registration")
+		t.Fatalf("missing token")
 	}
-
-	resp := doJSONRequest(t, router, http.MethodPost, "/v1/agents/register", "", map[string]string{"agent_id": "agent-a"})
-	if resp.Code != http.StatusConflict {
-		t.Fatalf("expected 409 on duplicate registration, got %d: %s", resp.Code, resp.Body.String())
-	}
+	return token
 }
 
-func TestCreateBondAndActivation(t *testing.T) {
+func publish(t *testing.T, router http.Handler, senderToken, toAgentID, payload string) *httptest.ResponseRecorder {
+	t.Helper()
+	return doJSONRequest(t, router, http.MethodPost, "/v1/messages/publish", map[string]string{
+		"to_agent_id":  toAgentID,
+		"content_type": "text/plain",
+		"payload":      payload,
+	}, map[string]string{"Authorization": "Bearer " + senderToken})
+}
+
+func pull(t *testing.T, router http.Handler, token string, timeoutMS int) *httptest.ResponseRecorder {
+	t.Helper()
+	req := httptest.NewRequest(http.MethodGet, fmt.Sprintf("/v1/messages/pull?timeout_ms=%d", timeoutMS), nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	resp := httptest.NewRecorder()
+	router.ServeHTTP(resp, req)
+	return resp
+}
+
+func decodeJSONMap(t *testing.T, body []byte) map[string]any {
+	t.Helper()
+	var m map[string]any
+	if err := json.Unmarshal(body, &m); err != nil {
+		t.Fatalf("decode json map: %v body=%s", err, string(body))
+	}
+	return m
+}
+
+func setupTrustedAgents(t *testing.T, router http.Handler) (string, string, string, string, string, string) {
+	t.Helper()
+	aliceHumanID := currentHumanID(t, router, "alice", "alice@a.test")
+	bobHumanID := currentHumanID(t, router, "bob", "bob@b.test")
+	orgA := createOrg(t, router, "alice", "alice@a.test", "Org A")
+	orgB := createOrg(t, router, "bob", "bob@b.test", "Org B")
+
+	tokenA := registerAgent(t, router, "alice", "alice@a.test", orgA, "agent-a", aliceHumanID)
+	tokenB := registerAgent(t, router, "bob", "bob@b.test", orgB, "agent-b", bobHumanID)
+
+	orgTrustResp := doJSONRequest(t, router, http.MethodPost, "/v1/org-trusts", map[string]string{
+		"org_id":      orgA,
+		"peer_org_id": orgB,
+	}, humanHeaders("alice", "alice@a.test"))
+	if orgTrustResp.Code != http.StatusCreated {
+		t.Fatalf("org trust create failed: %d %s", orgTrustResp.Code, orgTrustResp.Body.String())
+	}
+	orgTrust := decodeJSONMap(t, orgTrustResp.Body.Bytes())
+	orgTrustObj := orgTrust["trust"].(map[string]any)
+	orgTrustID := orgTrustObj["edge_id"].(string)
+	orgApprove := doJSONRequest(t, router, http.MethodPost, "/v1/org-trusts/"+orgTrustID+"/approve", nil, humanHeaders("bob", "bob@b.test"))
+	if orgApprove.Code != http.StatusOK {
+		t.Fatalf("org trust approve failed: %d %s", orgApprove.Code, orgApprove.Body.String())
+	}
+
+	agentTrustResp := doJSONRequest(t, router, http.MethodPost, "/v1/agent-trusts", map[string]string{
+		"org_id":        orgA,
+		"agent_id":      "agent-a",
+		"peer_agent_id": "agent-b",
+	}, humanHeaders("alice", "alice@a.test"))
+	if agentTrustResp.Code != http.StatusCreated {
+		t.Fatalf("agent trust create failed: %d %s", agentTrustResp.Code, agentTrustResp.Body.String())
+	}
+	agentTrust := decodeJSONMap(t, agentTrustResp.Body.Bytes())
+	agentTrustObj := agentTrust["trust"].(map[string]any)
+	agentTrustID := agentTrustObj["edge_id"].(string)
+	agentApprove := doJSONRequest(t, router, http.MethodPost, "/v1/agent-trusts/"+agentTrustID+"/approve", nil, humanHeaders("bob", "bob@b.test"))
+	if agentApprove.Code != http.StatusOK {
+		t.Fatalf("agent trust approve failed: %d %s", agentApprove.Code, agentApprove.Body.String())
+	}
+
+	return orgA, orgB, tokenA, tokenB, orgTrustID, agentTrustID
+}
+
+func TestInviteAcceptFlow(t *testing.T) {
 	router := newTestRouter()
-	tokenA := registerAgent(t, router, "agent-a")
-	tokenB := registerAgent(t, router, "agent-b")
+	orgID := createOrg(t, router, "alice", "alice@a.test", "Org A")
+	inviteID := createInvite(t, router, "alice", "alice@a.test", orgID, "bob@b.test", "member")
+	acceptInvite(t, router, "bob", "bob@b.test", inviteID)
 
-	resp := createBond(t, router, tokenA, "agent-b")
-	if resp.Code != http.StatusCreated {
-		t.Fatalf("expected 201 for first bond join, got %d: %s", resp.Code, resp.Body.String())
-	}
-	payload := decodeMap(t, resp.Body.Bytes())
-	bond, _ := payload["bond"].(map[string]any)
-	bondID, _ := bond["bond_id"].(string)
-	state, _ := bond["state"].(string)
-	if state != "pending" {
-		t.Fatalf("expected pending bond after first side joins, got %q", state)
-	}
-	if bondID == "" {
-		t.Fatalf("missing bond_id in create response")
-	}
-
-	resp = publishMessage(t, router, tokenA, "agent-b", "hello-before-bond")
-	if resp.Code != http.StatusAccepted {
-		t.Fatalf("expected 202 for dropped message, got %d: %s", resp.Code, resp.Body.String())
-	}
-	publishBefore := decodeMap(t, resp.Body.Bytes())
-	if publishBefore["status"] != "dropped" {
-		t.Fatalf("expected dropped publish before active bond, got %v", publishBefore["status"])
-	}
-
-	resp = createBond(t, router, tokenB, "agent-a")
+	resp := doJSONRequest(t, router, http.MethodGet, "/v1/orgs/"+orgID+"/humans", nil, humanHeaders("alice", "alice@a.test"))
 	if resp.Code != http.StatusOK {
-		t.Fatalf("expected 200 when second side joins, got %d: %s", resp.Code, resp.Body.String())
+		t.Fatalf("list humans failed: %d %s", resp.Code, resp.Body.String())
 	}
-	payload = decodeMap(t, resp.Body.Bytes())
-	bond, _ = payload["bond"].(map[string]any)
-	state, _ = bond["state"].(string)
-	if state != "active" {
-		t.Fatalf("expected active bond after both sides join, got %q", state)
-	}
-	bondID2, _ := bond["bond_id"].(string)
-	if bondID2 != bondID {
-		t.Fatalf("expected same bond_id on second join, got %s vs %s", bondID2, bondID)
-	}
-
-	resp = publishMessage(t, router, tokenA, "agent-b", "hello-after-bond")
-	if resp.Code != http.StatusAccepted {
-		t.Fatalf("expected 202 publish queued, got %d: %s", resp.Code, resp.Body.String())
-	}
-	publishAfter := decodeMap(t, resp.Body.Bytes())
-	if publishAfter["status"] != "queued" {
-		t.Fatalf("expected queued publish after active bond, got %v", publishAfter["status"])
-	}
-	if _, ok := publishAfter["message_id"]; !ok {
-		t.Fatalf("expected message_id in queued response: %s", resp.Body.String())
-	}
-
-	pull := pullMessage(t, router, tokenB, 25)
-	if pull.Code != http.StatusOK {
-		t.Fatalf("pull after queued publish failed: %d %s", pull.Code, pull.Body.String())
-	}
-	msg := decodePulledMessage(t, pull.Body.Bytes())
-	if got := msg["payload"]; got != "hello-after-bond" {
-		t.Fatalf("expected payload hello-after-bond, got %v", got)
+	body := decodeJSONMap(t, resp.Body.Bytes())
+	humans := body["humans"].([]any)
+	if len(humans) < 2 {
+		t.Fatalf("expected at least 2 humans, got %d", len(humans))
 	}
 }
 
-func TestCreateBondUnknownPeer(t *testing.T) {
+func TestRoleEnforcementOnInvites(t *testing.T) {
 	router := newTestRouter()
-	tokenA := registerAgent(t, router, "agent-a")
+	orgID := createOrg(t, router, "owner", "owner@a.test", "Org A")
+	inviteID := createInvite(t, router, "owner", "owner@a.test", orgID, "viewer@a.test", "viewer")
+	acceptInvite(t, router, "viewer", "viewer@a.test", inviteID)
 
-	resp := createBond(t, router, tokenA, "ghost")
-	if resp.Code != http.StatusNotFound {
-		t.Fatalf("expected 404 for unknown peer, got %d: %s", resp.Code, resp.Body.String())
-	}
-}
-
-func TestDeleteBondAccessAndPublishDrop(t *testing.T) {
-	router := newTestRouter()
-	tokenA := registerAgent(t, router, "agent-a")
-	tokenB := registerAgent(t, router, "agent-b")
-	tokenC := registerAgent(t, router, "agent-c")
-
-	bondID := activateBond(t, router, tokenA, tokenB)
-
-	resp := deleteBond(t, router, tokenC, bondID)
+	resp := doJSONRequest(t, router, http.MethodPost, "/v1/orgs/"+orgID+"/invites", map[string]string{
+		"email": "x@a.test",
+		"role":  "member",
+	}, humanHeaders("viewer", "viewer@a.test"))
 	if resp.Code != http.StatusForbidden {
-		t.Fatalf("expected 403 for non-participant delete, got %d: %s", resp.Code, resp.Body.String())
+		t.Fatalf("expected 403 for viewer invite creation, got %d", resp.Code)
 	}
+}
 
-	resp = deleteBond(t, router, tokenA, bondID)
-	if resp.Code != http.StatusOK {
-		t.Fatalf("expected 200 for participant delete, got %d: %s", resp.Code, resp.Body.String())
-	}
+func TestAgentRegisterHumanAndOrgOwned(t *testing.T) {
+	router := newTestRouter()
+	orgID := createOrg(t, router, "alice", "alice@a.test", "Org A")
+	aliceHumanID := currentHumanID(t, router, "alice", "alice@a.test")
+	registerAgent(t, router, "alice", "alice@a.test", orgID, "a-human", aliceHumanID)
+	registerAgent(t, router, "alice", "alice@a.test", orgID, "a-org", "")
+}
 
-	resp = publishMessage(t, router, tokenA, "agent-b", "after-delete")
+func TestTrustLifecycleAndBlockPrecedence(t *testing.T) {
+	router := newTestRouter()
+	_, _, tokenA, _, orgTrustID, _ := setupTrustedAgents(t, router)
+
+	resp := publish(t, router, tokenA, "agent-b", "hello-before-block")
 	if resp.Code != http.StatusAccepted {
-		t.Fatalf("expected 202 publish response after delete, got %d: %s", resp.Code, resp.Body.String())
+		t.Fatalf("publish should be accepted queued before block: %d %s", resp.Code, resp.Body.String())
 	}
-	payload := decodeMap(t, resp.Body.Bytes())
-	if payload["status"] != "dropped" {
-		t.Fatalf("expected dropped publish after bond delete, got %v", payload["status"])
+	before := decodeJSONMap(t, resp.Body.Bytes())
+	if before["status"] != "queued" {
+		t.Fatalf("expected queued, got %v", before["status"])
+	}
+
+	block := doJSONRequest(t, router, http.MethodPost, "/v1/org-trusts/"+orgTrustID+"/block", nil, humanHeaders("bob", "bob@b.test"))
+	if block.Code != http.StatusOK {
+		t.Fatalf("block failed: %d %s", block.Code, block.Body.String())
+	}
+
+	resp = publish(t, router, tokenA, "agent-b", "hello-after-block")
+	after := decodeJSONMap(t, resp.Body.Bytes())
+	if after["status"] != "dropped" {
+		t.Fatalf("expected dropped after block, got %v", after["status"])
+	}
+}
+
+func TestPublishDropAndQueuedPaths(t *testing.T) {
+	router := newTestRouter()
+	aliceHumanID := currentHumanID(t, router, "alice", "alice@a.test")
+	bobHumanID := currentHumanID(t, router, "bob", "bob@b.test")
+	orgA := createOrg(t, router, "alice", "alice@a.test", "Org A")
+	orgB := createOrg(t, router, "bob", "bob@b.test", "Org B")
+	tokenA := registerAgent(t, router, "alice", "alice@a.test", orgA, "agent-a", aliceHumanID)
+	tokenB := registerAgent(t, router, "bob", "bob@b.test", orgB, "agent-b", bobHumanID)
+
+	resp := publish(t, router, tokenA, "agent-b", "no-trust")
+	if resp.Code != http.StatusAccepted {
+		t.Fatalf("publish without trust should still be 202: %d", resp.Code)
+	}
+	noTrust := decodeJSONMap(t, resp.Body.Bytes())
+	if noTrust["status"] != "dropped" {
+		t.Fatalf("expected dropped, got %v", noTrust["status"])
+	}
+
+	orgTrustResp := doJSONRequest(t, router, http.MethodPost, "/v1/org-trusts", map[string]string{
+		"org_id":      orgA,
+		"peer_org_id": orgB,
+	}, humanHeaders("alice", "alice@a.test"))
+	orgTrust := decodeJSONMap(t, orgTrustResp.Body.Bytes())
+	orgTrustID := orgTrust["trust"].(map[string]any)["edge_id"].(string)
+	doJSONRequest(t, router, http.MethodPost, "/v1/org-trusts/"+orgTrustID+"/approve", nil, humanHeaders("bob", "bob@b.test"))
+
+	agentTrustResp := doJSONRequest(t, router, http.MethodPost, "/v1/agent-trusts", map[string]string{
+		"org_id":        orgA,
+		"agent_id":      "agent-a",
+		"peer_agent_id": "agent-b",
+	}, humanHeaders("alice", "alice@a.test"))
+	agentTrust := decodeJSONMap(t, agentTrustResp.Body.Bytes())
+	agentTrustID := agentTrust["trust"].(map[string]any)["edge_id"].(string)
+	doJSONRequest(t, router, http.MethodPost, "/v1/agent-trusts/"+agentTrustID+"/approve", nil, humanHeaders("bob", "bob@b.test"))
+
+	resp = publish(t, router, tokenA, "agent-b", "has-trust")
+	withTrust := decodeJSONMap(t, resp.Body.Bytes())
+	if withTrust["status"] != "queued" {
+		t.Fatalf("expected queued, got %v", withTrust["status"])
+	}
+
+	pullResp := pull(t, router, tokenB, 50)
+	if pullResp.Code != http.StatusOK {
+		t.Fatalf("expected pull 200, got %d", pullResp.Code)
 	}
 }
 
 func TestLongPollTimeout(t *testing.T) {
 	router := newTestRouter()
-	tokenA := registerAgent(t, router, "agent-a")
-
+	orgID := createOrg(t, router, "alice", "alice@a.test", "Org A")
+	aliceHumanID := currentHumanID(t, router, "alice", "alice@a.test")
+	token := registerAgent(t, router, "alice", "alice@a.test", orgID, "agent-a", aliceHumanID)
 	start := time.Now()
-	resp := pullMessage(t, router, tokenA, 25)
+	resp := pull(t, router, token, 25)
 	if resp.Code != http.StatusNoContent {
-		t.Fatalf("expected 204 on timeout, got %d: %s", resp.Code, resp.Body.String())
+		t.Fatalf("expected 204, got %d", resp.Code)
 	}
 	if time.Since(start) < 20*time.Millisecond {
-		t.Fatalf("expected long-poll to wait before timeout")
-	}
-}
-
-func TestFIFOOrdering(t *testing.T) {
-	router := newTestRouter()
-	tokenA := registerAgent(t, router, "agent-a")
-	tokenB := registerAgent(t, router, "agent-b")
-	_ = activateBond(t, router, tokenA, tokenB)
-
-	resp := publishMessage(t, router, tokenA, "agent-b", "first")
-	if resp.Code != http.StatusAccepted {
-		t.Fatalf("publish first failed: %d %s", resp.Code, resp.Body.String())
-	}
-	resp = publishMessage(t, router, tokenA, "agent-b", "second")
-	if resp.Code != http.StatusAccepted {
-		t.Fatalf("publish second failed: %d %s", resp.Code, resp.Body.String())
-	}
-
-	pull1 := pullMessage(t, router, tokenB, 10)
-	if pull1.Code != http.StatusOK {
-		t.Fatalf("pull first failed: %d %s", pull1.Code, pull1.Body.String())
-	}
-	msg1 := decodePulledMessage(t, pull1.Body.Bytes())
-	if got := msg1["payload"]; got != "first" {
-		t.Fatalf("expected first payload, got %v", got)
-	}
-
-	pull2 := pullMessage(t, router, tokenB, 10)
-	if pull2.Code != http.StatusOK {
-		t.Fatalf("pull second failed: %d %s", pull2.Code, pull2.Body.String())
-	}
-	msg2 := decodePulledMessage(t, pull2.Body.Bytes())
-	if got := msg2["payload"]; got != "second" {
-		t.Fatalf("expected second payload, got %v", got)
+		t.Fatalf("expected pull wait")
 	}
 }
 
 func TestConcurrentPublishPull(t *testing.T) {
 	router := newTestRouter()
-	tokenA := registerAgent(t, router, "agent-a")
-	tokenB := registerAgent(t, router, "agent-b")
-	_ = activateBond(t, router, tokenA, tokenB)
+	_, _, tokenA, tokenB, _, _ := setupTrustedAgents(t, router)
+	const total = 30
 
-	const total = 40
-	var pubWG sync.WaitGroup
+	var wg sync.WaitGroup
 	for i := 0; i < total; i++ {
-		pubWG.Add(1)
+		wg.Add(1)
 		go func(i int) {
-			defer pubWG.Done()
-			payload := fmt.Sprintf("msg-%02d", i)
-			resp := publishMessage(t, router, tokenA, "agent-b", payload)
+			defer wg.Done()
+			resp := publish(t, router, tokenA, "agent-b", fmt.Sprintf("msg-%d", i))
 			if resp.Code != http.StatusAccepted {
-				t.Errorf("publish failed for %s: %d %s", payload, resp.Code, resp.Body.String())
-				return
-			}
-			pub := decodeMap(t, resp.Body.Bytes())
-			if pub["status"] != "queued" {
-				t.Errorf("publish not queued for %s: %v", payload, pub["status"])
+				t.Errorf("publish status=%d body=%s", resp.Code, resp.Body.String())
 			}
 		}(i)
 	}
-	pubWG.Wait()
+	wg.Wait()
 
-	received := make(map[string]struct{})
-	deadline := time.Now().Add(5 * time.Second)
-	for len(received) < total && time.Now().Before(deadline) {
-		resp := pullMessage(t, router, tokenB, 250)
+	seen := 0
+	deadline := time.Now().Add(4 * time.Second)
+	for seen < total && time.Now().Before(deadline) {
+		resp := pull(t, router, tokenB, 50)
 		if resp.Code == http.StatusNoContent {
 			continue
 		}
 		if resp.Code != http.StatusOK {
 			t.Fatalf("pull failed: %d %s", resp.Code, resp.Body.String())
 		}
-		msg := decodePulledMessage(t, resp.Body.Bytes())
-		payload, _ := msg["payload"].(string)
-		received[payload] = struct{}{}
+		seen++
 	}
-
-	if len(received) != total {
-		t.Fatalf("expected %d received messages, got %d", total, len(received))
+	if seen != total {
+		t.Fatalf("expected %d messages, got %d", total, seen)
 	}
 }

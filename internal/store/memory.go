@@ -3,6 +3,7 @@ package store
 import (
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -10,164 +11,555 @@ import (
 )
 
 var (
-	ErrAgentExists      = errors.New("agent already exists")
-	ErrAgentNotFound    = errors.New("agent not found")
-	ErrSenderUnknown    = errors.New("sender agent not found")
-	ErrPeerUnknown      = errors.New("peer agent not found")
-	ErrSelfBond         = errors.New("cannot create bond with self")
-	ErrBondNotFound     = errors.New("bond not found")
-	ErrBondAccessDenied = errors.New("bond access denied")
-	ErrNoActiveBond     = errors.New("no active bond")
-	ErrInvalidToken     = errors.New("invalid token")
+	ErrInvalidToken       = errors.New("invalid token")
+	ErrOrgNotFound        = errors.New("organization not found")
+	ErrHumanNotFound      = errors.New("human not found")
+	ErrMembershipNotFound = errors.New("membership not found")
+	ErrInviteNotFound     = errors.New("invite not found")
+	ErrInviteInvalid      = errors.New("invite invalid")
+	ErrAgentExists        = errors.New("agent already exists")
+	ErrAgentNotFound      = errors.New("agent not found")
+	ErrAgentRevoked       = errors.New("agent revoked")
+	ErrTrustNotFound      = errors.New("trust edge not found")
+	ErrUnauthorizedRole   = errors.New("unauthorized role")
+	ErrInvalidRole        = errors.New("invalid role")
+	ErrInvalidEdgeType    = errors.New("invalid edge type")
+	ErrSelfTrust          = errors.New("self trust not allowed")
+	ErrNoTrustPath        = errors.New("no trust path")
 )
-
-type bondRecord struct {
-	bond         model.Bond
-	agentAJoined bool
-	agentBJoined bool
-}
 
 type MemoryStore struct {
 	mu sync.RWMutex
 
-	agents     map[string]model.Agent
-	tokenIndex map[string]string
-	queues     map[string][]model.Message
-	bonds      map[string]bondRecord
-	bondByPair map[string]string
+	orgs map[string]model.Organization
+
+	humans         map[string]model.Human
+	humanByAuthKey map[string]string
+
+	memberships         map[string]model.Membership
+	membershipByOrgUser map[string]string
+
+	invites map[string]model.Invite
+
+	agents        map[string]model.Agent
+	agentTokenIdx map[string]string
+	queues        map[string][]model.Message
+
+	orgTrusts      map[string]model.TrustEdge
+	orgTrustByPair map[string]string
+
+	agentTrusts      map[string]model.TrustEdge
+	agentTrustByPair map[string]string
+
+	auditByOrg map[string][]model.AuditEvent
+	statsByOrg map[string]model.OrgStats
 }
 
 func NewMemoryStore() *MemoryStore {
 	return &MemoryStore{
-		agents:     make(map[string]model.Agent),
-		tokenIndex: make(map[string]string),
-		queues:     make(map[string][]model.Message),
-		bonds:      make(map[string]bondRecord),
-		bondByPair: make(map[string]string),
+		orgs:                make(map[string]model.Organization),
+		humans:              make(map[string]model.Human),
+		humanByAuthKey:      make(map[string]string),
+		memberships:         make(map[string]model.Membership),
+		membershipByOrgUser: make(map[string]string),
+		invites:             make(map[string]model.Invite),
+		agents:              make(map[string]model.Agent),
+		agentTokenIdx:       make(map[string]string),
+		queues:              make(map[string][]model.Message),
+		orgTrusts:           make(map[string]model.TrustEdge),
+		orgTrustByPair:      make(map[string]string),
+		agentTrusts:         make(map[string]model.TrustEdge),
+		agentTrustByPair:    make(map[string]string),
+		auditByOrg:          make(map[string][]model.AuditEvent),
+		statsByOrg:          make(map[string]model.OrgStats),
 	}
 }
 
-func (s *MemoryStore) RegisterAgent(agentID, tokenHash string, now time.Time) (model.Agent, error) {
+func (s *MemoryStore) UpsertHuman(provider, subject, email string, now time.Time, idFactory func() (string, error)) (model.Human, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	if _, exists := s.agents[agentID]; exists {
+	key := authKey(provider, subject)
+	if humanID, ok := s.humanByAuthKey[key]; ok {
+		h := s.humans[humanID]
+		if email != "" && !strings.EqualFold(h.Email, email) {
+			h.Email = email
+			s.humans[humanID] = h
+		}
+		return h, nil
+	}
+
+	humanID, err := idFactory()
+	if err != nil {
+		return model.Human{}, err
+	}
+	h := model.Human{
+		HumanID:      humanID,
+		AuthProvider: provider,
+		AuthSubject:  subject,
+		Email:        email,
+		CreatedAt:    now,
+	}
+	s.humans[humanID] = h
+	s.humanByAuthKey[key] = humanID
+	return h, nil
+}
+
+func (s *MemoryStore) CreateOrg(name string, creatorHumanID string, orgID string, now time.Time) (model.Organization, model.Membership, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if _, ok := s.humans[creatorHumanID]; !ok {
+		return model.Organization{}, model.Membership{}, ErrHumanNotFound
+	}
+
+	org := model.Organization{
+		OrgID:     orgID,
+		Name:      name,
+		CreatedAt: now,
+		CreatedBy: creatorHumanID,
+	}
+	s.orgs[org.OrgID] = org
+
+	memID := fmt.Sprintf("m-%s", orgID)
+	mem := model.Membership{
+		MembershipID: memID,
+		OrgID:        org.OrgID,
+		HumanID:      creatorHumanID,
+		Role:         model.RoleOwner,
+		Status:       model.StatusActive,
+		CreatedAt:    now,
+	}
+	s.memberships[memID] = mem
+	s.membershipByOrgUser[orgHumanKey(org.OrgID, creatorHumanID)] = memID
+	s.ensureOrgStatsLocked(org.OrgID)
+	s.appendAuditLocked(org.OrgID, creatorHumanID, "org", "create", org.OrgID, nil, now)
+	return org, mem, nil
+}
+
+func (s *MemoryStore) ListMyMemberships(humanID string) []model.MembershipWithOrg {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	out := make([]model.MembershipWithOrg, 0)
+	for _, m := range s.memberships {
+		if m.HumanID != humanID || m.Status != model.StatusActive {
+			continue
+		}
+		org, ok := s.orgs[m.OrgID]
+		if !ok {
+			continue
+		}
+		out = append(out, model.MembershipWithOrg{Membership: m, Org: org})
+	}
+	return out
+}
+
+func (s *MemoryStore) CreateInvite(orgID, email, role, actorHumanID, inviteID string, now time.Time) (model.Invite, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if _, ok := s.orgs[orgID]; !ok {
+		return model.Invite{}, ErrOrgNotFound
+	}
+	if !hasRoleAtLeast(s.membershipRoleLocked(orgID, actorHumanID), model.RoleAdmin) {
+		return model.Invite{}, ErrUnauthorizedRole
+	}
+	if !isValidRole(role) || role == model.RoleOwner {
+		return model.Invite{}, ErrInvalidRole
+	}
+
+	invite := model.Invite{
+		InviteID:  inviteID,
+		OrgID:     orgID,
+		Email:     strings.ToLower(strings.TrimSpace(email)),
+		Role:      role,
+		Status:    model.StatusPending,
+		CreatedBy: actorHumanID,
+		CreatedAt: now,
+	}
+	s.invites[invite.InviteID] = invite
+	s.appendAuditLocked(orgID, actorHumanID, "invite", "create", invite.InviteID, map[string]any{
+		"email": invite.Email,
+		"role":  invite.Role,
+	}, now)
+	return invite, nil
+}
+
+func (s *MemoryStore) AcceptInvite(inviteID, humanID, humanEmail string, now time.Time, idFactory func() (string, error)) (model.Membership, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	invite, ok := s.invites[inviteID]
+	if !ok {
+		return model.Membership{}, ErrInviteNotFound
+	}
+	if invite.Status != model.StatusPending {
+		return model.Membership{}, ErrInviteInvalid
+	}
+	if invite.Email != "" && !strings.EqualFold(invite.Email, humanEmail) {
+		return model.Membership{}, ErrInviteInvalid
+	}
+	if _, ok := s.humans[humanID]; !ok {
+		return model.Membership{}, ErrHumanNotFound
+	}
+
+	if existingID, ok := s.membershipByOrgUser[orgHumanKey(invite.OrgID, humanID)]; ok {
+		m := s.memberships[existingID]
+		if m.Status == model.StatusActive {
+			accepted := now
+			invite.Status = model.StatusActive
+			invite.AcceptedAt = &accepted
+			s.invites[inviteID] = invite
+			return m, nil
+		}
+	}
+
+	memID, err := idFactory()
+	if err != nil {
+		return model.Membership{}, err
+	}
+	mem := model.Membership{
+		MembershipID: memID,
+		OrgID:        invite.OrgID,
+		HumanID:      humanID,
+		Role:         invite.Role,
+		Status:       model.StatusActive,
+		CreatedAt:    now,
+	}
+	s.memberships[memID] = mem
+	s.membershipByOrgUser[orgHumanKey(invite.OrgID, humanID)] = memID
+
+	accepted := now
+	invite.Status = model.StatusActive
+	invite.AcceptedAt = &accepted
+	s.invites[inviteID] = invite
+	s.appendAuditLocked(invite.OrgID, humanID, "invite", "accept", inviteID, nil, now)
+	return mem, nil
+}
+
+func (s *MemoryStore) ListOrgHumans(orgID, requesterHumanID string) ([]model.OrgHumanView, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	if _, ok := s.orgs[orgID]; !ok {
+		return nil, ErrOrgNotFound
+	}
+	if s.membershipRoleLocked(orgID, requesterHumanID) == "" {
+		return nil, ErrUnauthorizedRole
+	}
+
+	out := make([]model.OrgHumanView, 0)
+	for _, m := range s.memberships {
+		if m.OrgID != orgID || m.Status != model.StatusActive {
+			continue
+		}
+		h, ok := s.humans[m.HumanID]
+		if !ok {
+			continue
+		}
+		out = append(out, model.OrgHumanView{
+			HumanID:      h.HumanID,
+			Email:        h.Email,
+			Role:         m.Role,
+			Status:       m.Status,
+			AuthProvider: h.AuthProvider,
+		})
+	}
+	return out, nil
+}
+
+func (s *MemoryStore) RegisterAgent(orgID, agentID string, ownerHumanID *string, tokenHash, actorHumanID string, now time.Time) (model.Agent, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if _, ok := s.orgs[orgID]; !ok {
+		return model.Agent{}, ErrOrgNotFound
+	}
+	if !hasRoleAtLeast(s.membershipRoleLocked(orgID, actorHumanID), model.RoleMember) {
+		return model.Agent{}, ErrUnauthorizedRole
+	}
+	if _, ok := s.agents[agentID]; ok {
 		return model.Agent{}, ErrAgentExists
+	}
+	if ownerHumanID != nil {
+		if s.membershipRoleLocked(orgID, *ownerHumanID) == "" {
+			return model.Agent{}, ErrMembershipNotFound
+		}
 	}
 
 	agent := model.Agent{
-		AgentID:   agentID,
-		TokenHash: tokenHash,
-		CreatedAt: now,
+		AgentID:      agentID,
+		OrgID:        orgID,
+		OwnerHumanID: ownerHumanID,
+		TokenHash:    tokenHash,
+		Status:       model.StatusActive,
+		CreatedBy:    actorHumanID,
+		CreatedAt:    now,
 	}
 	s.agents[agentID] = agent
-	s.tokenIndex[tokenHash] = agentID
+	s.agentTokenIdx[tokenHash] = agentID
 	s.queues[agentID] = s.queues[agentID]
-
+	s.appendAuditLocked(orgID, actorHumanID, "agent", "register", agent.AgentID, map[string]any{
+		"owner_human_id": ownerHumanID,
+	}, now)
 	return agent, nil
+}
+
+func (s *MemoryStore) RotateAgentToken(agentID, actorHumanID, tokenHash string, now time.Time) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	agent, ok := s.agents[agentID]
+	if !ok {
+		return ErrAgentNotFound
+	}
+	if !hasRoleAtLeast(s.membershipRoleLocked(agent.OrgID, actorHumanID), model.RoleAdmin) {
+		if agent.OwnerHumanID == nil || *agent.OwnerHumanID != actorHumanID {
+			return ErrUnauthorizedRole
+		}
+	}
+	delete(s.agentTokenIdx, agent.TokenHash)
+	agent.TokenHash = tokenHash
+	s.agents[agentID] = agent
+	s.agentTokenIdx[tokenHash] = agentID
+	s.appendAuditLocked(agent.OrgID, actorHumanID, "agent", "rotate_token", agentID, nil, now)
+	return nil
+}
+
+func (s *MemoryStore) RevokeAgent(agentID, actorHumanID string, now time.Time) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	agent, ok := s.agents[agentID]
+	if !ok {
+		return ErrAgentNotFound
+	}
+	if !hasRoleAtLeast(s.membershipRoleLocked(agent.OrgID, actorHumanID), model.RoleAdmin) {
+		if agent.OwnerHumanID == nil || *agent.OwnerHumanID != actorHumanID {
+			return ErrUnauthorizedRole
+		}
+	}
+	if agent.Status == model.StatusRevoked {
+		return nil
+	}
+	delete(s.agentTokenIdx, agent.TokenHash)
+	agent.Status = model.StatusRevoked
+	revokedAt := now
+	agent.RevokedAt = &revokedAt
+	s.agents[agentID] = agent
+	s.appendAuditLocked(agent.OrgID, actorHumanID, "agent", "revoke", agentID, nil, now)
+	return nil
 }
 
 func (s *MemoryStore) AgentIDForTokenHash(tokenHash string) (string, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	agentID, ok := s.tokenIndex[tokenHash]
+	agentID, ok := s.agentTokenIdx[tokenHash]
 	if !ok {
+		return "", ErrInvalidToken
+	}
+	agent, ok := s.agents[agentID]
+	if !ok || agent.Status == model.StatusRevoked {
 		return "", ErrInvalidToken
 	}
 	return agentID, nil
 }
 
-func (s *MemoryStore) CreateOrJoinBond(callerAgentID, peerAgentID, bondID string, now time.Time) (model.Bond, bool, error) {
+func (s *MemoryStore) CreateOrJoinOrgTrust(orgID, peerOrgID, actorHumanID, edgeID string, now time.Time) (model.TrustEdge, bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.createOrJoinTrustLocked("org", orgID, peerOrgID, actorHumanID, edgeID, now)
+}
+
+func (s *MemoryStore) CreateOrJoinAgentTrust(orgID, agentID, peerAgentID, actorHumanID, edgeID string, now time.Time) (model.TrustEdge, bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	if _, ok := s.agents[callerAgentID]; !ok {
-		return model.Bond{}, false, ErrAgentNotFound
+	a, ok := s.agents[agentID]
+	if !ok {
+		return model.TrustEdge{}, false, ErrAgentNotFound
+	}
+	if a.OrgID != orgID {
+		return model.TrustEdge{}, false, ErrUnauthorizedRole
+	}
+	if !hasRoleAtLeast(s.membershipRoleLocked(orgID, actorHumanID), model.RoleAdmin) {
+		return model.TrustEdge{}, false, ErrUnauthorizedRole
 	}
 	if _, ok := s.agents[peerAgentID]; !ok {
-		return model.Bond{}, false, ErrPeerUnknown
+		return model.TrustEdge{}, false, ErrAgentNotFound
 	}
-	if callerAgentID == peerAgentID {
-		return model.Bond{}, false, ErrSelfBond
-	}
-
-	agentAID, agentBID := canonicalPair(callerAgentID, peerAgentID)
-	key := pairKey(agentAID, agentBID)
-	if existingBondID, ok := s.bondByPair[key]; ok {
-		record := s.bonds[existingBondID]
-		if callerAgentID == record.bond.AgentAID {
-			record.agentAJoined = true
-		}
-		if callerAgentID == record.bond.AgentBID {
-			record.agentBJoined = true
-		}
-		if record.agentAJoined && record.agentBJoined && record.bond.State != "active" {
-			activatedAt := now
-			record.bond.State = "active"
-			record.bond.ActivatedAt = &activatedAt
-		}
-		s.bonds[existingBondID] = record
-		return record.bond, false, nil
-	}
-
-	record := bondRecord{
-		bond: model.Bond{
-			BondID:    bondID,
-			AgentAID:  agentAID,
-			AgentBID:  agentBID,
-			State:     "pending",
-			CreatedAt: now,
-		},
-	}
-	if callerAgentID == agentAID {
-		record.agentAJoined = true
-	} else {
-		record.agentBJoined = true
-	}
-
-	s.bonds[bondID] = record
-	s.bondByPair[key] = bondID
-	return record.bond, true, nil
+	return s.createOrJoinTrustLocked("agent", agentID, peerAgentID, actorHumanID, edgeID, now)
 }
 
-func (s *MemoryStore) DeleteBond(callerAgentID, bondID string) error {
+func (s *MemoryStore) ApproveOrgTrust(edgeID, actorHumanID string, now time.Time) (model.TrustEdge, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-
-	record, ok := s.bonds[bondID]
-	if !ok {
-		return ErrBondNotFound
-	}
-	if callerAgentID != record.bond.AgentAID && callerAgentID != record.bond.AgentBID {
-		return ErrBondAccessDenied
-	}
-	delete(s.bonds, bondID)
-	delete(s.bondByPair, pairKey(record.bond.AgentAID, record.bond.AgentBID))
-	return nil
+	return s.approveTrustLocked("org", edgeID, actorHumanID, now)
 }
 
-func (s *MemoryStore) CanPublish(senderAgentID, receiverAgentID string) error {
+func (s *MemoryStore) BlockOrgTrust(edgeID, actorHumanID string, now time.Time) (model.TrustEdge, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.blockTrustLocked("org", edgeID, actorHumanID, now)
+}
+
+func (s *MemoryStore) RevokeOrgTrust(edgeID, actorHumanID string, now time.Time) (model.TrustEdge, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.revokeTrustLocked("org", edgeID, actorHumanID, now)
+}
+
+func (s *MemoryStore) ApproveAgentTrust(edgeID, actorHumanID string, now time.Time) (model.TrustEdge, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.approveTrustLocked("agent", edgeID, actorHumanID, now)
+}
+
+func (s *MemoryStore) BlockAgentTrust(edgeID, actorHumanID string, now time.Time) (model.TrustEdge, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.blockTrustLocked("agent", edgeID, actorHumanID, now)
+}
+
+func (s *MemoryStore) RevokeAgentTrust(edgeID, actorHumanID string, now time.Time) (model.TrustEdge, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.revokeTrustLocked("agent", edgeID, actorHumanID, now)
+}
+
+func (s *MemoryStore) ListOrgAgents(orgID, requesterHumanID string) ([]model.Agent, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	if _, ok := s.agents[receiverAgentID]; !ok {
-		return ErrAgentNotFound
+	if _, ok := s.orgs[orgID]; !ok {
+		return nil, ErrOrgNotFound
 	}
-	if _, ok := s.agents[senderAgentID]; !ok {
-		return ErrSenderUnknown
+	if s.membershipRoleLocked(orgID, requesterHumanID) == "" {
+		return nil, ErrUnauthorizedRole
+	}
+	out := make([]model.Agent, 0)
+	for _, a := range s.agents {
+		if a.OrgID == orgID {
+			out = append(out, a)
+		}
+	}
+	return out, nil
+}
+
+func (s *MemoryStore) ListOrgTrustGraph(orgID, requesterHumanID string) ([]model.TrustEdge, []model.TrustEdge, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	if _, ok := s.orgs[orgID]; !ok {
+		return nil, nil, ErrOrgNotFound
+	}
+	if s.membershipRoleLocked(orgID, requesterHumanID) == "" {
+		return nil, nil, ErrUnauthorizedRole
 	}
 
-	agentAID, agentBID := canonicalPair(senderAgentID, receiverAgentID)
-	bondID, ok := s.bondByPair[pairKey(agentAID, agentBID)]
+	orgEdges := make([]model.TrustEdge, 0)
+	for _, e := range s.orgTrusts {
+		if e.LeftID == orgID || e.RightID == orgID {
+			orgEdges = append(orgEdges, e)
+		}
+	}
+	agentEdges := make([]model.TrustEdge, 0)
+	for _, e := range s.agentTrusts {
+		leftAgent, lok := s.agents[e.LeftID]
+		rightAgent, rok := s.agents[e.RightID]
+		if !lok || !rok {
+			continue
+		}
+		if leftAgent.OrgID == orgID || rightAgent.OrgID == orgID {
+			agentEdges = append(agentEdges, e)
+		}
+	}
+	return orgEdges, agentEdges, nil
+}
+
+func (s *MemoryStore) ListAudit(orgID, requesterHumanID string) ([]model.AuditEvent, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	if _, ok := s.orgs[orgID]; !ok {
+		return nil, ErrOrgNotFound
+	}
+	if s.membershipRoleLocked(orgID, requesterHumanID) == "" {
+		return nil, ErrUnauthorizedRole
+	}
+	events := s.auditByOrg[orgID]
+	out := make([]model.AuditEvent, len(events))
+	copy(out, events)
+	return out, nil
+}
+
+func (s *MemoryStore) GetOrgStats(orgID, requesterHumanID string) (model.OrgStats, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if _, ok := s.orgs[orgID]; !ok {
+		return model.OrgStats{}, ErrOrgNotFound
+	}
+	if s.membershipRoleLocked(orgID, requesterHumanID) == "" {
+		return model.OrgStats{}, ErrUnauthorizedRole
+	}
+	stats := s.statsByOrg[orgID]
+	return stats, nil
+}
+
+func (s *MemoryStore) CanPublish(senderAgentID, receiverAgentID string) (string, string, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	sender, ok := s.agents[senderAgentID]
+	if !ok || sender.Status == model.StatusRevoked {
+		return "", "", ErrAgentNotFound
+	}
+	receiver, ok := s.agents[receiverAgentID]
+	if !ok || receiver.Status == model.StatusRevoked {
+		return "", "", ErrAgentNotFound
+	}
+	senderOrgID := sender.OrgID
+	receiverOrgID := receiver.OrgID
+
+	if senderOrgID != receiverOrgID {
+		orgEdgeID, ok := s.orgTrustByPair[pairKey(senderOrgID, receiverOrgID)]
+		if !ok {
+			return senderOrgID, receiverOrgID, ErrNoTrustPath
+		}
+		orgEdge := s.orgTrusts[orgEdgeID]
+		if orgEdge.State != model.StatusActive {
+			return senderOrgID, receiverOrgID, ErrNoTrustPath
+		}
+	}
+
+	agentEdgeID, ok := s.agentTrustByPair[pairKey(senderAgentID, receiverAgentID)]
 	if !ok {
-		return ErrNoActiveBond
+		return senderOrgID, receiverOrgID, ErrNoTrustPath
 	}
-	record := s.bonds[bondID]
-	if record.bond.State != "active" {
-		return ErrNoActiveBond
+	agentEdge := s.agentTrusts[agentEdgeID]
+	if agentEdge.State != model.StatusActive {
+		return senderOrgID, receiverOrgID, ErrNoTrustPath
 	}
-	return nil
+
+	return senderOrgID, receiverOrgID, nil
+}
+
+func (s *MemoryStore) RecordMessageQueued(orgID string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	stats := s.ensureOrgStatsLocked(orgID)
+	stats.QueuedMessages++
+	s.statsByOrg[orgID] = stats
+}
+
+func (s *MemoryStore) RecordMessageDropped(orgID string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	stats := s.ensureOrgStatsLocked(orgID)
+	stats.DroppedMessages++
+	s.statsByOrg[orgID] = stats
 }
 
 func (s *MemoryStore) Enqueue(message model.Message) error {
@@ -177,7 +569,6 @@ func (s *MemoryStore) Enqueue(message model.Message) error {
 	if _, ok := s.agents[message.ToAgentID]; !ok {
 		return ErrAgentNotFound
 	}
-
 	s.queues[message.ToAgentID] = append(s.queues[message.ToAgentID], message)
 	return nil
 }
@@ -190,10 +581,311 @@ func (s *MemoryStore) PopNext(agentID string) (model.Message, bool) {
 	if len(queue) == 0 {
 		return model.Message{}, false
 	}
-
-	message := queue[0]
+	msg := queue[0]
 	s.queues[agentID] = queue[1:]
-	return message, true
+	return msg, true
+}
+
+func (s *MemoryStore) createOrJoinTrustLocked(edgeType, leftInput, rightInput, actorHumanID, edgeID string, now time.Time) (model.TrustEdge, bool, error) {
+	if edgeType != "org" && edgeType != "agent" {
+		return model.TrustEdge{}, false, ErrInvalidEdgeType
+	}
+	if leftInput == rightInput {
+		return model.TrustEdge{}, false, ErrSelfTrust
+	}
+
+	leftID, rightID := canonicalPair(leftInput, rightInput)
+	if edgeType == "org" {
+		if _, ok := s.orgs[leftID]; !ok {
+			return model.TrustEdge{}, false, ErrOrgNotFound
+		}
+		if _, ok := s.orgs[rightID]; !ok {
+			return model.TrustEdge{}, false, ErrOrgNotFound
+		}
+		actorSideOrg := leftInput
+		if !hasRoleAtLeast(s.membershipRoleLocked(actorSideOrg, actorHumanID), model.RoleAdmin) {
+			return model.TrustEdge{}, false, ErrUnauthorizedRole
+		}
+		key := pairKey(leftID, rightID)
+		if existingID, ok := s.orgTrustByPair[key]; ok {
+			edge := s.orgTrusts[existingID]
+			edge = applyTrustRequest(edge, actorSideOrg == edge.LeftID, now)
+			s.orgTrusts[existingID] = edge
+			s.appendAuditLocked(actorSideOrg, actorHumanID, "trust_org", "request", edge.EdgeID, map[string]any{
+				"peer_org_id": opposite(edge, actorSideOrg),
+				"state":       edge.State,
+			}, now)
+			return edge, false, nil
+		}
+		edge := model.TrustEdge{
+			EdgeID:    edgeID,
+			EdgeType:  "org",
+			LeftID:    leftID,
+			RightID:   rightID,
+			State:     model.StatusPending,
+			CreatedBy: actorHumanID,
+			CreatedAt: now,
+			UpdatedAt: now,
+		}
+		edge = applyTrustRequest(edge, actorSideOrg == edge.LeftID, now)
+		s.orgTrusts[edge.EdgeID] = edge
+		s.orgTrustByPair[key] = edge.EdgeID
+		s.appendAuditLocked(actorSideOrg, actorHumanID, "trust_org", "request", edge.EdgeID, map[string]any{
+			"peer_org_id": opposite(edge, actorSideOrg),
+			"state":       edge.State,
+		}, now)
+		return edge, true, nil
+	}
+
+	leftAgent, ok := s.agents[leftID]
+	if !ok {
+		return model.TrustEdge{}, false, ErrAgentNotFound
+	}
+	rightAgent, ok := s.agents[rightID]
+	if !ok {
+		return model.TrustEdge{}, false, ErrAgentNotFound
+	}
+
+	actorSideOrg := s.agents[leftInput].OrgID
+	if !hasRoleAtLeast(s.membershipRoleLocked(actorSideOrg, actorHumanID), model.RoleAdmin) {
+		return model.TrustEdge{}, false, ErrUnauthorizedRole
+	}
+
+	key := pairKey(leftID, rightID)
+	if existingID, ok := s.agentTrustByPair[key]; ok {
+		edge := s.agentTrusts[existingID]
+		isLeftActor := leftInput == edge.LeftID
+		edge = applyTrustRequest(edge, isLeftActor, now)
+		s.agentTrusts[existingID] = edge
+		s.appendAuditLocked(actorSideOrg, actorHumanID, "trust_agent", "request", edge.EdgeID, map[string]any{
+			"peer_agent_id": opposite(edge, leftInput),
+			"state":         edge.State,
+		}, now)
+		return edge, false, nil
+	}
+
+	edge := model.TrustEdge{
+		EdgeID:    edgeID,
+		EdgeType:  "agent",
+		LeftID:    leftID,
+		RightID:   rightID,
+		State:     model.StatusPending,
+		CreatedBy: actorHumanID,
+		CreatedAt: now,
+		UpdatedAt: now,
+	}
+	edge = applyTrustRequest(edge, leftInput == edge.LeftID, now)
+	s.agentTrusts[edge.EdgeID] = edge
+	s.agentTrustByPair[key] = edge.EdgeID
+
+	_ = leftAgent
+	_ = rightAgent
+	s.appendAuditLocked(actorSideOrg, actorHumanID, "trust_agent", "request", edge.EdgeID, map[string]any{
+		"peer_agent_id": opposite(edge, leftInput),
+		"state":         edge.State,
+	}, now)
+	return edge, true, nil
+}
+
+func (s *MemoryStore) approveTrustLocked(edgeType, edgeID, actorHumanID string, now time.Time) (model.TrustEdge, error) {
+	edge, actorLeft, orgID, err := s.loadEdgeForActorLocked(edgeType, edgeID, actorHumanID)
+	if err != nil {
+		return model.TrustEdge{}, err
+	}
+	if edge.State == model.StatusRevoked || edge.State == model.StatusBlocked {
+		edge.State = model.StatusPending
+	}
+	if actorLeft {
+		edge.LeftApproved = true
+	} else {
+		edge.RightApproved = true
+	}
+	if edge.LeftApproved && edge.RightApproved {
+		edge.State = model.StatusActive
+	} else {
+		edge.State = model.StatusPending
+	}
+	edge.UpdatedAt = now
+	s.storeEdgeLocked(edgeType, edge)
+	s.appendAuditLocked(orgID, actorHumanID, "trust_"+edgeType, "approve", edge.EdgeID, map[string]any{"state": edge.State}, now)
+	return edge, nil
+}
+
+func (s *MemoryStore) blockTrustLocked(edgeType, edgeID, actorHumanID string, now time.Time) (model.TrustEdge, error) {
+	edge, _, orgID, err := s.loadEdgeForActorLocked(edgeType, edgeID, actorHumanID)
+	if err != nil {
+		return model.TrustEdge{}, err
+	}
+	edge.State = model.StatusBlocked
+	edge.LeftApproved = false
+	edge.RightApproved = false
+	edge.UpdatedAt = now
+	s.storeEdgeLocked(edgeType, edge)
+	s.appendAuditLocked(orgID, actorHumanID, "trust_"+edgeType, "block", edge.EdgeID, nil, now)
+	return edge, nil
+}
+
+func (s *MemoryStore) revokeTrustLocked(edgeType, edgeID, actorHumanID string, now time.Time) (model.TrustEdge, error) {
+	edge, _, orgID, err := s.loadEdgeForActorLocked(edgeType, edgeID, actorHumanID)
+	if err != nil {
+		return model.TrustEdge{}, err
+	}
+	edge.State = model.StatusRevoked
+	edge.LeftApproved = false
+	edge.RightApproved = false
+	edge.UpdatedAt = now
+	s.storeEdgeLocked(edgeType, edge)
+	s.appendAuditLocked(orgID, actorHumanID, "trust_"+edgeType, "revoke", edge.EdgeID, nil, now)
+	return edge, nil
+}
+
+func (s *MemoryStore) loadEdgeForActorLocked(edgeType, edgeID, actorHumanID string) (model.TrustEdge, bool, string, error) {
+	var edge model.TrustEdge
+	var ok bool
+	if edgeType == "org" {
+		edge, ok = s.orgTrusts[edgeID]
+	} else if edgeType == "agent" {
+		edge, ok = s.agentTrusts[edgeID]
+	} else {
+		return model.TrustEdge{}, false, "", ErrInvalidEdgeType
+	}
+	if !ok {
+		return model.TrustEdge{}, false, "", ErrTrustNotFound
+	}
+
+	if edgeType == "org" {
+		leftRole := s.membershipRoleLocked(edge.LeftID, actorHumanID)
+		rightRole := s.membershipRoleLocked(edge.RightID, actorHumanID)
+		if hasRoleAtLeast(leftRole, model.RoleAdmin) {
+			return edge, true, edge.LeftID, nil
+		}
+		if hasRoleAtLeast(rightRole, model.RoleAdmin) {
+			return edge, false, edge.RightID, nil
+		}
+		return model.TrustEdge{}, false, "", ErrUnauthorizedRole
+	}
+
+	leftAgent, lok := s.agents[edge.LeftID]
+	rightAgent, rok := s.agents[edge.RightID]
+	if !lok || !rok {
+		return model.TrustEdge{}, false, "", ErrAgentNotFound
+	}
+	leftRole := s.membershipRoleLocked(leftAgent.OrgID, actorHumanID)
+	rightRole := s.membershipRoleLocked(rightAgent.OrgID, actorHumanID)
+	if hasRoleAtLeast(leftRole, model.RoleAdmin) {
+		return edge, true, leftAgent.OrgID, nil
+	}
+	if hasRoleAtLeast(rightRole, model.RoleAdmin) {
+		return edge, false, rightAgent.OrgID, nil
+	}
+	return model.TrustEdge{}, false, "", ErrUnauthorizedRole
+}
+
+func (s *MemoryStore) storeEdgeLocked(edgeType string, edge model.TrustEdge) {
+	if edgeType == "org" {
+		s.orgTrusts[edge.EdgeID] = edge
+		return
+	}
+	s.agentTrusts[edge.EdgeID] = edge
+}
+
+func (s *MemoryStore) membershipRoleLocked(orgID, humanID string) string {
+	if membershipID, ok := s.membershipByOrgUser[orgHumanKey(orgID, humanID)]; ok {
+		if membership, ok := s.memberships[membershipID]; ok && membership.Status == model.StatusActive {
+			return membership.Role
+		}
+	}
+	return ""
+}
+
+func (s *MemoryStore) appendAuditLocked(orgID, actorHumanID, category, action, subjectID string, details map[string]any, now time.Time) {
+	events := s.auditByOrg[orgID]
+	events = append(events, model.AuditEvent{
+		EventID:    fmt.Sprintf("%d", now.UnixNano()),
+		OrgID:      orgID,
+		ActorHuman: actorHumanID,
+		Category:   category,
+		Action:     action,
+		SubjectID:  subjectID,
+		Details:    details,
+		CreatedAt:  now,
+	})
+	if len(events) > 200 {
+		events = events[len(events)-200:]
+	}
+	s.auditByOrg[orgID] = events
+}
+
+func (s *MemoryStore) ensureOrgStatsLocked(orgID string) model.OrgStats {
+	stats, ok := s.statsByOrg[orgID]
+	if !ok {
+		stats = model.OrgStats{OrgID: orgID}
+		s.statsByOrg[orgID] = stats
+	}
+	return stats
+}
+
+func applyTrustRequest(edge model.TrustEdge, isLeftRequester bool, now time.Time) model.TrustEdge {
+	if edge.State == model.StatusBlocked || edge.State == model.StatusRevoked {
+		edge.State = model.StatusPending
+		edge.LeftApproved = false
+		edge.RightApproved = false
+	}
+	if isLeftRequester {
+		edge.LeftApproved = true
+	} else {
+		edge.RightApproved = true
+	}
+	if edge.LeftApproved && edge.RightApproved {
+		edge.State = model.StatusActive
+	} else {
+		edge.State = model.StatusPending
+	}
+	edge.UpdatedAt = now
+	return edge
+}
+
+func opposite(edge model.TrustEdge, id string) string {
+	if edge.LeftID == id {
+		return edge.RightID
+	}
+	return edge.LeftID
+}
+
+func hasRoleAtLeast(actualRole, minimumRole string) bool {
+	return roleRank(actualRole) >= roleRank(minimumRole)
+}
+
+func isValidRole(role string) bool {
+	switch role {
+	case model.RoleOwner, model.RoleAdmin, model.RoleMember, model.RoleViewer:
+		return true
+	default:
+		return false
+	}
+}
+
+func roleRank(role string) int {
+	switch role {
+	case model.RoleOwner:
+		return 4
+	case model.RoleAdmin:
+		return 3
+	case model.RoleMember:
+		return 2
+	case model.RoleViewer:
+		return 1
+	default:
+		return 0
+	}
+}
+
+func authKey(provider, subject string) string {
+	return provider + "\x00" + subject
+}
+
+func orgHumanKey(orgID, humanID string) string {
+	return orgID + "\x00" + humanID
 }
 
 func canonicalPair(a, b string) (string, string) {
@@ -204,5 +896,6 @@ func canonicalPair(a, b string) (string, string) {
 }
 
 func pairKey(a, b string) string {
-	return fmt.Sprintf("%s\x00%s", a, b)
+	left, right := canonicalPair(a, b)
+	return left + "\x00" + right
 }
