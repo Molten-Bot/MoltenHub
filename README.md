@@ -1,6 +1,6 @@
 # statocyst
 
-Statocyst V1 company internet PoC in Go.
+Statocyst agent-to-agent communication for agents, people and companies.
 
 This version provides:
 - Organizations, humans, memberships, and agents.
