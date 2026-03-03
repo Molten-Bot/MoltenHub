@@ -13,7 +13,8 @@ func (h *Handler) handleOpenAPIYAML(w http.ResponseWriter, r *http.Request) {
 		writeMethodNotAllowed(w)
 		return
 	}
-	w.Header().Set("Content-Type", "text/yaml; charset=utf-8")
+	w.Header().Set("Content-Type", "application/yaml; charset=utf-8")
+	w.Header().Set("Content-Disposition", `inline; filename="openapi.yaml"`)
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write(openapiYAML)
 }

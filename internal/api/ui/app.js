@@ -70,6 +70,12 @@ $("btnRegisterAgent").onclick = async () => {
   if (owner) payload.owner_human_id = owner;
   out("agentOut", await req("/v1/agents/register", "POST", payload));
 };
+$("btnCreateBindToken").onclick = async () => {
+  const owner = $("ownerHumanId").value.trim();
+  const payload = { org_id: selectedOrg() };
+  if (owner) payload.owner_human_id = owner;
+  out("bindOut", await req("/v1/agents/bind-tokens", "POST", payload));
+};
 $("btnRotateAgent").onclick = async () =>
   out("agentOut", await req(`/v1/agents/${$("rotateAgentId").value}/rotate-token`, "POST"));
 $("btnRevokeAgent").onclick = async () =>
@@ -114,5 +120,7 @@ $("btnAudit").onclick = async () =>
   out("graphOut", await req(`/v1/orgs/${selectedOrg()}/audit`));
 $("btnStats").onclick = async () =>
   out("graphOut", await req(`/v1/orgs/${selectedOrg()}/stats`));
+$("btnAdminSnapshot").onclick = async () =>
+  out("graphOut", await req("/v1/admin/snapshot"));
 
 listOrgs();

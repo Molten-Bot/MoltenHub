@@ -46,11 +46,11 @@ type MemoryStore struct {
 
 	invites map[string]model.Invite
 
-	agents        map[string]model.Agent
-	agentTokenIdx map[string]string
+	agents                 map[string]model.Agent
+	agentTokenIdx          map[string]string
 	orgOwnedAgentNameIdx   map[string]string
 	humanOwnedAgentNameIdx map[string]string
-	queues        map[string][]model.Message
+	queues                 map[string][]model.Message
 
 	binds      map[string]model.BindToken
 	bindByHash map[string]string
@@ -67,26 +67,26 @@ type MemoryStore struct {
 
 func NewMemoryStore() *MemoryStore {
 	return &MemoryStore{
-		orgs:                make(map[string]model.Organization),
-		orgByName:           make(map[string]string),
-		humans:              make(map[string]model.Human),
-		humanByAuthKey:      make(map[string]string),
-		memberships:         make(map[string]model.Membership),
-		membershipByOrgUser: make(map[string]string),
-		invites:             make(map[string]model.Invite),
-		agents:              make(map[string]model.Agent),
-		agentTokenIdx:       make(map[string]string),
+		orgs:                   make(map[string]model.Organization),
+		orgByName:              make(map[string]string),
+		humans:                 make(map[string]model.Human),
+		humanByAuthKey:         make(map[string]string),
+		memberships:            make(map[string]model.Membership),
+		membershipByOrgUser:    make(map[string]string),
+		invites:                make(map[string]model.Invite),
+		agents:                 make(map[string]model.Agent),
+		agentTokenIdx:          make(map[string]string),
 		orgOwnedAgentNameIdx:   make(map[string]string),
 		humanOwnedAgentNameIdx: make(map[string]string),
-		queues:              make(map[string][]model.Message),
-		binds:               make(map[string]model.BindToken),
-		bindByHash:          make(map[string]string),
-		orgTrusts:           make(map[string]model.TrustEdge),
-		orgTrustByPair:      make(map[string]string),
-		agentTrusts:         make(map[string]model.TrustEdge),
-		agentTrustByPair:    make(map[string]string),
-		auditByOrg:          make(map[string][]model.AuditEvent),
-		statsByOrg:          make(map[string]model.OrgStats),
+		queues:                 make(map[string][]model.Message),
+		binds:                  make(map[string]model.BindToken),
+		bindByHash:             make(map[string]string),
+		orgTrusts:              make(map[string]model.TrustEdge),
+		orgTrustByPair:         make(map[string]string),
+		agentTrusts:            make(map[string]model.TrustEdge),
+		agentTrustByPair:       make(map[string]string),
+		auditByOrg:             make(map[string][]model.AuditEvent),
+		statsByOrg:             make(map[string]model.OrgStats),
 	}
 }
 
@@ -110,12 +110,12 @@ func (s *MemoryStore) UpsertHuman(provider, subject, email string, emailVerified
 		return model.Human{}, err
 	}
 	h := model.Human{
-		HumanID:      humanID,
-		AuthProvider: provider,
-		AuthSubject:  subject,
-		Email:        email,
+		HumanID:       humanID,
+		AuthProvider:  provider,
+		AuthSubject:   subject,
+		Email:         email,
 		EmailVerified: emailVerified,
-		CreatedAt:    now,
+		CreatedAt:     now,
 	}
 	s.humans[humanID] = h
 	s.humanByAuthKey[key] = humanID

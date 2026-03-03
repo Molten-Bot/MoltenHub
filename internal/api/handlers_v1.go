@@ -19,7 +19,7 @@ type createInviteRequest struct {
 }
 
 type createBindTokenRequest struct {
-	OrgID       string  `json:"org_id"`
+	OrgID        string  `json:"org_id"`
 	OwnerHumanID *string `json:"owner_human_id,omitempty"`
 }
 

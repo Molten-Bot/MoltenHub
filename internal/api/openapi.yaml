@@ -40,6 +40,16 @@ paths:
           description: Human
         '401':
           description: Unauthorized
+  /v1/admin/snapshot:
+    get:
+      summary: Super-admin read-only global snapshot
+      security:
+        - humanAuth: []
+      responses:
+        '200':
+          description: Global metadata snapshot
+        '403':
+          description: Super admin required
   /v1/me/orgs:
     get:
       summary: List memberships for current human
@@ -199,6 +209,46 @@ paths:
       responses:
         '201':
           description: Agent created with token
+  /v1/agents/bind-tokens:
+    post:
+      summary: Create single-use bind token for agent onboarding
+      security:
+        - humanAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [org_id]
+              properties:
+                org_id:
+                  type: string
+                owner_human_id:
+                  type: string
+      responses:
+        '201':
+          description: Bind token created
+  /v1/agents/bind/redeem:
+    post:
+      summary: Redeem bind token and mint long-lived agent token
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [bind_token, agent_id]
+              properties:
+                bind_token:
+                  type: string
+                agent_id:
+                  type: string
+      responses:
+        '201':
+          description: Agent onboarded
+        '409':
+          description: Bind already used or agent id exists
   /v1/agents/{agent_id}/rotate-token:
     post:
       summary: Rotate token

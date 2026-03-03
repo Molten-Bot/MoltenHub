@@ -22,12 +22,12 @@ type Organization struct {
 }
 
 type Human struct {
-	HumanID      string    `json:"human_id"`
-	AuthProvider string    `json:"auth_provider"`
-	AuthSubject  string    `json:"auth_subject"`
-	Email        string    `json:"email"`
-	EmailVerified bool     `json:"email_verified"`
-	CreatedAt    time.Time `json:"created_at"`
+	HumanID       string    `json:"human_id"`
+	AuthProvider  string    `json:"auth_provider"`
+	AuthSubject   string    `json:"auth_subject"`
+	Email         string    `json:"email"`
+	EmailVerified bool      `json:"email_verified"`
+	CreatedAt     time.Time `json:"created_at"`
 }
 
 type Membership struct {

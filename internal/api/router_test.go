@@ -18,7 +18,7 @@ import (
 func newTestRouter() http.Handler {
 	st := store.NewMemoryStore()
 	waiters := longpoll.NewWaiters()
-	h := NewHandler(st, waiters, auth.NewDevHumanAuthProvider(), "", "")
+	h := NewHandler(st, waiters, auth.NewDevHumanAuthProvider(), "", "", "molten.bot", 15*time.Minute)
 	return NewRouter(h)
 }
 
@@ -75,11 +75,12 @@ func currentHumanID(t *testing.T, router http.Handler, humanID, email string) st
 	if resp.Code != http.StatusOK {
 		t.Fatalf("get me failed: %d %s", resp.Code, resp.Body.String())
 	}
-	var payload map[string]map[string]any
+	var payload map[string]any
 	if err := json.Unmarshal(resp.Body.Bytes(), &payload); err != nil {
 		t.Fatalf("decode me response: %v", err)
 	}
-	id, _ := payload["human"]["human_id"].(string)
+	humanObj, _ := payload["human"].(map[string]any)
+	id, _ := humanObj["human_id"].(string)
 	if id == "" {
 		t.Fatalf("missing human_id in /v1/me response")
 	}
@@ -368,5 +369,59 @@ func TestConcurrentPublishPull(t *testing.T) {
 	}
 	if seen != total {
 		t.Fatalf("expected %d messages, got %d", total, seen)
+	}
+}
+
+func TestBindTokenRedeemSingleUse(t *testing.T) {
+	router := newTestRouter()
+	orgID := createOrg(t, router, "alice", "alice@a.test", "Org A")
+	aliceHumanID := currentHumanID(t, router, "alice", "alice@a.test")
+
+	createResp := doJSONRequest(t, router, http.MethodPost, "/v1/agents/bind-tokens", map[string]any{
+		"org_id":         orgID,
+		"owner_human_id": aliceHumanID,
+	}, humanHeaders("alice", "alice@a.test"))
+	if createResp.Code != http.StatusCreated {
+		t.Fatalf("create bind token failed: %d %s", createResp.Code, createResp.Body.String())
+	}
+	createPayload := decodeJSONMap(t, createResp.Body.Bytes())
+	bindToken, _ := createPayload["bind_token"].(string)
+	if bindToken == "" {
+		t.Fatalf("bind_token missing in create response")
+	}
+
+	redeemResp := doJSONRequest(t, router, http.MethodPost, "/v1/agents/bind/redeem", map[string]string{
+		"bind_token": bindToken,
+		"agent_id":   "bound-agent",
+	}, nil)
+	if redeemResp.Code != http.StatusCreated {
+		t.Fatalf("redeem bind token failed: %d %s", redeemResp.Code, redeemResp.Body.String())
+	}
+	redeemPayload := decodeJSONMap(t, redeemResp.Body.Bytes())
+	if redeemPayload["status"] != "ok" {
+		t.Fatalf("expected status ok, got %v", redeemPayload["status"])
+	}
+
+	redeemAgain := doJSONRequest(t, router, http.MethodPost, "/v1/agents/bind/redeem", map[string]string{
+		"bind_token": bindToken,
+		"agent_id":   "bound-agent-2",
+	}, nil)
+	if redeemAgain.Code != http.StatusConflict {
+		t.Fatalf("expected second redeem to fail with 409, got %d %s", redeemAgain.Code, redeemAgain.Body.String())
+	}
+}
+
+func TestSuperAdminReadOnly(t *testing.T) {
+	router := newTestRouter()
+	_ = createOrg(t, router, "alice", "alice@a.test", "Org A")
+
+	readonlyCreate := doJSONRequest(t, router, http.MethodPost, "/v1/orgs", map[string]string{"name": "ShouldFail"}, humanHeaders("root", "root@molten.bot"))
+	if readonlyCreate.Code != http.StatusForbidden {
+		t.Fatalf("expected super admin write deny 403, got %d %s", readonlyCreate.Code, readonlyCreate.Body.String())
+	}
+
+	snap := doJSONRequest(t, router, http.MethodGet, "/v1/admin/snapshot", nil, humanHeaders("root", "root@molten.bot"))
+	if snap.Code != http.StatusOK {
+		t.Fatalf("expected super admin snapshot 200, got %d %s", snap.Code, snap.Body.String())
 	}
 }

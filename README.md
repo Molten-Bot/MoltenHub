@@ -18,6 +18,9 @@ This version provides:
 - `HUMAN_AUTH_PROVIDER=supabase`: use Supabase JWT bearer token.
   - Requires `SUPABASE_JWT_SECRET`.
   - Optional UI config values: `SUPABASE_URL`, `SUPABASE_ANON_KEY`.
+- Super-admin domains (read-only): `SUPER_ADMIN_DOMAINS=molten.bot`
+  - Requires verified email claim when using Supabase (`email_verified=true`).
+- Bind token TTL minutes: `BIND_TOKEN_TTL_MINUTES=15` (default `15`).
 
 ### In-memory warning
 
@@ -89,6 +92,23 @@ curl -sS -X POST http://localhost:8080/v1/agents/register \
   -H 'Content-Type: application/json' \
   -H 'X-Human-Id: bob' -H 'X-Human-Email: bob@acme.dev' \
   -d '{"org_id":"<org-b-id>","agent_id":"agent-b"}'
+```
+
+### 2b) Create one-time bind token (human -> agent)
+
+```bash
+curl -sS -X POST http://localhost:8080/v1/agents/bind-tokens \
+  -H 'Content-Type: application/json' \
+  -H 'X-Human-Id: alice' -H 'X-Human-Email: alice@acme.dev' \
+  -d '{"org_id":"<org-a-id>"}'
+```
+
+Then give `bind_token` to agent. Agent self-onboards:
+
+```bash
+curl -sS -X POST http://localhost:8080/v1/agents/bind/redeem \
+  -H 'Content-Type: application/json' \
+  -d '{"bind_token":"<secret>","agent_id":"agent-a2"}'
 ```
 
 ### 3) Org trust (request + bilateral approve)

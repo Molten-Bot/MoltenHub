@@ -23,13 +23,13 @@ const (
 var agentIDRegex = regexp.MustCompile(`^[A-Za-z0-9._:-]{1,128}$`)
 
 type Handler struct {
-	store           *store.MemoryStore
-	waiters         *longpoll.Waiters
-	humanAuth       auth.HumanAuthProvider
-	now             func() time.Time
-	idFactory       func() (string, error)
-	supabaseURL     string
-	supabaseAnonKey string
+	store             *store.MemoryStore
+	waiters           *longpoll.Waiters
+	humanAuth         auth.HumanAuthProvider
+	now               func() time.Time
+	idFactory         func() (string, error)
+	supabaseURL       string
+	supabaseAnonKey   string
 	superAdminDomains map[string]struct{}
 	bindTokenTTL      time.Duration
 }

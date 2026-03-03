@@ -1,4 +1,4 @@
 interface:
   display_name: "OpenClaw Bind Agent"
-  short_description: "Register agent and create or join a peer bond"
-  default_prompt: "Use $openclaw-bind-agent to register agent_id=crab and bond with from_agent_id=shrimp."
+  short_description: "Redeem a one-time bind token and store long-lived agent token"
+  default_prompt: "Use $openclaw-bind-agent to redeem bind_token=<secret> as agent_id=crab and write token_output_file=/tmp/crab.token."
