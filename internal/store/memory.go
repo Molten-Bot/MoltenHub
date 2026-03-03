@@ -13,6 +13,7 @@ import (
 var (
 	ErrInvalidToken       = errors.New("invalid token")
 	ErrOrgNotFound        = errors.New("organization not found")
+	ErrOrgNameTaken       = errors.New("organization name already exists")
 	ErrHumanNotFound      = errors.New("human not found")
 	ErrMembershipNotFound = errors.New("membership not found")
 	ErrInviteNotFound     = errors.New("invite not found")
@@ -26,12 +27,16 @@ var (
 	ErrInvalidEdgeType    = errors.New("invalid edge type")
 	ErrSelfTrust          = errors.New("self trust not allowed")
 	ErrNoTrustPath        = errors.New("no trust path")
+	ErrBindNotFound       = errors.New("bind token not found")
+	ErrBindExpired        = errors.New("bind token expired")
+	ErrBindUsed           = errors.New("bind token already used")
 )
 
 type MemoryStore struct {
 	mu sync.RWMutex
 
-	orgs map[string]model.Organization
+	orgs      map[string]model.Organization
+	orgByName map[string]string
 
 	humans         map[string]model.Human
 	humanByAuthKey map[string]string
@@ -43,7 +48,12 @@ type MemoryStore struct {
 
 	agents        map[string]model.Agent
 	agentTokenIdx map[string]string
+	orgOwnedAgentNameIdx   map[string]string
+	humanOwnedAgentNameIdx map[string]string
 	queues        map[string][]model.Message
+
+	binds      map[string]model.BindToken
+	bindByHash map[string]string
 
 	orgTrusts      map[string]model.TrustEdge
 	orgTrustByPair map[string]string
@@ -58,6 +68,7 @@ type MemoryStore struct {
 func NewMemoryStore() *MemoryStore {
 	return &MemoryStore{
 		orgs:                make(map[string]model.Organization),
+		orgByName:           make(map[string]string),
 		humans:              make(map[string]model.Human),
 		humanByAuthKey:      make(map[string]string),
 		memberships:         make(map[string]model.Membership),
@@ -65,7 +76,11 @@ func NewMemoryStore() *MemoryStore {
 		invites:             make(map[string]model.Invite),
 		agents:              make(map[string]model.Agent),
 		agentTokenIdx:       make(map[string]string),
+		orgOwnedAgentNameIdx:   make(map[string]string),
+		humanOwnedAgentNameIdx: make(map[string]string),
 		queues:              make(map[string][]model.Message),
+		binds:               make(map[string]model.BindToken),
+		bindByHash:          make(map[string]string),
 		orgTrusts:           make(map[string]model.TrustEdge),
 		orgTrustByPair:      make(map[string]string),
 		agentTrusts:         make(map[string]model.TrustEdge),
@@ -75,7 +90,7 @@ func NewMemoryStore() *MemoryStore {
 	}
 }
 
-func (s *MemoryStore) UpsertHuman(provider, subject, email string, now time.Time, idFactory func() (string, error)) (model.Human, error) {
+func (s *MemoryStore) UpsertHuman(provider, subject, email string, emailVerified bool, now time.Time, idFactory func() (string, error)) (model.Human, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -84,8 +99,9 @@ func (s *MemoryStore) UpsertHuman(provider, subject, email string, now time.Time
 		h := s.humans[humanID]
 		if email != "" && !strings.EqualFold(h.Email, email) {
 			h.Email = email
-			s.humans[humanID] = h
 		}
+		h.EmailVerified = emailVerified
+		s.humans[humanID] = h
 		return h, nil
 	}
 
@@ -98,6 +114,7 @@ func (s *MemoryStore) UpsertHuman(provider, subject, email string, now time.Time
 		AuthProvider: provider,
 		AuthSubject:  subject,
 		Email:        email,
+		EmailVerified: emailVerified,
 		CreatedAt:    now,
 	}
 	s.humans[humanID] = h
@@ -113,6 +130,11 @@ func (s *MemoryStore) CreateOrg(name string, creatorHumanID string, orgID string
 		return model.Organization{}, model.Membership{}, ErrHumanNotFound
 	}
 
+	nameKey := strings.ToLower(strings.TrimSpace(name))
+	if existingOrgID, ok := s.orgByName[nameKey]; ok && existingOrgID != "" {
+		return model.Organization{}, model.Membership{}, ErrOrgNameTaken
+	}
+
 	org := model.Organization{
 		OrgID:     orgID,
 		Name:      name,
@@ -120,6 +142,7 @@ func (s *MemoryStore) CreateOrg(name string, creatorHumanID string, orgID string
 		CreatedBy: creatorHumanID,
 	}
 	s.orgs[org.OrgID] = org
+	s.orgByName[nameKey] = org.OrgID
 
 	memID := fmt.Sprintf("m-%s", orgID)
 	mem := model.Membership{
@@ -238,14 +261,14 @@ func (s *MemoryStore) AcceptInvite(inviteID, humanID, humanEmail string, now tim
 	return mem, nil
 }
 
-func (s *MemoryStore) ListOrgHumans(orgID, requesterHumanID string) ([]model.OrgHumanView, error) {
+func (s *MemoryStore) ListOrgHumans(orgID, requesterHumanID string, isSuperAdmin bool) ([]model.OrgHumanView, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
 	if _, ok := s.orgs[orgID]; !ok {
 		return nil, ErrOrgNotFound
 	}
-	if s.membershipRoleLocked(orgID, requesterHumanID) == "" {
+	if !isSuperAdmin && s.membershipRoleLocked(orgID, requesterHumanID) == "" {
 		return nil, ErrUnauthorizedRole
 	}
 
@@ -286,6 +309,15 @@ func (s *MemoryStore) RegisterAgent(orgID, agentID string, ownerHumanID *string,
 		if s.membershipRoleLocked(orgID, *ownerHumanID) == "" {
 			return model.Agent{}, ErrMembershipNotFound
 		}
+		key := humanOwnedAgentNameKey(orgID, *ownerHumanID, agentID)
+		if _, exists := s.humanOwnedAgentNameIdx[key]; exists {
+			return model.Agent{}, ErrAgentExists
+		}
+	} else {
+		key := orgOwnedAgentNameKey(orgID, agentID)
+		if _, exists := s.orgOwnedAgentNameIdx[key]; exists {
+			return model.Agent{}, ErrAgentExists
+		}
 	}
 
 	agent := model.Agent{
@@ -299,9 +331,109 @@ func (s *MemoryStore) RegisterAgent(orgID, agentID string, ownerHumanID *string,
 	}
 	s.agents[agentID] = agent
 	s.agentTokenIdx[tokenHash] = agentID
+	if ownerHumanID != nil {
+		s.humanOwnedAgentNameIdx[humanOwnedAgentNameKey(orgID, *ownerHumanID, agentID)] = agentID
+	} else {
+		s.orgOwnedAgentNameIdx[orgOwnedAgentNameKey(orgID, agentID)] = agentID
+	}
 	s.queues[agentID] = s.queues[agentID]
 	s.appendAuditLocked(orgID, actorHumanID, "agent", "register", agent.AgentID, map[string]any{
 		"owner_human_id": ownerHumanID,
+	}, now)
+	return agent, nil
+}
+
+func (s *MemoryStore) CreateBindToken(orgID string, ownerHumanID *string, actorHumanID, bindID, bindTokenHash string, expiresAt, now time.Time) (model.BindToken, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if _, ok := s.orgs[orgID]; !ok {
+		return model.BindToken{}, ErrOrgNotFound
+	}
+	if !hasRoleAtLeast(s.membershipRoleLocked(orgID, actorHumanID), model.RoleMember) {
+		return model.BindToken{}, ErrUnauthorizedRole
+	}
+	if ownerHumanID != nil && s.membershipRoleLocked(orgID, *ownerHumanID) == "" {
+		return model.BindToken{}, ErrMembershipNotFound
+	}
+	if _, exists := s.bindByHash[bindTokenHash]; exists {
+		return model.BindToken{}, ErrInvalidToken
+	}
+
+	bind := model.BindToken{
+		BindID:       bindID,
+		OrgID:        orgID,
+		OwnerHumanID: ownerHumanID,
+		TokenHash:    bindTokenHash,
+		CreatedBy:    actorHumanID,
+		CreatedAt:    now,
+		ExpiresAt:    expiresAt,
+	}
+	s.binds[bind.BindID] = bind
+	s.bindByHash[bindTokenHash] = bind.BindID
+	s.appendAuditLocked(orgID, actorHumanID, "agent_bind", "create", bind.BindID, map[string]any{
+		"owner_human_id": ownerHumanID,
+		"expires_at":     expiresAt,
+	}, now)
+	return bind, nil
+}
+
+func (s *MemoryStore) RedeemBindToken(bindTokenHash, agentID, agentTokenHash string, now time.Time) (model.Agent, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	bindID, ok := s.bindByHash[bindTokenHash]
+	if !ok {
+		return model.Agent{}, ErrBindNotFound
+	}
+	bind, ok := s.binds[bindID]
+	if !ok {
+		return model.Agent{}, ErrBindNotFound
+	}
+	if bind.UsedAt != nil {
+		return model.Agent{}, ErrBindUsed
+	}
+	if now.After(bind.ExpiresAt) {
+		return model.Agent{}, ErrBindExpired
+	}
+	if _, exists := s.agents[agentID]; exists {
+		return model.Agent{}, ErrAgentExists
+	}
+	if bind.OwnerHumanID != nil {
+		if s.membershipRoleLocked(bind.OrgID, *bind.OwnerHumanID) == "" {
+			return model.Agent{}, ErrMembershipNotFound
+		}
+		if _, exists := s.humanOwnedAgentNameIdx[humanOwnedAgentNameKey(bind.OrgID, *bind.OwnerHumanID, agentID)]; exists {
+			return model.Agent{}, ErrAgentExists
+		}
+	} else {
+		if _, exists := s.orgOwnedAgentNameIdx[orgOwnedAgentNameKey(bind.OrgID, agentID)]; exists {
+			return model.Agent{}, ErrAgentExists
+		}
+	}
+
+	agent := model.Agent{
+		AgentID:      agentID,
+		OrgID:        bind.OrgID,
+		OwnerHumanID: bind.OwnerHumanID,
+		TokenHash:    agentTokenHash,
+		Status:       model.StatusActive,
+		CreatedBy:    bind.CreatedBy,
+		CreatedAt:    now,
+	}
+	s.agents[agent.AgentID] = agent
+	s.agentTokenIdx[agentTokenHash] = agent.AgentID
+	if bind.OwnerHumanID != nil {
+		s.humanOwnedAgentNameIdx[humanOwnedAgentNameKey(bind.OrgID, *bind.OwnerHumanID, agent.AgentID)] = agent.AgentID
+	} else {
+		s.orgOwnedAgentNameIdx[orgOwnedAgentNameKey(bind.OrgID, agent.AgentID)] = agent.AgentID
+	}
+	s.queues[agent.AgentID] = s.queues[agent.AgentID]
+	used := now
+	bind.UsedAt = &used
+	s.binds[bind.BindID] = bind
+	s.appendAuditLocked(bind.OrgID, bind.CreatedBy, "agent_bind", "redeem", bind.BindID, map[string]any{
+		"agent_id": agent.AgentID,
 	}, now)
 	return agent, nil
 }
@@ -344,6 +476,11 @@ func (s *MemoryStore) RevokeAgent(agentID, actorHumanID string, now time.Time) e
 		return nil
 	}
 	delete(s.agentTokenIdx, agent.TokenHash)
+	if agent.OwnerHumanID != nil {
+		delete(s.humanOwnedAgentNameIdx, humanOwnedAgentNameKey(agent.OrgID, *agent.OwnerHumanID, agent.AgentID))
+	} else {
+		delete(s.orgOwnedAgentNameIdx, orgOwnedAgentNameKey(agent.OrgID, agent.AgentID))
+	}
 	agent.Status = model.StatusRevoked
 	revokedAt := now
 	agent.RevokedAt = &revokedAt
@@ -429,14 +566,14 @@ func (s *MemoryStore) RevokeAgentTrust(edgeID, actorHumanID string, now time.Tim
 	return s.revokeTrustLocked("agent", edgeID, actorHumanID, now)
 }
 
-func (s *MemoryStore) ListOrgAgents(orgID, requesterHumanID string) ([]model.Agent, error) {
+func (s *MemoryStore) ListOrgAgents(orgID, requesterHumanID string, isSuperAdmin bool) ([]model.Agent, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
 	if _, ok := s.orgs[orgID]; !ok {
 		return nil, ErrOrgNotFound
 	}
-	if s.membershipRoleLocked(orgID, requesterHumanID) == "" {
+	if !isSuperAdmin && s.membershipRoleLocked(orgID, requesterHumanID) == "" {
 		return nil, ErrUnauthorizedRole
 	}
 	out := make([]model.Agent, 0)
@@ -448,14 +585,14 @@ func (s *MemoryStore) ListOrgAgents(orgID, requesterHumanID string) ([]model.Age
 	return out, nil
 }
 
-func (s *MemoryStore) ListOrgTrustGraph(orgID, requesterHumanID string) ([]model.TrustEdge, []model.TrustEdge, error) {
+func (s *MemoryStore) ListOrgTrustGraph(orgID, requesterHumanID string, isSuperAdmin bool) ([]model.TrustEdge, []model.TrustEdge, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
 	if _, ok := s.orgs[orgID]; !ok {
 		return nil, nil, ErrOrgNotFound
 	}
-	if s.membershipRoleLocked(orgID, requesterHumanID) == "" {
+	if !isSuperAdmin && s.membershipRoleLocked(orgID, requesterHumanID) == "" {
 		return nil, nil, ErrUnauthorizedRole
 	}
 
@@ -479,14 +616,14 @@ func (s *MemoryStore) ListOrgTrustGraph(orgID, requesterHumanID string) ([]model
 	return orgEdges, agentEdges, nil
 }
 
-func (s *MemoryStore) ListAudit(orgID, requesterHumanID string) ([]model.AuditEvent, error) {
+func (s *MemoryStore) ListAudit(orgID, requesterHumanID string, isSuperAdmin bool) ([]model.AuditEvent, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
 	if _, ok := s.orgs[orgID]; !ok {
 		return nil, ErrOrgNotFound
 	}
-	if s.membershipRoleLocked(orgID, requesterHumanID) == "" {
+	if !isSuperAdmin && s.membershipRoleLocked(orgID, requesterHumanID) == "" {
 		return nil, ErrUnauthorizedRole
 	}
 	events := s.auditByOrg[orgID]
@@ -495,17 +632,56 @@ func (s *MemoryStore) ListAudit(orgID, requesterHumanID string) ([]model.AuditEv
 	return out, nil
 }
 
-func (s *MemoryStore) GetOrgStats(orgID, requesterHumanID string) (model.OrgStats, error) {
+func (s *MemoryStore) GetOrgStats(orgID, requesterHumanID string, isSuperAdmin bool) (model.OrgStats, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	if _, ok := s.orgs[orgID]; !ok {
 		return model.OrgStats{}, ErrOrgNotFound
 	}
-	if s.membershipRoleLocked(orgID, requesterHumanID) == "" {
+	if !isSuperAdmin && s.membershipRoleLocked(orgID, requesterHumanID) == "" {
 		return model.OrgStats{}, ErrUnauthorizedRole
 	}
 	stats := s.statsByOrg[orgID]
 	return stats, nil
+}
+
+func (s *MemoryStore) AdminSnapshot() model.AdminSnapshot {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	snapshot := model.AdminSnapshot{
+		Organizations: make([]model.Organization, 0, len(s.orgs)),
+		Humans:        make([]model.Human, 0, len(s.humans)),
+		Memberships:   make([]model.Membership, 0, len(s.memberships)),
+		Agents:        make([]model.Agent, 0, len(s.agents)),
+		OrgTrusts:     make([]model.TrustEdge, 0, len(s.orgTrusts)),
+		AgentTrusts:   make([]model.TrustEdge, 0, len(s.agentTrusts)),
+		Stats:         make([]model.OrgStats, 0, len(s.statsByOrg)),
+	}
+
+	for _, v := range s.orgs {
+		snapshot.Organizations = append(snapshot.Organizations, v)
+	}
+	for _, v := range s.humans {
+		snapshot.Humans = append(snapshot.Humans, v)
+	}
+	for _, v := range s.memberships {
+		snapshot.Memberships = append(snapshot.Memberships, v)
+	}
+	for _, v := range s.agents {
+		snapshot.Agents = append(snapshot.Agents, v)
+	}
+	for _, v := range s.orgTrusts {
+		snapshot.OrgTrusts = append(snapshot.OrgTrusts, v)
+	}
+	for _, v := range s.agentTrusts {
+		snapshot.AgentTrusts = append(snapshot.AgentTrusts, v)
+	}
+	for _, v := range s.statsByOrg {
+		snapshot.Stats = append(snapshot.Stats, v)
+	}
+
+	return snapshot
 }
 
 func (s *MemoryStore) CanPublish(senderAgentID, receiverAgentID string) (string, string, error) {
@@ -886,6 +1062,14 @@ func authKey(provider, subject string) string {
 
 func orgHumanKey(orgID, humanID string) string {
 	return orgID + "\x00" + humanID
+}
+
+func orgOwnedAgentNameKey(orgID, agentID string) string {
+	return orgID + "\x00" + strings.ToLower(agentID)
+}
+
+func humanOwnedAgentNameKey(orgID, humanID, agentID string) string {
+	return orgID + "\x00" + humanID + "\x00" + strings.ToLower(agentID)
 }
 
 func canonicalPair(a, b string) (string, string) {

@@ -19,9 +19,10 @@ var (
 )
 
 type HumanIdentity struct {
-	Provider string
-	Subject  string
-	Email    string
+	Provider      string
+	Subject       string
+	Email         string
+	EmailVerified bool
 }
 
 type HumanAuthProvider interface {
@@ -59,9 +60,10 @@ func (p *DevHumanAuthProvider) Authenticate(r *http.Request) (HumanIdentity, err
 		email = id + "@local.dev"
 	}
 	return HumanIdentity{
-		Provider: p.Name(),
-		Subject:  id,
-		Email:    email,
+		Provider:      p.Name(),
+		Subject:       id,
+		Email:         email,
+		EmailVerified: true,
 	}, nil
 }
 
@@ -92,6 +94,7 @@ func (p *SupabaseAuthProvider) Authenticate(r *http.Request) (HumanIdentity, err
 
 	sub, _ := claims["sub"].(string)
 	email, _ := claims["email"].(string)
+	emailVerified, _ := claims["email_verified"].(bool)
 	if strings.TrimSpace(sub) == "" {
 		return HumanIdentity{}, ErrUnauthorizedHuman
 	}
@@ -104,9 +107,10 @@ func (p *SupabaseAuthProvider) Authenticate(r *http.Request) (HumanIdentity, err
 	}
 
 	return HumanIdentity{
-		Provider: p.Name(),
-		Subject:  sub,
-		Email:    strings.ToLower(strings.TrimSpace(email)),
+		Provider:      p.Name(),
+		Subject:       sub,
+		Email:         strings.ToLower(strings.TrimSpace(email)),
+		EmailVerified: emailVerified,
 	}, nil
 }
 

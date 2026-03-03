@@ -30,17 +30,29 @@ type Handler struct {
 	idFactory       func() (string, error)
 	supabaseURL     string
 	supabaseAnonKey string
+	superAdminDomains map[string]struct{}
+	bindTokenTTL      time.Duration
 }
 
-func NewHandler(st *store.MemoryStore, waiters *longpoll.Waiters, humanAuth auth.HumanAuthProvider, supabaseURL, supabaseAnonKey string) *Handler {
+type humanActor struct {
+	Human        model.Human
+	IsSuperAdmin bool
+}
+
+func NewHandler(st *store.MemoryStore, waiters *longpoll.Waiters, humanAuth auth.HumanAuthProvider, supabaseURL, supabaseAnonKey, superAdminDomainsCSV string, bindTokenTTL time.Duration) *Handler {
+	if bindTokenTTL <= 0 {
+		bindTokenTTL = 15 * time.Minute
+	}
 	return &Handler{
-		store:           st,
-		waiters:         waiters,
-		humanAuth:       humanAuth,
-		now:             time.Now,
-		idFactory:       newUUIDv7,
-		supabaseURL:     strings.TrimSpace(supabaseURL),
-		supabaseAnonKey: strings.TrimSpace(supabaseAnonKey),
+		store:             st,
+		waiters:           waiters,
+		humanAuth:         humanAuth,
+		now:               time.Now,
+		idFactory:         newUUIDv7,
+		supabaseURL:       strings.TrimSpace(supabaseURL),
+		supabaseAnonKey:   strings.TrimSpace(supabaseAnonKey),
+		superAdminDomains: parseDomains(superAdminDomainsCSV),
+		bindTokenTTL:      bindTokenTTL,
 	}
 }
 
@@ -52,9 +64,12 @@ func NewRouter(handler *Handler) http.Handler {
 	mux.HandleFunc("/v1/ui/config", handler.handleUIConfig)
 	mux.HandleFunc("/v1/me", handler.handleMe)
 	mux.HandleFunc("/v1/me/orgs", handler.handleMyOrgs)
+	mux.HandleFunc("/v1/admin/snapshot", handler.handleAdminSnapshot)
 	mux.HandleFunc("/v1/orgs", handler.handleOrgs)
 	mux.HandleFunc("/v1/orgs/", handler.handleOrgSubroutes)
 	mux.HandleFunc("/v1/org-invites/", handler.handleOrgInvites)
+	mux.HandleFunc("/v1/agents/bind-tokens", handler.handleCreateBindToken)
+	mux.HandleFunc("/v1/agents/bind/redeem", handler.handleRedeemBindToken)
 	mux.HandleFunc("/v1/agents/register", handler.handleRegisterAgent)
 	mux.HandleFunc("/v1/agents/", handler.handleAgentsSubroutes)
 	mux.HandleFunc("/v1/org-trusts", handler.handleOrgTrusts)
@@ -118,12 +133,19 @@ func parsePullTimeout(r *http.Request) (time.Duration, error) {
 	return time.Duration(ms) * time.Millisecond, nil
 }
 
-func (h *Handler) authenticateHuman(r *http.Request) (model.Human, error) {
+func (h *Handler) authenticateHuman(r *http.Request) (humanActor, error) {
 	identity, err := h.humanAuth.Authenticate(r)
 	if err != nil {
-		return model.Human{}, err
+		return humanActor{}, err
 	}
-	return h.store.UpsertHuman(identity.Provider, identity.Subject, identity.Email, h.now().UTC(), h.idFactory)
+	human, err := h.store.UpsertHuman(identity.Provider, identity.Subject, identity.Email, identity.EmailVerified, h.now().UTC(), h.idFactory)
+	if err != nil {
+		return humanActor{}, err
+	}
+	return humanActor{
+		Human:        human,
+		IsSuperAdmin: h.isSuperAdmin(identity),
+	}, nil
 }
 
 func (h *Handler) authenticateAgent(r *http.Request) (string, error) {
@@ -141,4 +163,39 @@ func splitPath(path string) []string {
 		return nil
 	}
 	return strings.Split(trimmed, "/")
+}
+
+func parseDomains(csv string) map[string]struct{} {
+	out := make(map[string]struct{})
+	for _, raw := range strings.Split(csv, ",") {
+		d := strings.ToLower(strings.TrimSpace(raw))
+		if d == "" {
+			continue
+		}
+		if strings.HasPrefix(d, "@") {
+			d = strings.TrimPrefix(d, "@")
+		}
+		out[d] = struct{}{}
+	}
+	return out
+}
+
+func (h *Handler) isSuperAdmin(identity auth.HumanIdentity) bool {
+	if !identity.EmailVerified {
+		return false
+	}
+	parts := strings.Split(strings.ToLower(strings.TrimSpace(identity.Email)), "@")
+	if len(parts) != 2 {
+		return false
+	}
+	_, ok := h.superAdminDomains[parts[1]]
+	return ok
+}
+
+func (h *Handler) denySuperAdminWrite(w http.ResponseWriter, actor humanActor) bool {
+	if actor.IsSuperAdmin {
+		writeError(w, http.StatusForbidden, "super_admin_read_only", "super admin is read-only")
+		return true
+	}
+	return false
 }

@@ -26,6 +26,7 @@ type Human struct {
 	AuthProvider string    `json:"auth_provider"`
 	AuthSubject  string    `json:"auth_subject"`
 	Email        string    `json:"email"`
+	EmailVerified bool     `json:"email_verified"`
 	CreatedAt    time.Time `json:"created_at"`
 }
 
@@ -58,6 +59,17 @@ type Agent struct {
 	CreatedBy    string     `json:"created_by"`
 	CreatedAt    time.Time  `json:"created_at"`
 	RevokedAt    *time.Time `json:"revoked_at,omitempty"`
+}
+
+type BindToken struct {
+	BindID       string     `json:"bind_id"`
+	OrgID        string     `json:"org_id"`
+	OwnerHumanID *string    `json:"owner_human_id,omitempty"`
+	TokenHash    string     `json:"-"`
+	CreatedBy    string     `json:"created_by"`
+	CreatedAt    time.Time  `json:"created_at"`
+	ExpiresAt    time.Time  `json:"expires_at"`
+	UsedAt       *time.Time `json:"used_at,omitempty"`
 }
 
 type TrustEdge struct {
@@ -113,4 +125,14 @@ type AuditEvent struct {
 type MembershipWithOrg struct {
 	Membership Membership   `json:"membership"`
 	Org        Organization `json:"org"`
+}
+
+type AdminSnapshot struct {
+	Organizations []Organization `json:"organizations"`
+	Humans        []Human        `json:"humans"`
+	Memberships   []Membership   `json:"memberships"`
+	Agents        []Agent        `json:"agents"`
+	OrgTrusts     []TrustEdge    `json:"org_trusts"`
+	AgentTrusts   []TrustEdge    `json:"agent_trusts"`
+	Stats         []OrgStats     `json:"stats"`
 }
