@@ -2,6 +2,11 @@ name: deploy-prod
 
 on:
   workflow_dispatch:
+    inputs:
+      source_sha:
+        description: "Commit SHA to promote from vnext tag (vnext-<sha>). Defaults to current main commit."
+        required: false
+        type: string
 
 concurrency:
   group: deploy-prod
@@ -38,12 +43,13 @@ jobs:
       - name: Run tests
         run: go test ./...
 
-  build-and-push:
+  promote-and-tag:
     runs-on: ubuntu-latest
     needs:
       - test
     outputs:
       image_ref: ${{ steps.image.outputs.image_ref }}
+      promoted_sha: ${{ steps.resolve_source.outputs.promote_sha }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -76,23 +82,57 @@ jobs:
       - name: Setup Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Build and push image
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          push: true
-          tags: |
-            ${{ steps.dockerhub.outputs.image_repo }}:prod-${{ github.sha }}
-            ${{ steps.dockerhub.outputs.image_repo }}:latest
+      - name: Resolve source vnext image
+        id: resolve_source
+        env:
+          IMAGE_REPO: ${{ steps.dockerhub.outputs.image_repo }}
+          INPUT_SOURCE_SHA: ${{ inputs.source_sha }}
+        run: |
+          promote_sha="$INPUT_SOURCE_SHA"
+          if [ -z "$promote_sha" ]; then
+            promote_sha="$GITHUB_SHA"
+          fi
+
+          source_tag_ref="${IMAGE_REPO}:vnext-${promote_sha}"
+          inspect_output="$(docker buildx imagetools inspect "$source_tag_ref" || true)"
+          source_digest="$(printf '%s\n' "$inspect_output" | awk '/^Digest:/ {print $2; exit}')"
+
+          if [ -z "$source_digest" ]; then
+            echo "ERROR: Unable to resolve digest for source image: $source_tag_ref" >&2
+            echo "$inspect_output" >&2
+            exit 1
+          fi
+
+          echo "promote_sha=$promote_sha" >> "$GITHUB_OUTPUT"
+          echo "source_digest=$source_digest" >> "$GITHUB_OUTPUT"
+          echo "source_ref=${IMAGE_REPO}@${source_digest}" >> "$GITHUB_OUTPUT"
+
+      - name: Promote vnext digest to prod tags
+        env:
+          IMAGE_REPO: ${{ steps.dockerhub.outputs.image_repo }}
+          PROMOTE_SHA: ${{ steps.resolve_source.outputs.promote_sha }}
+          SOURCE_DIGEST: ${{ steps.resolve_source.outputs.source_digest }}
+          SOURCE_REF: ${{ steps.resolve_source.outputs.source_ref }}
+        run: |
+          docker buildx imagetools create \
+            -t "${IMAGE_REPO}:prod-${PROMOTE_SHA}" \
+            -t "${IMAGE_REPO}:latest" \
+            "${SOURCE_REF}"
+
+          promoted_digest="$(docker buildx imagetools inspect "${IMAGE_REPO}:prod-${PROMOTE_SHA}" | awk '/^Digest:/ {print $2; exit}')"
+          if [ "$promoted_digest" != "$SOURCE_DIGEST" ]; then
+            echo "ERROR: promoted digest mismatch. expected=$SOURCE_DIGEST got=$promoted_digest" >&2
+            exit 1
+          fi
 
       - name: Export image reference
         id: image
-        run: echo "image_ref=${{ steps.dockerhub.outputs.image_repo }}:prod-${GITHUB_SHA}" >> "$GITHUB_OUTPUT"
+        run: echo "image_ref=${{ steps.dockerhub.outputs.image_repo }}:prod-${{ steps.resolve_source.outputs.promote_sha }}" >> "$GITHUB_OUTPUT"
 
   deploy:
     runs-on: ubuntu-latest
     needs:
-      - build-and-push
+      - promote-and-tag
     environment: prod
     steps:
       - name: Checkout
@@ -120,8 +160,8 @@ jobs:
           scripts/release/trigger_deploy_hook.sh \
             "${DEPLOY_HOOK_URL}" \
             "prod" \
-            "${{ needs.build-and-push.outputs.image_ref }}" \
-            "${{ github.sha }}"
+            "${{ needs.promote-and-tag.outputs.image_ref }}" \
+            "${{ needs.promote-and-tag.outputs.promoted_sha }}"
 
       - name: Optional Prod health check
         if: ${{ steps.deploy_hook.outputs.enabled == 'true' && vars.HEALTHCHECK_URL != '' }}

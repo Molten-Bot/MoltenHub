@@ -177,9 +177,10 @@ No domain names are hardcoded in application code. Domain/app targeting is confi
   - Triggers VNext deploy hook.
 - `.github/workflows/deploy-prod.yml`
   - Manual only (`workflow_dispatch`), guarded to `main`.
-  - Builds and pushes image tags:
+  - Promotes existing `vnext-<sha>` image digest (no rebuild) to:
     - `docker.io/<dockerhub-username>/statocyst:prod-<sha>`
     - `docker.io/<dockerhub-username>/statocyst:latest`
+  - Optional input: `source_sha` to promote a specific `vnext-<sha>` image.
   - Triggers Prod deploy hook.
 
 ### Docker Hub Credentials (for build/push)
