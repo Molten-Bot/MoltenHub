@@ -3,6 +3,7 @@ package store
 import (
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -259,6 +260,61 @@ func (s *MemoryStore) AcceptInvite(inviteID, humanID, humanEmail string, now tim
 	s.invites[inviteID] = invite
 	s.appendAuditLocked(invite.OrgID, humanID, "invite", "accept", inviteID, nil, now)
 	return mem, nil
+}
+
+func (s *MemoryStore) ListInvitesForHuman(humanID, humanEmail string, isSuperAdmin bool) []model.InviteWithOrg {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	email := strings.ToLower(strings.TrimSpace(humanEmail))
+	out := make([]model.InviteWithOrg, 0)
+	for _, inv := range s.invites {
+		if !isSuperAdmin && email != "" && !strings.EqualFold(inv.Email, email) {
+			continue
+		}
+		org, ok := s.orgs[inv.OrgID]
+		if !ok {
+			continue
+		}
+		out = append(out, model.InviteWithOrg{
+			Invite: inv,
+			Org:    org,
+		})
+	}
+	sort.Slice(out, func(i, j int) bool {
+		return out[i].Invite.CreatedAt.After(out[j].Invite.CreatedAt)
+	})
+	return out
+}
+
+func (s *MemoryStore) RevokeInvite(inviteID, actorHumanID, actorEmail string, isSuperAdmin bool, now time.Time) (model.Invite, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	invite, ok := s.invites[inviteID]
+	if !ok {
+		return model.Invite{}, ErrInviteNotFound
+	}
+
+	allowed := strings.EqualFold(invite.Email, strings.TrimSpace(actorEmail))
+	if !allowed {
+		role := s.membershipRoleLocked(invite.OrgID, actorHumanID)
+		allowed = hasRoleAtLeast(role, model.RoleAdmin)
+	}
+	if isSuperAdmin {
+		allowed = true
+	}
+	if !allowed {
+		return model.Invite{}, ErrUnauthorizedRole
+	}
+
+	if invite.Status == model.StatusRevoked {
+		return invite, nil
+	}
+	invite.Status = model.StatusRevoked
+	s.invites[inviteID] = invite
+	s.appendAuditLocked(invite.OrgID, actorHumanID, "invite", "revoke", inviteID, nil, now)
+	return invite, nil
 }
 
 func (s *MemoryStore) ListOrgHumans(orgID, requesterHumanID string, isSuperAdmin bool) ([]model.OrgHumanView, error) {
