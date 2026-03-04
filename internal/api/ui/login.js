@@ -98,15 +98,6 @@ async function startGoogleLogin() {
 }
 
 async function init() {
-  $("btnContinue").onclick = () => {
-    window.location.assign("/profile");
-  };
-
-  $("btnClear").onclick = () => {
-    clearToken();
-    setStatus("Saved token cleared.");
-  };
-
   $("loginBtn").onclick = async () => {
     if (oauthEnabled) {
       await startGoogleLogin();

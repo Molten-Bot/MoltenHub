@@ -55,11 +55,6 @@
         font-weight: 700;
         cursor: pointer;
       }
-      button.secondary {
-        margin-top: 8px;
-        background: #fff;
-        color: var(--ink);
-      }
       .status {
         margin-top: 12px;
         border: 1px solid var(--line);
@@ -72,12 +67,6 @@
         background: var(--warn-bg);
         color: var(--warn-ink);
       }
-      .mono {
-        font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-      }
-      a {
-        color: var(--accent);
-      }
     </style>
   </head>
   <body>
@@ -86,14 +75,8 @@
       <p id="configSummary">Loading auth config...</p>
 
       <button id="loginBtn" class="primary" type="button">Login</button>
-      <button id="btnContinue" class="secondary" type="button">Continue to Profile</button>
-      <button id="btnClear" class="secondary" type="button">Clear Saved Token</button>
 
       <div id="status" class="status" role="status"></div>
-
-      <p style="margin-top: 12px">
-        Start here: <a href="/profile" class="mono">/profile</a>
-      </p>
     </main>
 
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
