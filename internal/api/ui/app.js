@@ -1,8 +1,15 @@
 const $ = (id) => document.getElementById(id);
+
 const TOKEN_KEY = "statocyst_access_token";
+const DEV_ID_KEY = "statocyst_dev_human_id";
+const DEV_EMAIL_KEY = "statocyst_dev_human_email";
+
+function readStorage(key) {
+  return localStorage.getItem(key) || "";
+}
 
 function loadSavedToken() {
-  return localStorage.getItem(TOKEN_KEY) || "";
+  return readStorage(TOKEN_KEY);
 }
 
 function saveToken(token) {
@@ -16,16 +23,17 @@ function clearToken() {
 
 const headers = () => {
   const h = { "Content-Type": "application/json" };
-  const token = $("authToken").value.trim() || loadSavedToken();
+  const token = ($("authToken")?.value || loadSavedToken()).trim();
   if (token) h.Authorization = `Bearer ${token}`;
-  const humanId = $("humanId").value.trim();
-  const humanEmail = $("humanEmail").value.trim();
+
+  const humanId = ($("humanId")?.value || readStorage(DEV_ID_KEY)).trim();
+  const humanEmail = ($("humanEmail")?.value || readStorage(DEV_EMAIL_KEY)).trim();
   if (humanId) h["X-Human-Id"] = humanId;
   if (humanEmail) h["X-Human-Email"] = humanEmail;
   return h;
 };
 
-const selectedOrg = () => $("orgSelect").value.trim();
+const selectedOrg = () => ($("orgSelect")?.value || "").trim();
 
 async function req(path, method = "GET", body = null) {
   const res = await fetch(path, {
@@ -42,6 +50,7 @@ async function req(path, method = "GET", body = null) {
 }
 
 function out(el, obj) {
+  if (!$(el)) return;
   $(el).textContent = JSON.stringify(obj, null, 2);
 }
 
@@ -49,6 +58,7 @@ async function listOrgs() {
   const r = await req("/v1/me/orgs");
   out("orgOut", r);
   const select = $("orgSelect");
+  if (!select) return;
   select.innerHTML = "";
   if (r.status === 200 && Array.isArray(r.data.memberships)) {
     for (const m of r.data.memberships) {
@@ -60,94 +70,81 @@ async function listOrgs() {
   }
 }
 
-$("btnMe").onclick = async () => out("meOut", await req("/v1/me"));
-$("btnSaveToken").onclick = () => {
-  saveToken($("authToken").value.trim());
-  out("meOut", { status: "ok", message: "access token saved" });
-};
-$("btnClearToken").onclick = () => {
-  $("authToken").value = "";
-  clearToken();
-  out("meOut", { status: "ok", message: "access token cleared" });
-};
-$("btnGoLogin").onclick = () => {
-  window.location.assign("/");
-};
-$("btnCreateOrg").onclick = async () =>
-  out("orgOut", await req("/v1/orgs", "POST", { name: $("orgName").value }));
-$("btnListOrgs").onclick = listOrgs;
+function showDomainsAccessBlocked() {
+  const main = document.querySelector("main");
+  if (!main) return;
+  main.innerHTML =
+    '<div class="banner"><strong>Domains (Legacy)</strong> is super-admin view-only. Access denied for this account.</div>';
+}
 
-$("btnInvite").onclick = async () =>
-  out(
-    "inviteOut",
-    await req(`/v1/orgs/${selectedOrg()}/invites`, "POST", {
-      email: $("inviteEmail").value,
-      role: $("inviteRole").value,
-    })
-  );
-$("btnAcceptInvite").onclick = async () =>
-  out("inviteOut", await req(`/v1/org-invites/${$("inviteId").value}/accept`, "POST"));
-$("btnOrgHumans").onclick = async () =>
-  out("inviteOut", await req(`/v1/orgs/${selectedOrg()}/humans`));
+function disableMutatingActions() {
+  const mutatingIDs = [
+    "btnCreateOrg",
+    "btnInvite",
+    "btnAcceptInvite",
+    "btnRegisterAgent",
+    "btnCreateBindToken",
+    "btnRotateAgent",
+    "btnRevokeAgent",
+    "btnReqOrgTrust",
+    "btnApproveOrgTrust",
+    "btnBlockOrgTrust",
+    "btnRevokeOrgTrust",
+    "btnReqAgentTrust",
+    "btnApproveAgentTrust",
+    "btnBlockAgentTrust",
+    "btnRevokeAgentTrust",
+  ];
+  for (const id of mutatingIDs) {
+    const btn = $(id);
+    if (!btn) continue;
+    btn.disabled = true;
+    btn.title = "Disabled: legacy page is view-only";
+  }
+}
 
-$("btnRegisterAgent").onclick = async () => {
-  const owner = $("ownerHumanId").value.trim();
-  const payload = { org_id: selectedOrg(), agent_id: $("agentId").value };
-  if (owner) payload.owner_human_id = owner;
-  out("agentOut", await req("/v1/agents/register", "POST", payload));
-};
-$("btnCreateBindToken").onclick = async () => {
-  const owner = $("ownerHumanId").value.trim();
-  const payload = { org_id: selectedOrg() };
-  if (owner) payload.owner_human_id = owner;
-  out("bindOut", await req("/v1/agents/bind-tokens", "POST", payload));
-};
-$("btnRotateAgent").onclick = async () =>
-  out("agentOut", await req(`/v1/agents/${$("rotateAgentId").value}/rotate-token`, "POST"));
-$("btnRevokeAgent").onclick = async () =>
-  out("agentOut", await req(`/v1/agents/${$("rotateAgentId").value}`, "DELETE"));
-$("btnListAgents").onclick = async () =>
-  out("agentOut", await req(`/v1/orgs/${selectedOrg()}/agents`));
+function bindReadActions() {
+  $("btnMe").onclick = async () => out("meOut", await req("/v1/me"));
+  $("btnSaveToken").onclick = () => {
+    saveToken($("authToken").value.trim());
+    out("meOut", { status: "ok", message: "access token saved" });
+  };
+  $("btnClearToken").onclick = () => {
+    $("authToken").value = "";
+    clearToken();
+    out("meOut", { status: "ok", message: "access token cleared" });
+  };
+  $("btnGoLogin").onclick = () => {
+    window.location.assign("/");
+  };
+  $("btnListOrgs").onclick = listOrgs;
 
-$("btnReqOrgTrust").onclick = async () =>
-  out(
-    "orgTrustOut",
-    await req("/v1/org-trusts", "POST", {
-      org_id: selectedOrg(),
-      peer_org_id: $("peerOrgId").value,
-    })
-  );
-$("btnApproveOrgTrust").onclick = async () =>
-  out("orgTrustOut", await req(`/v1/org-trusts/${$("orgTrustId").value}/approve`, "POST"));
-$("btnBlockOrgTrust").onclick = async () =>
-  out("orgTrustOut", await req(`/v1/org-trusts/${$("orgTrustId").value}/block`, "POST"));
-$("btnRevokeOrgTrust").onclick = async () =>
-  out("orgTrustOut", await req(`/v1/org-trusts/${$("orgTrustId").value}`, "DELETE"));
+  $("btnOrgHumans").onclick = async () => out("inviteOut", await req(`/v1/orgs/${selectedOrg()}/humans`));
+  $("btnListAgents").onclick = async () => out("agentOut", await req(`/v1/orgs/${selectedOrg()}/agents`));
 
-$("btnReqAgentTrust").onclick = async () =>
-  out(
-    "agentTrustOut",
-    await req("/v1/agent-trusts", "POST", {
-      org_id: selectedOrg(),
-      agent_id: $("trustAgentId").value,
-      peer_agent_id: $("trustPeerAgentId").value,
-    })
-  );
-$("btnApproveAgentTrust").onclick = async () =>
-  out("agentTrustOut", await req(`/v1/agent-trusts/${$("agentTrustId").value}/approve`, "POST"));
-$("btnBlockAgentTrust").onclick = async () =>
-  out("agentTrustOut", await req(`/v1/agent-trusts/${$("agentTrustId").value}/block`, "POST"));
-$("btnRevokeAgentTrust").onclick = async () =>
-  out("agentTrustOut", await req(`/v1/agent-trusts/${$("agentTrustId").value}`, "DELETE"));
+  $("btnGraph").onclick = async () => out("graphOut", await req(`/v1/orgs/${selectedOrg()}/trust-graph`));
+  $("btnAudit").onclick = async () => out("graphOut", await req(`/v1/orgs/${selectedOrg()}/audit`));
+  $("btnStats").onclick = async () => out("graphOut", await req(`/v1/orgs/${selectedOrg()}/stats`));
+  $("btnAdminSnapshot").onclick = async () => out("graphOut", await req("/v1/admin/snapshot"));
+}
 
-$("btnGraph").onclick = async () =>
-  out("graphOut", await req(`/v1/orgs/${selectedOrg()}/trust-graph`));
-$("btnAudit").onclick = async () =>
-  out("graphOut", await req(`/v1/orgs/${selectedOrg()}/audit`));
-$("btnStats").onclick = async () =>
-  out("graphOut", await req(`/v1/orgs/${selectedOrg()}/stats`));
-$("btnAdminSnapshot").onclick = async () =>
-  out("graphOut", await req("/v1/admin/snapshot"));
+async function init() {
+  if ($("authToken")) $("authToken").value = loadSavedToken();
+  if ($("humanId")) $("humanId").value = readStorage(DEV_ID_KEY);
+  if ($("humanEmail")) $("humanEmail").value = readStorage(DEV_EMAIL_KEY);
 
-$("authToken").value = loadSavedToken();
-listOrgs();
+  const me = await req("/v1/me");
+  if (me.status !== 200 || !Boolean(me?.data?.is_super_admin)) {
+    showDomainsAccessBlocked();
+    return;
+  }
+
+  disableMutatingActions();
+  bindReadActions();
+  out("meOut", me);
+  await listOrgs();
+}
+
+init().catch((err) => {
+  out("meOut", { error: String(err) });
+});
