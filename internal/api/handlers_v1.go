@@ -76,7 +76,6 @@ func (h *Handler) handleUIConfig(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"app_name":                 uiAppName(),
 		"human_auth_provider":      h.humanAuth.Name(),
 		"supabase_url":             h.supabaseURL,
 		"supabase_anon_key":        h.supabaseAnonKey,
@@ -128,6 +127,155 @@ func (h *Handler) handleMyOrgs(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
 		"memberships": h.store.ListMyMemberships(actor.Human.HumanID),
 	})
+}
+
+func (h *Handler) handleMyAgents(w http.ResponseWriter, r *http.Request) {
+	actor, err := h.authenticateHuman(r)
+	if err != nil {
+		writeError(w, http.StatusUnauthorized, "unauthorized", "missing or invalid human auth")
+		return
+	}
+
+	switch r.Method {
+	case http.MethodGet:
+		writeJSON(w, http.StatusOK, map[string]any{
+			"agents": h.store.ListHumanAgents(actor.Human.HumanID),
+		})
+		return
+	case http.MethodPost:
+		if h.denySuperAdminWrite(w, actor) {
+			return
+		}
+		var req registerAgentRequest
+		if err := decodeJSON(r, &req); err != nil {
+			writeError(w, http.StatusBadRequest, "invalid_request", "invalid JSON request")
+			return
+		}
+
+		req.OrgID = strings.TrimSpace(req.OrgID)
+		req.AgentID = strings.TrimSpace(req.AgentID)
+		if !validateAgentID(req.AgentID) {
+			writeError(w, http.StatusBadRequest, "invalid_agent_id", "agent_id must match [A-Za-z0-9._:-]{1,128}")
+			return
+		}
+
+		orgID := req.OrgID
+		if orgID == "" {
+			org, err := h.store.EnsurePersonalOrg(actor.Human.HumanID, h.now().UTC(), h.idFactory)
+			if err != nil {
+				writeError(w, http.StatusInternalServerError, "store_error", "failed to provision personal organization")
+				return
+			}
+			orgID = org.OrgID
+		}
+
+		ownerHumanID := actor.Human.HumanID
+		token, err := auth.GenerateToken()
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "token_generation_failed", "failed to generate token")
+			return
+		}
+		agent, err := h.store.RegisterAgent(orgID, req.AgentID, &ownerHumanID, auth.HashToken(token), actor.Human.HumanID, h.now().UTC())
+		if err != nil {
+			switch {
+			case errors.Is(err, store.ErrOrgNotFound):
+				writeError(w, http.StatusNotFound, "unknown_org", "org_id is not registered")
+			case errors.Is(err, store.ErrUnauthorizedRole):
+				writeError(w, http.StatusForbidden, "forbidden", "membership in org required")
+			case errors.Is(err, store.ErrMembershipNotFound):
+				writeError(w, http.StatusBadRequest, "invalid_owner_human_id", "owner_human_id must be active in org")
+			case errors.Is(err, store.ErrAgentExists):
+				writeError(w, http.StatusConflict, "agent_exists", "agent_id already registered")
+			default:
+				writeError(w, http.StatusInternalServerError, "store_error", "failed to register agent")
+			}
+			return
+		}
+
+		writeJSON(w, http.StatusCreated, map[string]any{
+			"agent_id":       agent.AgentID,
+			"org_id":         agent.OrgID,
+			"owner_human_id": agent.OwnerHumanID,
+			"token":          token,
+			"status":         agent.Status,
+		})
+		return
+	default:
+		writeMethodNotAllowed(w)
+		return
+	}
+}
+
+func (h *Handler) handleMyAgentTrusts(w http.ResponseWriter, r *http.Request) {
+	actor, err := h.authenticateHuman(r)
+	if err != nil {
+		writeError(w, http.StatusUnauthorized, "unauthorized", "missing or invalid human auth")
+		return
+	}
+
+	switch r.Method {
+	case http.MethodGet:
+		writeJSON(w, http.StatusOK, map[string]any{
+			"agent_trusts": h.store.ListHumanAgentTrusts(actor.Human.HumanID),
+		})
+		return
+	case http.MethodPost:
+		if h.denySuperAdminWrite(w, actor) {
+			return
+		}
+		var req trustAgentRequest
+		if err := decodeJSON(r, &req); err != nil {
+			writeError(w, http.StatusBadRequest, "invalid_request", "invalid JSON request")
+			return
+		}
+		req.OrgID = strings.TrimSpace(req.OrgID)
+		req.AgentID = strings.TrimSpace(req.AgentID)
+		req.PeerAgentID = strings.TrimSpace(req.PeerAgentID)
+		if !validateAgentID(req.AgentID) || !validateAgentID(req.PeerAgentID) {
+			writeError(w, http.StatusBadRequest, "invalid_agent_id", "agent ids must match [A-Za-z0-9._:-]{1,128}")
+			return
+		}
+
+		edgeID, err := h.idFactory()
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "id_generation_failed", "failed to generate edge_id")
+			return
+		}
+		edge, created, err := h.store.CreateOrJoinAgentTrust(req.OrgID, req.AgentID, req.PeerAgentID, actor.Human.HumanID, edgeID, h.now().UTC())
+		if err != nil {
+			switch {
+			case errors.Is(err, store.ErrAgentNotFound):
+				writeError(w, http.StatusNotFound, "unknown_agent", "agent_id or peer_agent_id is not registered")
+			case errors.Is(err, store.ErrUnauthorizedRole):
+				writeError(w, http.StatusForbidden, "forbidden", "owner/admin required for initiating agent")
+			case errors.Is(err, store.ErrSelfTrust):
+				writeError(w, http.StatusBadRequest, "invalid_peer_agent_id", "peer_agent_id cannot equal agent_id")
+			default:
+				writeError(w, http.StatusInternalServerError, "store_error", "failed to create agent trust")
+			}
+			return
+		}
+		status := http.StatusOK
+		if created {
+			status = http.StatusCreated
+		}
+		writeJSON(w, status, map[string]any{"trust": edge, "created": created})
+		return
+	default:
+		writeMethodNotAllowed(w)
+		return
+	}
+}
+
+func normalizeOptionalHumanID(value *string) *string {
+	if value == nil {
+		return nil
+	}
+	v := strings.TrimSpace(*value)
+	if v == "" {
+		return nil
+	}
+	return &v
 }
 
 func (h *Handler) handleAdminSnapshot(w http.ResponseWriter, r *http.Request) {
@@ -882,6 +1030,7 @@ func (h *Handler) handleRegisterAgent(w http.ResponseWriter, r *http.Request) {
 
 	req.OrgID = strings.TrimSpace(req.OrgID)
 	req.AgentID = strings.TrimSpace(req.AgentID)
+	req.OwnerHumanID = normalizeOptionalHumanID(req.OwnerHumanID)
 	if req.OrgID == "" {
 		writeError(w, http.StatusBadRequest, "invalid_org_id", "org_id is required")
 		return
