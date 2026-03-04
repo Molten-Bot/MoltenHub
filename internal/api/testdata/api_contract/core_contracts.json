@@ -1,0 +1,124 @@
+{
+  "cases": [
+    {
+      "name": "health_ok",
+      "method": "GET",
+      "path": "/health",
+      "expected_status": 200,
+      "required_json_paths": ["status"],
+      "expected_json_values": {
+        "status": "ok"
+      }
+    },
+    {
+      "name": "me_unauthorized",
+      "method": "GET",
+      "path": "/v1/me",
+      "expected_status": 401,
+      "expected_error": "unauthorized",
+      "required_json_paths": ["error", "message"]
+    },
+    {
+      "name": "me_authorized_shape",
+      "method": "GET",
+      "path": "/v1/me",
+      "headers": {
+        "X-Human-Id": "alice",
+        "X-Human-Email": "alice@a.test"
+      },
+      "expected_status": 200,
+      "required_json_paths": [
+        "human.human_id",
+        "human.handle",
+        "onboarding.handle_required"
+      ],
+      "expected_json_values": {
+        "onboarding.handle_required": true
+      }
+    },
+    {
+      "name": "org_create_blocked_before_onboarding",
+      "method": "POST",
+      "path": "/v1/orgs",
+      "headers": {
+        "X-Human-Id": "alice",
+        "X-Human-Email": "alice@a.test"
+      },
+      "body": {
+        "handle": "alpha",
+        "display_name": "Alpha"
+      },
+      "expected_status": 409,
+      "expected_error": "onboarding_required"
+    },
+    {
+      "name": "org_create_after_onboarding",
+      "setup": "alice_handle_confirmed",
+      "method": "POST",
+      "path": "/v1/orgs",
+      "headers": {
+        "X-Human-Id": "alice",
+        "X-Human-Email": "alice@a.test"
+      },
+      "body": {
+        "handle": "alpha",
+        "display_name": "Alpha"
+      },
+      "expected_status": 201,
+      "required_json_paths": [
+        "organization.org_id",
+        "organization.handle",
+        "membership.membership_id"
+      ],
+      "expected_json_values": {
+        "organization.handle": "alpha"
+      }
+    },
+    {
+      "name": "publish_queued_with_trust",
+      "setup": "trusted_agents",
+      "method": "POST",
+      "path": "/v1/messages/publish",
+      "headers": {
+        "Authorization": "Bearer __TOKEN_A__"
+      },
+      "body": {
+        "to_agent_id": "agent-b",
+        "content_type": "text/plain",
+        "payload": "fixture-ping"
+      },
+      "expected_status": 202,
+      "required_json_paths": ["message_id", "status"],
+      "expected_json_values": {
+        "status": "queued"
+      }
+    },
+    {
+      "name": "publish_dropped_without_trust",
+      "setup": "agents_no_trust",
+      "method": "POST",
+      "path": "/v1/messages/publish",
+      "headers": {
+        "Authorization": "Bearer __TOKEN_A__"
+      },
+      "body": {
+        "to_agent_id": "agent-b",
+        "content_type": "text/plain",
+        "payload": "fixture-ping"
+      },
+      "expected_status": 202,
+      "required_json_paths": ["status", "reason"],
+      "expected_json_values": {
+        "status": "dropped",
+        "reason": "no_trust_path"
+      }
+    },
+    {
+      "name": "agent_capabilities_unauthorized",
+      "method": "GET",
+      "path": "/v1/agents/me/capabilities",
+      "expected_status": 401,
+      "expected_error": "unauthorized"
+    }
+  ]
+}

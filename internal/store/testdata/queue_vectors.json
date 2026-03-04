@@ -1,0 +1,17 @@
+{
+  "cases": [
+    {
+      "name": "enqueue_and_pop_fifo",
+      "unknown_receiver": false,
+      "payloads": ["first", "second"],
+      "expect_pop_payloads": ["first", "second"],
+      "expect_empty_after": true
+    },
+    {
+      "name": "enqueue_unknown_agent_returns_error",
+      "unknown_receiver": true,
+      "payloads": ["ghost"],
+      "expect_error": "agent not found"
+    }
+  ]
+}
