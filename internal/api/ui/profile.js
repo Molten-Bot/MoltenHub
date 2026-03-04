@@ -1,6 +1,5 @@
 const UI = StatocystUI;
 const PENDING_INVITE_CODE_KEY = "statocyst_pending_invite_code";
-let currentHuman = null;
 
 function setStatus(message, warn = false) {
   const el = UI.$("profileStatus");
@@ -60,7 +59,6 @@ function renderOrgs(memberships) {
 
 function renderProfile(me, orgs) {
   const human = me?.data?.human;
-  currentHuman = human || null;
   UI.$("profileEmail").textContent = human?.email || "-";
   UI.$("profileHandle").textContent = human?.handle || "-";
   UI.$("profileJoined").textContent = daysAgoLabel(human?.created_at);
