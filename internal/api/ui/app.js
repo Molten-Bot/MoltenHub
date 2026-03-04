@@ -1,8 +1,22 @@
 const $ = (id) => document.getElementById(id);
+const TOKEN_KEY = "statocyst_access_token";
+
+function loadSavedToken() {
+  return localStorage.getItem(TOKEN_KEY) || "";
+}
+
+function saveToken(token) {
+  if (!token) return;
+  localStorage.setItem(TOKEN_KEY, token);
+}
+
+function clearToken() {
+  localStorage.removeItem(TOKEN_KEY);
+}
 
 const headers = () => {
   const h = { "Content-Type": "application/json" };
-  const token = $("authToken").value.trim();
+  const token = $("authToken").value.trim() || loadSavedToken();
   if (token) h.Authorization = `Bearer ${token}`;
   const humanId = $("humanId").value.trim();
   const humanEmail = $("humanEmail").value.trim();
@@ -47,6 +61,18 @@ async function listOrgs() {
 }
 
 $("btnMe").onclick = async () => out("meOut", await req("/v1/me"));
+$("btnSaveToken").onclick = () => {
+  saveToken($("authToken").value.trim());
+  out("meOut", { status: "ok", message: "access token saved" });
+};
+$("btnClearToken").onclick = () => {
+  $("authToken").value = "";
+  clearToken();
+  out("meOut", { status: "ok", message: "access token cleared" });
+};
+$("btnGoLogin").onclick = () => {
+  window.location.assign("/");
+};
 $("btnCreateOrg").onclick = async () =>
   out("orgOut", await req("/v1/orgs", "POST", { name: $("orgName").value }));
 $("btnListOrgs").onclick = listOrgs;
@@ -123,4 +149,5 @@ $("btnStats").onclick = async () =>
 $("btnAdminSnapshot").onclick = async () =>
   out("graphOut", await req("/v1/admin/snapshot"));
 
+$("authToken").value = loadSavedToken();
 listOrgs();

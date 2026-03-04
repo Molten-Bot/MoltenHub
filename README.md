@@ -38,6 +38,13 @@ Optional:
 STATOCYST_ADDR=:8080 HUMAN_AUTH_PROVIDER=dev go run ./cmd/statocystd
 ```
 
+Test UI changes locally without Docker Hub:
+
+```bash
+docker build -t statocyst:local .
+# then point local compose (for hub) at STATOCYST_IMAGE=statocyst:local
+```
+
 ## Endpoints
 
 ### Health and spec
@@ -48,15 +55,19 @@ curl -sS http://localhost:8080/healthz
 curl -sS http://localhost:8080/openapi.yaml
 ```
 
-### Admin UI
+### UI
 
 Open:
 
 ```text
-http://localhost:8080/
+http://localhost:8080/         # login page (human login via Supabase when enabled)
+http://localhost:8080/domains  # existing admin/domains operations UI
 ```
 
-UI banner explicitly states in-memory and single-instance limitations.
+Notes:
+- `HUMAN_AUTH_PROVIDER=supabase`: `/` login button uses Supabase Google OAuth (via Supabase JS + `/v1/ui/config`).
+- `HUMAN_AUTH_PROVIDER=dev`: `/` login button skips directly to `/domains` for local development.
+- Domains UI banner still states in-memory and single-instance limitations.
 
 ## Quick API Flow (Dev Auth)
 

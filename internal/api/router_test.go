@@ -515,3 +515,49 @@ func TestAdminSnapshotDoesNotLeakMessagePayloads(t *testing.T) {
 		t.Fatalf("snapshot should not include message payload data: %s", bodyText)
 	}
 }
+
+func TestUIRoutes_LoginAndDomains(t *testing.T) {
+	router := newTestRouter()
+
+	testCases := []struct {
+		path        string
+		contentHint string
+	}{
+		{path: "/", contentHint: "Statocyst Human Login"},
+		{path: "/index.html", contentHint: "Statocyst Human Login"},
+		{path: "/domains", contentHint: "Statocyst Domains UI"},
+		{path: "/domains/", contentHint: "Statocyst Domains UI"},
+	}
+
+	for _, tc := range testCases {
+		req := httptest.NewRequest(http.MethodGet, tc.path, nil)
+		resp := httptest.NewRecorder()
+		router.ServeHTTP(resp, req)
+
+		if resp.Code != http.StatusOK {
+			t.Fatalf("%s expected 200, got %d body=%s", tc.path, resp.Code, resp.Body.String())
+		}
+		if !strings.Contains(resp.Body.String(), tc.contentHint) {
+			t.Fatalf("%s response missing %q", tc.path, tc.contentHint)
+		}
+	}
+}
+
+func TestUIRoutes_JavascriptAssets(t *testing.T) {
+	router := newTestRouter()
+
+	testCases := []string{"/login.js", "/app.js", "/domains/app.js"}
+	for _, path := range testCases {
+		req := httptest.NewRequest(http.MethodGet, path, nil)
+		resp := httptest.NewRecorder()
+		router.ServeHTTP(resp, req)
+
+		if resp.Code != http.StatusOK {
+			t.Fatalf("%s expected 200, got %d body=%s", path, resp.Code, resp.Body.String())
+		}
+		contentType := resp.Header().Get("Content-Type")
+		if !strings.Contains(contentType, "application/javascript") {
+			t.Fatalf("%s expected javascript content type, got %q", path, contentType)
+		}
+	}
+}

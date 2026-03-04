@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Statocyst Admin</title>
+    <title>Statocyst Domains</title>
     <style>
       :root {
         --bg: #f6f7f9;
@@ -88,7 +88,8 @@
   </head>
   <body>
     <header>
-      <strong>Statocyst Admin UI</strong>
+      <strong>Statocyst Domains UI</strong>
+      <span style="float: right"><a href="/" style="color: var(--accent)">Login</a></span>
     </header>
     <main>
       <div class="banner">
@@ -99,9 +100,12 @@
         <section class="panel">
           <h2>Auth</h2>
           <div class="muted">
-            For dev auth, use X-Human headers fields below. For Supabase, paste access token.
+            Saved Supabase token is auto-loaded from local storage. For dev mode, use X-Human headers below.
           </div>
           <input id="authToken" placeholder="Supabase access token (optional)" />
+          <button id="btnSaveToken">Save Access Token</button>
+          <button id="btnClearToken">Clear Access Token</button>
+          <button id="btnGoLogin">Go to Login</button>
           <input id="humanId" placeholder="Dev human id (e.g. alice)" />
           <input id="humanEmail" placeholder="Dev email (e.g. alice@acme.dev)" />
           <button id="btnMe">Load Me</button>
