@@ -49,8 +49,8 @@ type trustAgentRequest struct {
 }
 
 type createOrgAccessKeyRequest struct {
-	Label        string   `json:"label"`
-	Scopes       []string `json:"scopes"`
+	Label         string   `json:"label"`
+	Scopes        []string `json:"scopes"`
 	ExpiresInDays *int     `json:"expires_in_days,omitempty"`
 }
 

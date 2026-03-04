@@ -49,7 +49,7 @@
         cursor: pointer;
       }
       main {
-        max-width: 1200px;
+        max-width: 1240px;
         margin: 16px auto;
         padding: 0 12px 24px;
       }
@@ -146,6 +146,30 @@
         font-weight: 700;
         margin-top: 4px;
       }
+      .scopeRow {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin: 4px 0;
+      }
+      .scopeRow input {
+        width: auto;
+        margin: 0;
+      }
+      .keySecret {
+        font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+        font-size: 0.85rem;
+        word-break: break-all;
+      }
+      .inlineActions {
+        display: flex;
+        gap: 8px;
+        margin-top: 8px;
+      }
+      .inlineActions button {
+        width: auto;
+        margin: 0;
+      }
     </style>
   </head>
   <body>
@@ -195,6 +219,40 @@
         </section>
 
         <section class="panel">
+          <h2>Organization Access Keys</h2>
+          <p class="muted">Create scoped keys to share org read access securely by org name + key.</p>
+          <input id="accessKeyLabel" placeholder="Key label (e.g. Partner ACME)" />
+          <input id="accessKeyExpiryDays" type="number" min="1" max="3650" placeholder="Expires in days (optional)" />
+          <div class="scopeRow">
+            <input id="scopeListHumans" type="checkbox" checked />
+            <label for="scopeListHumans">list_humans</label>
+          </div>
+          <div class="scopeRow">
+            <input id="scopeListAgents" type="checkbox" checked />
+            <label for="scopeListAgents">list_agents</label>
+          </div>
+          <button id="btnCreateAccessKey">Create Access Key</button>
+          <div id="accessKeyStatus" class="status">No key action yet.</div>
+          <div id="accessKeySecret" class="keySecret muted"></div>
+
+          <h3>Active / Historical Keys</h3>
+          <div id="accessKeysList"></div>
+        </section>
+
+        <section class="panel">
+          <h2>Partner Access (Org Name + Key)</h2>
+          <p class="muted">Test partner key access against humans/agents read endpoints.</p>
+          <input id="partnerOrgName" placeholder="Organization name" />
+          <input id="partnerOrgKey" placeholder="Org access key" />
+          <div class="inlineActions">
+            <button id="btnPartnerHumans" type="button">List Humans</button>
+            <button id="btnPartnerAgents" type="button">List Agents</button>
+          </div>
+          <div id="partnerStatus" class="status">No partner access query yet.</div>
+          <div id="partnerList"></div>
+        </section>
+
+        <section class="panel" style="grid-column: 1 / -1">
           <h2>Organization Metrics</h2>
           <p class="muted">Last 7 days stats, trusted organization links, and recent audit events.</p>
           <button id="btnRefreshMetrics">Refresh Metrics</button>

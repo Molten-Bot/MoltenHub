@@ -67,12 +67,31 @@ const StatocystUI = (() => {
 
   function initTopNav() {
     const logoutBtn = $("btnLogout");
-    if (!logoutBtn) return;
-    logoutBtn.onclick = () => {
-      clearSession();
-      clearSupabaseSessionKeys();
-      window.location.assign("/");
-    };
+    if (logoutBtn) {
+      logoutBtn.onclick = () => {
+        clearSession();
+        clearSupabaseSessionKeys();
+        window.location.assign("/");
+      };
+    }
+
+    const adminOnlyLinks = document.querySelectorAll("[data-super-admin-only]");
+    for (const node of adminOnlyLinks) {
+      node.style.display = "none";
+    }
+
+    req("/v1/me")
+      .then((r) => {
+        const isSuperAdmin = r.status === 200 && Boolean(r?.data?.is_super_admin);
+        for (const node of adminOnlyLinks) {
+          node.style.display = isSuperAdmin ? "" : "none";
+        }
+      })
+      .catch(() => {
+        for (const node of adminOnlyLinks) {
+          node.style.display = "none";
+        }
+      });
   }
 
   async function populateOrgSelect(selectID, outputID = "") {

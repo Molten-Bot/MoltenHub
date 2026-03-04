@@ -12,28 +12,28 @@ import (
 )
 
 var (
-	ErrInvalidToken       = errors.New("invalid token")
-	ErrOrgNotFound        = errors.New("organization not found")
-	ErrOrgNameTaken       = errors.New("organization name already exists")
-	ErrHumanNotFound      = errors.New("human not found")
-	ErrMembershipNotFound = errors.New("membership not found")
-	ErrInviteNotFound     = errors.New("invite not found")
-	ErrInviteInvalid      = errors.New("invite invalid")
+	ErrInvalidToken         = errors.New("invalid token")
+	ErrOrgNotFound          = errors.New("organization not found")
+	ErrOrgNameTaken         = errors.New("organization name already exists")
+	ErrHumanNotFound        = errors.New("human not found")
+	ErrMembershipNotFound   = errors.New("membership not found")
+	ErrInviteNotFound       = errors.New("invite not found")
+	ErrInviteInvalid        = errors.New("invite invalid")
 	ErrOrgAccessKeyNotFound = errors.New("org access key not found")
 	ErrOrgAccessKeyInvalid  = errors.New("org access key invalid")
 	ErrOrgAccessScopeDenied = errors.New("org access scope denied")
-	ErrAgentExists        = errors.New("agent already exists")
-	ErrAgentNotFound      = errors.New("agent not found")
-	ErrAgentRevoked       = errors.New("agent revoked")
-	ErrTrustNotFound      = errors.New("trust edge not found")
-	ErrUnauthorizedRole   = errors.New("unauthorized role")
-	ErrInvalidRole        = errors.New("invalid role")
-	ErrInvalidEdgeType    = errors.New("invalid edge type")
-	ErrSelfTrust          = errors.New("self trust not allowed")
-	ErrNoTrustPath        = errors.New("no trust path")
-	ErrBindNotFound       = errors.New("bind token not found")
-	ErrBindExpired        = errors.New("bind token expired")
-	ErrBindUsed           = errors.New("bind token already used")
+	ErrAgentExists          = errors.New("agent already exists")
+	ErrAgentNotFound        = errors.New("agent not found")
+	ErrAgentRevoked         = errors.New("agent revoked")
+	ErrTrustNotFound        = errors.New("trust edge not found")
+	ErrUnauthorizedRole     = errors.New("unauthorized role")
+	ErrInvalidRole          = errors.New("invalid role")
+	ErrInvalidEdgeType      = errors.New("invalid edge type")
+	ErrSelfTrust            = errors.New("self trust not allowed")
+	ErrNoTrustPath          = errors.New("no trust path")
+	ErrBindNotFound         = errors.New("bind token not found")
+	ErrBindExpired          = errors.New("bind token expired")
+	ErrBindUsed             = errors.New("bind token already used")
 )
 
 type MemoryStore struct {
@@ -48,7 +48,7 @@ type MemoryStore struct {
 	memberships         map[string]model.Membership
 	membershipByOrgUser map[string]string
 
-	invites map[string]model.Invite
+	invites            map[string]model.Invite
 	orgAccessKeys      map[string]model.OrgAccessKey
 	orgAccessKeyByHash map[string]string
 

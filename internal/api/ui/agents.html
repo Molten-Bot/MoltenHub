@@ -93,18 +93,6 @@
         font-weight: 600;
         cursor: pointer;
       }
-      button.secondary {
-        background: #fff;
-        color: var(--ink);
-      }
-      pre {
-        background: #0f172a;
-        color: #cbd5e1;
-        border-radius: 6px;
-        padding: 8px;
-        overflow: auto;
-        max-height: 220px;
-      }
       .status {
         margin-top: 6px;
         border: 1px solid var(--line);
@@ -118,6 +106,13 @@
       }
       .muted {
         color: var(--muted);
+      }
+      .list {
+        margin: 8px 0 0;
+        padding-left: 18px;
+      }
+      .list li {
+        margin: 4px 0;
       }
       table {
         width: 100%;
@@ -158,40 +153,31 @@
 
     <main>
       <div class="banner">
-        <strong>/agents</strong> focuses on agent lifecycle (list/register/rotate/revoke) and pending agent-trust
-        approvals (approve/block/revoke). Org trust actions are intentionally omitted from this page for now.
+        <strong>/agents</strong> focuses on agent lifecycle and pending agent-trust approvals.
       </div>
 
       <div class="grid">
         <section class="panel">
-          <h2>Organization Scope</h2>
-          <p class="muted">Pick organization before listing agents or trust queue.</p>
-          <button id="btnLoadOrgs">Load My Organizations</button>
-          <select id="orgSelect"></select>
-          <pre id="orgOut"></pre>
-        </section>
-
-        <section class="panel">
           <h2>Agents</h2>
-          <button id="btnListAgents">List Agents</button>
+          <label class="muted" for="orgSelect">Organization</label>
+          <select id="orgSelect"></select>
+
+          <div id="agentStatus" class="status">Loading agents...</div>
+          <ul id="agentsList" class="list"></ul>
+
           <input id="agentId" placeholder="agent_id" />
           <input id="ownerHumanId" placeholder="owner_human_id (optional for register)" />
           <button id="btnRegisterAgent">Register Agent</button>
           <button id="btnRotateAgent">Rotate Token</button>
           <button id="btnRevokeAgent">Revoke Agent</button>
-          <pre id="agentOut"></pre>
-          <pre id="agentsOut"></pre>
         </section>
 
-        <section class="panel" style="grid-column: span 2">
+        <section class="panel">
           <h2>Pending Agent Trust Approvals</h2>
-          <p class="muted">
-            Shows pending agent-to-agent trust edges for selected org (via trust graph). Use actions to
-            approve, block, or revoke.
-          </p>
+          <p class="muted">Approve, block, or revoke pending trust requests for the selected organization.</p>
           <button id="btnRefreshPending">Refresh Pending Requests</button>
+          <div id="pendingStatus" class="status">No pending-trust action yet.</div>
           <div id="pendingList"></div>
-          <pre id="pendingOut"></pre>
         </section>
       </div>
     </main>

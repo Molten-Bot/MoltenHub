@@ -4,66 +4,156 @@ function selectedOrg() {
   return UI.selectedOrg("orgSelect");
 }
 
-function requireOrg(outputID) {
+function setStatus(id, message, warn = false) {
+  const el = UI.$(id);
+  if (!el) return;
+  el.textContent = message;
+  el.className = warn ? "status warn" : "status";
+}
+
+function requireOrg(statusID, message = "Select an organization first.") {
   const orgID = selectedOrg();
   if (!orgID) {
-    UI.out(outputID, { status: 400, data: { error: "select an organization first" } });
+    setStatus(statusID, message, true);
     return "";
   }
   return orgID;
 }
 
-async function listOrgs() {
-  await UI.populateOrgSelect("orgSelect", "orgOut");
+async function listOrgs(preserveCurrent = true) {
+  const res = await UI.req("/v1/me/orgs");
+  const select = UI.$("orgSelect");
+  const current = selectedOrg();
+  select.innerHTML = "";
+
+  if (res.status !== 200 || !Array.isArray(res.data.memberships)) {
+    setStatus("agentStatus", "Could not load organizations.", true);
+    UI.$("agentsList").innerHTML = "";
+    return;
+  }
+
+  for (const membership of res.data.memberships) {
+    const opt = document.createElement("option");
+    opt.value = membership.org.org_id;
+    opt.textContent = `${membership.org.name} (${membership.membership.role})`;
+    select.appendChild(opt);
+  }
+
+  if (select.options.length === 0) {
+    setStatus("agentStatus", "No organizations yet.");
+    UI.$("agentsList").innerHTML = "";
+    return;
+  }
+
+  if (preserveCurrent && current && [...select.options].some((opt) => opt.value === current)) {
+    select.value = current;
+  } else {
+    select.value = select.options[0].value;
+  }
+
+  await loadAgents();
+  await loadPendingTrusts();
 }
 
-async function listAgents() {
-  const orgID = requireOrg("agentsOut");
+function renderAgents(agents) {
+  const root = UI.$("agentsList");
+  root.innerHTML = "";
+
+  if (!Array.isArray(agents) || agents.length === 0) {
+    const li = document.createElement("li");
+    li.textContent = "No agents yet.";
+    root.appendChild(li);
+    setStatus("agentStatus", "No agents found for this organization.");
+    return;
+  }
+
+  for (const agent of agents) {
+    const li = document.createElement("li");
+    const owner = agent.owner_human_id ? `owner: ${agent.owner_human_id}` : "org-owned";
+    li.textContent = `${agent.agent_id} (${agent.status}, ${owner})`;
+    li.dataset.agentId = agent.agent_id || "";
+    root.appendChild(li);
+  }
+
+  if (!UI.$("agentId").value.trim()) {
+    UI.$("agentId").value = agents[0].agent_id || "";
+  }
+  setStatus("agentStatus", `${agents.length} agent(s) loaded.`);
+}
+
+async function loadAgents() {
+  const orgID = requireOrg("agentStatus");
   if (!orgID) return;
 
+  setStatus("agentStatus", "Loading agents...");
   const result = await UI.req(`/v1/orgs/${orgID}/agents`);
-  UI.out("agentsOut", result);
-
-  if (result.status === 200 && Array.isArray(result.data.agents) && result.data.agents.length > 0) {
-    UI.$("agentId").value = result.data.agents[0].agent_id || "";
+  if (result.status !== 200) {
+    setStatus("agentStatus", "Could not load agents.", true);
+    renderAgents([]);
+    return;
   }
+
+  renderAgents(result.data.agents || []);
 }
 
 async function registerAgent() {
-  const orgID = requireOrg("agentOut");
+  const orgID = requireOrg("agentStatus");
   if (!orgID) return;
 
   const agentID = UI.$("agentId").value.trim();
   const ownerHumanID = UI.$("ownerHumanId").value.trim();
   if (!agentID) {
-    UI.out("agentOut", { status: 400, data: { error: "agent_id required" } });
+    setStatus("agentStatus", "agent_id required", true);
     return;
   }
 
   const payload = { org_id: orgID, agent_id: agentID };
   if (ownerHumanID) payload.owner_human_id = ownerHumanID;
 
-  UI.out("agentOut", await UI.req("/v1/agents/register", "POST", payload));
-  await listAgents();
+  setStatus("agentStatus", "Registering agent...");
+  const result = await UI.req("/v1/agents/register", "POST", payload);
+  if (result.status !== 201) {
+    setStatus("agentStatus", "Could not register agent.", true);
+    return;
+  }
+
+  setStatus("agentStatus", `Registered ${agentID}.`);
+  await loadAgents();
 }
 
 async function rotateAgent() {
   const agentID = UI.$("agentId").value.trim();
   if (!agentID) {
-    UI.out("agentOut", { status: 400, data: { error: "agent_id required" } });
+    setStatus("agentStatus", "agent_id required", true);
     return;
   }
-  UI.out("agentOut", await UI.req(`/v1/agents/${agentID}/rotate-token`, "POST"));
+
+  setStatus("agentStatus", "Rotating token...");
+  const result = await UI.req(`/v1/agents/${agentID}/rotate-token`, "POST");
+  if (result.status !== 200) {
+    setStatus("agentStatus", "Could not rotate token.", true);
+    return;
+  }
+
+  setStatus("agentStatus", `Token rotated for ${agentID}.`);
 }
 
 async function revokeAgent() {
   const agentID = UI.$("agentId").value.trim();
   if (!agentID) {
-    UI.out("agentOut", { status: 400, data: { error: "agent_id required" } });
+    setStatus("agentStatus", "agent_id required", true);
     return;
   }
-  UI.out("agentOut", await UI.req(`/v1/agents/${agentID}`, "DELETE"));
-  await listAgents();
+
+  setStatus("agentStatus", "Revoking agent...");
+  const result = await UI.req(`/v1/agents/${agentID}`, "DELETE");
+  if (result.status !== 200) {
+    setStatus("agentStatus", "Could not revoke agent.", true);
+    return;
+  }
+
+  setStatus("agentStatus", `Revoked ${agentID}.`);
+  await loadAgents();
 }
 
 function renderPendingRows(edges) {
@@ -75,8 +165,11 @@ function renderPendingRows(edges) {
     p.className = "muted";
     p.textContent = "No pending agent trust approvals for this organization.";
     root.appendChild(p);
+    setStatus("pendingStatus", "No pending requests.");
     return;
   }
+
+  setStatus("pendingStatus", `${edges.length} pending request(s).`);
 
   const table = document.createElement("table");
   const thead = document.createElement("thead");
@@ -127,13 +220,14 @@ function renderPendingRows(edges) {
 }
 
 async function loadPendingTrusts() {
-  const orgID = requireOrg("pendingOut");
+  const orgID = requireOrg("pendingStatus", "Select an organization first.");
   if (!orgID) return;
 
+  setStatus("pendingStatus", "Loading pending requests...");
   const result = await UI.req(`/v1/orgs/${orgID}/trust-graph`);
-  UI.out("pendingOut", result);
 
   if (result.status !== 200 || !Array.isArray(result.data.agent_trusts)) {
+    setStatus("pendingStatus", "Could not load pending requests.", true);
     renderPendingRows([]);
     return;
   }
@@ -151,20 +245,32 @@ async function runTrustAction(edgeID, action) {
     path = `/v1/agent-trusts/${edgeID}`;
   }
 
+  setStatus("pendingStatus", `${action} in progress...`);
   const result = await UI.req(path, method);
-  UI.out("pendingOut", result);
+  if (result.status !== 200) {
+    setStatus("pendingStatus", `Could not ${action} trust request.`, true);
+    return;
+  }
   await loadPendingTrusts();
 }
 
 async function init() {
   UI.initTopNav();
 
-  UI.$("btnLoadOrgs").onclick = listOrgs;
-  UI.$("btnListAgents").onclick = listAgents;
   UI.$("btnRegisterAgent").onclick = registerAgent;
   UI.$("btnRotateAgent").onclick = rotateAgent;
   UI.$("btnRevokeAgent").onclick = revokeAgent;
   UI.$("btnRefreshPending").onclick = loadPendingTrusts;
+  UI.$("orgSelect").onchange = async () => {
+    await loadAgents();
+    await loadPendingTrusts();
+  };
+
+  UI.$("agentsList").addEventListener("click", (event) => {
+    const li = event.target.closest("li[data-agent-id]");
+    if (!li) return;
+    UI.$("agentId").value = li.dataset.agentId || "";
+  });
 
   UI.$("pendingList").addEventListener("click", async (event) => {
     const button = event.target.closest("button[data-action]");
@@ -177,7 +283,9 @@ async function init() {
     await runTrustAction(edgeID, action);
   });
 
-  await listOrgs();
+  await listOrgs(false);
 }
 
-init().catch((err) => UI.out("agentOut", { error: String(err) }));
+init().catch((err) => {
+  setStatus("agentStatus", `Unexpected error: ${String(err)}`, true);
+});

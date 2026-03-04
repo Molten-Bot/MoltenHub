@@ -140,6 +140,29 @@ func registerAgent(t *testing.T, router http.Handler, humanID, email, orgID, age
 	return token
 }
 
+func createOrgAccessKey(t *testing.T, router http.Handler, humanID, email, orgID, label string, scopes []string) (string, string) {
+	t.Helper()
+	body := map[string]any{
+		"label":  label,
+		"scopes": scopes,
+	}
+	resp := doJSONRequest(t, router, http.MethodPost, "/v1/orgs/"+orgID+"/access-keys", body, humanHeaders(humanID, email))
+	if resp.Code != http.StatusCreated {
+		t.Fatalf("create org access key failed: %d %s", resp.Code, resp.Body.String())
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(resp.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode create org access key: %v", err)
+	}
+	keyObj, _ := payload["access_key"].(map[string]any)
+	keyID, _ := keyObj["key_id"].(string)
+	secret, _ := payload["key"].(string)
+	if keyID == "" || secret == "" {
+		t.Fatalf("missing key_id or key secret")
+	}
+	return keyID, secret
+}
+
 func publish(t *testing.T, router http.Handler, senderToken, toAgentID, payload string) *httptest.ResponseRecorder {
 	t.Helper()
 	return doJSONRequest(t, router, http.MethodPost, "/v1/messages/publish", map[string]string{
@@ -240,6 +263,76 @@ func TestRoleEnforcementOnInvites(t *testing.T) {
 	}, humanHeaders("viewer", "viewer@a.test"))
 	if resp.Code != http.StatusForbidden {
 		t.Fatalf("expected 403 for viewer invite creation, got %d", resp.Code)
+	}
+}
+
+func TestOrgAccessKeyScopedReadsByOrgName(t *testing.T) {
+	router := newTestRouter()
+	orgID := createOrg(t, router, "alice", "alice@a.test", "Org Share")
+	aliceHumanID := currentHumanID(t, router, "alice", "alice@a.test")
+	registerAgent(t, router, "alice", "alice@a.test", orgID, "agent-share", aliceHumanID)
+
+	_, humansOnlyKey := createOrgAccessKey(t, router, "alice", "alice@a.test", orgID, "Humans Only", []string{"list_humans"})
+	humansResp := doJSONRequest(
+		t,
+		router,
+		http.MethodGet,
+		"/v1/org-access/humans?org_name=Org%20Share",
+		nil,
+		map[string]string{"X-Org-Access-Key": humansOnlyKey},
+	)
+	if humansResp.Code != http.StatusOK {
+		t.Fatalf("org-access humans failed: %d %s", humansResp.Code, humansResp.Body.String())
+	}
+
+	agentsDenied := doJSONRequest(
+		t,
+		router,
+		http.MethodGet,
+		"/v1/org-access/agents?org_name=Org%20Share",
+		nil,
+		map[string]string{"X-Org-Access-Key": humansOnlyKey},
+	)
+	if agentsDenied.Code != http.StatusForbidden {
+		t.Fatalf("expected 403 for missing list_agents scope, got %d body=%s", agentsDenied.Code, agentsDenied.Body.String())
+	}
+
+	keyID, fullKey := createOrgAccessKey(
+		t,
+		router,
+		"alice",
+		"alice@a.test",
+		orgID,
+		"Humans + Agents",
+		[]string{"list_humans", "list_agents"},
+	)
+	agentsAllowed := doJSONRequest(
+		t,
+		router,
+		http.MethodGet,
+		"/v1/org-access/agents?org_name=Org%20Share",
+		nil,
+		map[string]string{"X-Org-Access-Key": fullKey},
+	)
+	if agentsAllowed.Code != http.StatusOK {
+		t.Fatalf("expected 200 for list_agents scope, got %d body=%s", agentsAllowed.Code, agentsAllowed.Body.String())
+	}
+
+	revokeResp := doJSONRequest(t, router, http.MethodDelete, "/v1/orgs/"+orgID+"/access-keys/"+keyID, nil, humanHeaders("alice", "alice@a.test"))
+	if revokeResp.Code != http.StatusOK {
+		t.Fatalf("revoke org access key failed: %d %s", revokeResp.Code, revokeResp.Body.String())
+	}
+
+	agentsAfterRevoke := doJSONRequest(
+		t,
+		router,
+		http.MethodGet,
+		"/v1/org-access/agents?org_name=Org%20Share",
+		nil,
+		map[string]string{"X-Org-Access-Key": fullKey},
+	)
+	if agentsAfterRevoke.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401 for revoked key, got %d body=%s", agentsAfterRevoke.Code, agentsAfterRevoke.Body.String())
 	}
 }
 

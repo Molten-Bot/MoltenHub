@@ -98,6 +98,10 @@ Notes:
 - `HUMAN_AUTH_PROVIDER=dev`: `/` login button skips directly to `/profile` for local development.
 - Role checks are enforced by API; non-admin users may see org/agent pages but write actions can return `403`.
 - Super-admin review mode (`SUPER_ADMIN_REVIEW_MODE=true`) is enforced server-side in API handlers (no client trust).
+- `/organization` includes Organization Access Keys (scoped `list_humans` / `list_agents`) for cross-org read sharing.
+- Partner lookups with org name + key:
+  - `GET /v1/org-access/humans?org_name=<name>` + header `X-Org-Access-Key: <secret>`
+  - `GET /v1/org-access/agents?org_name=<name>` + header `X-Org-Access-Key: <secret>`
 
 ## Quick API Flow (Dev Auth)
 

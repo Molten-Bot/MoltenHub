@@ -37,6 +37,15 @@ function orgNameByID(orgID) {
   return label;
 }
 
+function escapeHTML(input) {
+  return String(input || "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/\"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
 async function listOrgs(preserveCurrent = true) {
   const res = await UI.req("/v1/me/orgs");
   if (res.status !== 200 || !Array.isArray(res.data.memberships)) {
@@ -80,12 +89,14 @@ async function listOrgs(preserveCurrent = true) {
     } else {
       select.value = memberships[0].org.org_id;
     }
+    UI.$("partnerOrgName").value = orgNameByID(select.value);
     await refreshOrgData();
   } else {
     renderHumans([]);
     renderTrusts([]);
     renderAudit([]);
     renderStats(null);
+    renderAccessKeys([]);
   }
 }
 
@@ -163,6 +174,182 @@ async function loadHumans() {
   }
 
   renderHumans(res.data.humans || []);
+}
+
+function selectedScopes() {
+  const scopes = [];
+  if (UI.$("scopeListHumans").checked) scopes.push("list_humans");
+  if (UI.$("scopeListAgents").checked) scopes.push("list_agents");
+  return scopes;
+}
+
+function renderAccessKeys(keys) {
+  const root = UI.$("accessKeysList");
+  root.innerHTML = "";
+
+  if (!Array.isArray(keys) || keys.length === 0) {
+    const empty = document.createElement("div");
+    empty.className = "muted";
+    empty.textContent = "No access keys yet.";
+    root.appendChild(empty);
+    return;
+  }
+
+  for (const key of keys) {
+    const card = document.createElement("div");
+    card.className = "card";
+
+    const title = document.createElement("div");
+    title.textContent = `${key.label || "Access Key"} (${key.status || "unknown"})`;
+
+    const meta = document.createElement("div");
+    meta.className = "muted";
+    const scopes = Array.isArray(key.scopes) ? key.scopes.join(", ") : "none";
+    const exp = key.expires_at ? new Date(key.expires_at).toLocaleString() : "never";
+    meta.textContent = `Scopes: ${scopes} • Expires: ${exp}`;
+
+    card.appendChild(title);
+    card.appendChild(meta);
+
+    if (key.status === "active") {
+      const actions = document.createElement("div");
+      actions.className = "inlineActions";
+      const revokeBtn = document.createElement("button");
+      revokeBtn.type = "button";
+      revokeBtn.textContent = "Revoke";
+      revokeBtn.dataset.revokeKeyId = key.key_id || "";
+      actions.appendChild(revokeBtn);
+      card.appendChild(actions);
+    }
+
+    root.appendChild(card);
+  }
+}
+
+async function loadAccessKeys() {
+  const orgID = requireOrg("accessKeyStatus", "Select an organization to manage access keys.");
+  if (!orgID) return;
+
+  const res = await UI.req(`/v1/orgs/${orgID}/access-keys`);
+  if (res.status !== 200) {
+    setStatus("accessKeyStatus", "Could not load access keys.", true);
+    renderAccessKeys([]);
+    return;
+  }
+  renderAccessKeys(res.data.access_keys || []);
+}
+
+async function createAccessKey() {
+  const orgID = requireOrg("accessKeyStatus", "Select an organization to create an access key.");
+  if (!orgID) return;
+
+  const scopes = selectedScopes();
+  if (scopes.length === 0) {
+    setStatus("accessKeyStatus", "Select at least one scope.", true);
+    return;
+  }
+
+  const label = UI.$("accessKeyLabel").value.trim();
+  const expiryRaw = UI.$("accessKeyExpiryDays").value.trim();
+  const payload = { label, scopes };
+  if (expiryRaw) {
+    const days = Number(expiryRaw);
+    if (!Number.isFinite(days) || days < 1 || days > 3650) {
+      setStatus("accessKeyStatus", "Expiry days must be in range 1..3650.", true);
+      return;
+    }
+    payload.expires_in_days = Math.floor(days);
+  }
+
+  setStatus("accessKeyStatus", "Creating access key...");
+  const res = await UI.req(`/v1/orgs/${orgID}/access-keys`, "POST", payload);
+  if (res.status !== 201) {
+    setStatus("accessKeyStatus", "Could not create access key.", true);
+    UI.$("accessKeySecret").textContent = "";
+    return;
+  }
+
+  const secret = res.data.key || "";
+  UI.$("accessKeySecret").innerHTML = secret
+    ? `Key (copy now): <span class="keySecret">${escapeHTML(secret)}</span>`
+    : "";
+  setStatus("accessKeyStatus", "Access key created.");
+  await loadAccessKeys();
+}
+
+async function revokeAccessKey(keyID) {
+  if (!keyID) return;
+  const orgID = requireOrg("accessKeyStatus");
+  if (!orgID) return;
+
+  setStatus("accessKeyStatus", "Revoking access key...");
+  const res = await UI.req(`/v1/orgs/${orgID}/access-keys/${keyID}`, "DELETE");
+  if (res.status !== 200) {
+    setStatus("accessKeyStatus", "Could not revoke access key.", true);
+    return;
+  }
+  setStatus("accessKeyStatus", "Access key revoked.");
+  await loadAccessKeys();
+}
+
+async function partnerReq(kind) {
+  const orgName = UI.$("partnerOrgName").value.trim();
+  const orgKey = UI.$("partnerOrgKey").value.trim();
+  if (!orgName || !orgKey) {
+    setStatus("partnerStatus", "Organization name and key are required.", true);
+    return null;
+  }
+
+  const res = await fetch(`/v1/org-access/${kind}?org_name=${encodeURIComponent(orgName)}`, {
+    headers: {
+      "X-Org-Access-Key": orgKey,
+    },
+  });
+  const text = await res.text();
+  let data = text;
+  try {
+    data = JSON.parse(text || "{}");
+  } catch (_) {}
+  return { status: res.status, data };
+}
+
+function renderPartnerList(kind, payload) {
+  const root = UI.$("partnerList");
+  root.innerHTML = "";
+
+  const items = Array.isArray(payload?.[kind]) ? payload[kind] : [];
+  if (items.length === 0) {
+    const empty = document.createElement("div");
+    empty.className = "muted";
+    empty.textContent = "No data yet.";
+    root.appendChild(empty);
+    return;
+  }
+
+  const ul = document.createElement("ul");
+  ul.className = "list";
+  for (const item of items) {
+    const li = document.createElement("li");
+    if (kind === "humans") {
+      li.textContent = `${item.email || item.human_id} (${item.role || "unknown"})`;
+    } else {
+      li.textContent = `${item.agent_id || "agent"} (${item.status || "unknown"})`;
+    }
+    ul.appendChild(li);
+  }
+  root.appendChild(ul);
+}
+
+async function runPartnerQuery(kind) {
+  setStatus("partnerStatus", "Loading partner access...");
+  const res = await partnerReq(kind);
+  if (!res || res.status !== 200) {
+    setStatus("partnerStatus", "Partner access request failed.", true);
+    UI.$("partnerList").innerHTML = "";
+    return;
+  }
+  setStatus("partnerStatus", `Partner ${kind} loaded.`);
+  renderPartnerList(kind, res.data);
 }
 
 function renderStats(statsPayload) {
@@ -326,7 +513,7 @@ async function refreshMetrics() {
 }
 
 async function refreshOrgData() {
-  await Promise.all([loadHumans(), refreshMetrics()]);
+  await Promise.all([loadHumans(), refreshMetrics(), loadAccessKeys()]);
 }
 
 async function init() {
@@ -335,7 +522,19 @@ async function init() {
   UI.$("btnCreateOrg").onclick = createOrg;
   UI.$("btnInvite").onclick = inviteHuman;
   UI.$("btnRefreshMetrics").onclick = refreshMetrics;
-  UI.$("orgSelect").onchange = refreshOrgData;
+  UI.$("btnCreateAccessKey").onclick = createAccessKey;
+  UI.$("btnPartnerHumans").onclick = () => runPartnerQuery("humans");
+  UI.$("btnPartnerAgents").onclick = () => runPartnerQuery("agents");
+  UI.$("orgSelect").onchange = async () => {
+    UI.$("partnerOrgName").value = orgNameByID(selectedOrg());
+    await refreshOrgData();
+  };
+
+  UI.$("accessKeysList").addEventListener("click", async (event) => {
+    const button = event.target.closest("button[data-revoke-key-id]");
+    if (!button) return;
+    await revokeAccessKey(button.dataset.revokeKeyId || "");
+  });
 
   await listOrgs(false);
 }
