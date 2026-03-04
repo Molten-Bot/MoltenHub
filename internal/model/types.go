@@ -12,6 +12,7 @@ const (
 	StatusActive  = "active"
 	StatusBlocked = "blocked"
 	StatusRevoked = "revoked"
+	StatusExpired = "expired"
 
 	OrgAccessScopeListHumans = "list_humans"
 	OrgAccessScopeListAgents = "list_agents"
@@ -43,14 +44,17 @@ type Membership struct {
 }
 
 type Invite struct {
-	InviteID   string     `json:"invite_id"`
-	OrgID      string     `json:"org_id"`
-	Email      string     `json:"email"`
-	Role       string     `json:"role"`
-	Status     string     `json:"status"`
-	CreatedBy  string     `json:"created_by"`
-	CreatedAt  time.Time  `json:"created_at"`
-	AcceptedAt *time.Time `json:"accepted_at,omitempty"`
+	InviteID     string     `json:"invite_id"`
+	OrgID        string     `json:"org_id"`
+	Email        string     `json:"email"`
+	Role         string     `json:"role"`
+	Status       string     `json:"status"`
+	CreatedBy    string     `json:"created_by"`
+	CreatedAt    time.Time  `json:"created_at"`
+	ExpiresAt    time.Time  `json:"expires_at"`
+	AcceptedAt   *time.Time `json:"accepted_at,omitempty"`
+	RevokedAt    *time.Time `json:"revoked_at,omitempty"`
+	InviteSecret string     `json:"-"`
 }
 
 type Agent struct {

@@ -22,6 +22,7 @@ var (
 	ErrOrgAccessKeyNotFound = errors.New("org access key not found")
 	ErrOrgAccessKeyInvalid  = errors.New("org access key invalid")
 	ErrOrgAccessScopeDenied = errors.New("org access scope denied")
+	ErrCannotRevokeOwner    = errors.New("cannot revoke owner membership")
 	ErrAgentExists          = errors.New("agent already exists")
 	ErrAgentNotFound        = errors.New("agent not found")
 	ErrAgentRevoked         = errors.New("agent revoked")
@@ -49,6 +50,7 @@ type MemoryStore struct {
 	membershipByOrgUser map[string]string
 
 	invites            map[string]model.Invite
+	inviteBySecretHash map[string]string
 	orgAccessKeys      map[string]model.OrgAccessKey
 	orgAccessKeyByHash map[string]string
 
@@ -81,6 +83,7 @@ func NewMemoryStore() *MemoryStore {
 		memberships:            make(map[string]model.Membership),
 		membershipByOrgUser:    make(map[string]string),
 		invites:                make(map[string]model.Invite),
+		inviteBySecretHash:     make(map[string]string),
 		orgAccessKeys:          make(map[string]model.OrgAccessKey),
 		orgAccessKeyByHash:     make(map[string]string),
 		agents:                 make(map[string]model.Agent),
