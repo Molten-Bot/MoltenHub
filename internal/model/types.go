@@ -127,6 +127,11 @@ type MembershipWithOrg struct {
 	Org        Organization `json:"org"`
 }
 
+type InviteWithOrg struct {
+	Invite Invite       `json:"invite"`
+	Org    Organization `json:"org"`
+}
+
 type AdminSnapshot struct {
 	Organizations []Organization `json:"organizations"`
 	Humans        []Human        `json:"humans"`

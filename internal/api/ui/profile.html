@@ -75,36 +75,6 @@
         margin: 4px 0 10px;
         font-size: 1rem;
       }
-      input,
-      button,
-      select {
-        width: 100%;
-        box-sizing: border-box;
-        margin: 5px 0;
-        padding: 8px;
-        border: 1px solid var(--line);
-        border-radius: 6px;
-        background: #fff;
-      }
-      button {
-        background: var(--accent);
-        color: #fff;
-        border-color: var(--accent);
-        font-weight: 600;
-        cursor: pointer;
-      }
-      button.secondary {
-        background: #fff;
-        color: var(--ink);
-      }
-      pre {
-        background: #0f172a;
-        color: #cbd5e1;
-        border-radius: 6px;
-        padding: 8px;
-        overflow: auto;
-        max-height: 240px;
-      }
       .status {
         margin-top: 6px;
         border: 1px solid var(--line);
@@ -118,6 +88,34 @@
       }
       .muted {
         color: var(--muted);
+      }
+      .profileRows {
+        display: grid;
+        gap: 8px;
+      }
+      .row {
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        padding: 10px;
+      }
+      .label {
+        display: block;
+        font-size: 0.85rem;
+        color: var(--muted);
+      }
+      .value {
+        margin-top: 4px;
+        font-weight: 600;
+      }
+      .list {
+        margin: 8px 0 0;
+        padding-left: 18px;
+      }
+      .list li {
+        margin: 4px 0;
+      }
+      a {
+        color: var(--accent);
       }
     </style>
   </head>
@@ -138,33 +136,28 @@
     </header>
 
     <main>
-      <div class="banner">
-        <strong>/profile</strong> is your human landing page: who you are, which organizations you belong to,
-        and invite acceptance.
-      </div>
-
       <div class="grid">
         <section class="panel">
-          <h2>My Info</h2>
-          <p class="muted">Loads your human identity and role context from the API.</p>
-          <button id="btnLoadMe">Load Profile</button>
-          <pre id="meOut"></pre>
-        </section>
-
-        <section class="panel">
-          <h2>My Organizations</h2>
-          <p class="muted">Lists organizations where you currently have membership.</p>
-          <button id="btnLoadOrgs">Load Organizations</button>
-          <select id="orgSelect"></select>
-          <pre id="orgOut"></pre>
-        </section>
-
-        <section class="panel">
-          <h2>Accept Invite</h2>
-          <p class="muted">Join an organization using an invite ID sent to your email.</p>
-          <input id="inviteId" placeholder="invite_id" />
-          <button id="btnAcceptInvite">Accept Invite</button>
-          <pre id="inviteOut"></pre>
+          <h2>Your Profile</h2>
+          <div id="profileStatus" class="status">Loading profile...</div>
+          <div class="profileRows">
+            <div class="row">
+              <span class="label">Email</span>
+              <div class="value" id="profileEmail">-</div>
+            </div>
+            <div class="row">
+              <span class="label">Joined On</span>
+              <div class="value" id="profileJoined">-</div>
+            </div>
+            <div class="row">
+              <span class="label">Organizations</span>
+              <div class="value" id="profileOrgs">-</div>
+            </div>
+            <div class="row" id="superAdminRow" style="display: none">
+              <span class="label">Account Role</span>
+              <div class="value">Super Admin</div>
+            </div>
+          </div>
         </section>
       </div>
     </main>
