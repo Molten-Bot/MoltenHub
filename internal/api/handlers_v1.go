@@ -155,7 +155,7 @@ func (h *Handler) handleMe(w http.ResponseWriter, r *http.Request) {
 		if req.Handle != nil {
 			handle = normalizeHandle(*req.Handle)
 			if !validateHandle(handle) {
-				writeError(w, http.StatusBadRequest, "invalid_handle", "handle must be URL-safe (a-z, 0-9, ., _, -)")
+				writeError(w, http.StatusBadRequest, "invalid_handle", "handle must be 2-64 chars, URL-safe (a-z, 0-9, ., _, -), and not blocked")
 				return
 			}
 		}
@@ -168,7 +168,7 @@ func (h *Handler) handleMe(w http.ResponseWriter, r *http.Request) {
 			case errors.Is(err, store.ErrHumanHandleTaken):
 				writeError(w, http.StatusConflict, "human_handle_exists", "handle is already taken")
 			case errors.Is(err, store.ErrInvalidHandle):
-				writeError(w, http.StatusBadRequest, "invalid_handle", "handle must be URL-safe (a-z, 0-9, ., _, -)")
+				writeError(w, http.StatusBadRequest, "invalid_handle", "handle must be 2-64 chars, URL-safe (a-z, 0-9, ., _, -), and not blocked")
 			default:
 				writeError(w, http.StatusInternalServerError, "store_error", "failed to update profile")
 			}
@@ -231,7 +231,7 @@ func (h *Handler) handleMyAgents(w http.ResponseWriter, r *http.Request) {
 		req.OrgID = strings.TrimSpace(req.OrgID)
 		req.AgentID = normalizeHandle(req.AgentID)
 		if !validateAgentID(req.AgentID) {
-			writeError(w, http.StatusBadRequest, "invalid_agent_id", "agent_id must be URL-safe (a-z, 0-9, ., _, -)")
+			writeError(w, http.StatusBadRequest, "invalid_agent_id", "agent_id must be 2-64 chars, URL-safe (a-z, 0-9, ., _, -), and not blocked")
 			return
 		}
 
@@ -265,6 +265,8 @@ func (h *Handler) handleMyAgents(w http.ResponseWriter, r *http.Request) {
 				writeError(w, http.StatusBadRequest, "invalid_owner_human_id", "owner_human_id must be active in org")
 			case errors.Is(err, store.ErrAgentExists):
 				writeError(w, http.StatusConflict, "agent_exists", "agent_id already registered")
+			case errors.Is(err, store.ErrInvalidHandle):
+				writeError(w, http.StatusBadRequest, "invalid_agent_id", "agent_id must be 2-64 chars, URL-safe (a-z, 0-9, ., _, -), and not blocked")
 			case errors.Is(err, store.ErrAgentLimitExceeded):
 				writeError(w, http.StatusConflict, "agent_limit_reached", "non-super-admin users can only own up to 2 active agents")
 			default:
@@ -275,6 +277,7 @@ func (h *Handler) handleMyAgents(w http.ResponseWriter, r *http.Request) {
 
 		writeJSON(w, http.StatusCreated, map[string]any{
 			"agent_id":       agent.AgentID,
+			"handle":         agent.Handle,
 			"org_id":         agent.OrgID,
 			"owner_human_id": agent.OwnerHumanID,
 			"token":          token,
@@ -379,10 +382,10 @@ func (h *Handler) handleMyAgentTrusts(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		req.OrgID = strings.TrimSpace(req.OrgID)
-		req.AgentID = normalizeHandle(req.AgentID)
-		req.PeerAgentID = normalizeHandle(req.PeerAgentID)
-		if !validateAgentID(req.AgentID) || !validateAgentID(req.PeerAgentID) {
-			writeError(w, http.StatusBadRequest, "invalid_agent_id", "agent ids must be URL-safe (a-z, 0-9, ., _, -)")
+		req.AgentID = normalizeAgentRef(req.AgentID)
+		req.PeerAgentID = normalizeAgentRef(req.PeerAgentID)
+		if !validateAgentRef(req.AgentID) || !validateAgentRef(req.PeerAgentID) {
+			writeError(w, http.StatusBadRequest, "invalid_agent_id", "agent refs must be handle (2-64 chars) or URI (org/agent or org/human/agent)")
 			return
 		}
 
@@ -396,6 +399,8 @@ func (h *Handler) handleMyAgentTrusts(w http.ResponseWriter, r *http.Request) {
 			switch {
 			case errors.Is(err, store.ErrAgentNotFound):
 				writeError(w, http.StatusNotFound, "unknown_agent", "agent_id or peer_agent_id is not registered")
+			case errors.Is(err, store.ErrAgentAmbiguous):
+				writeError(w, http.StatusConflict, "ambiguous_agent_id", "agent_id or peer_agent_id matched multiple agents; use canonical agent URI")
 			case errors.Is(err, store.ErrUnauthorizedRole):
 				writeError(w, http.StatusForbidden, "forbidden", "owner/admin required for initiating agent")
 			case errors.Is(err, store.ErrSelfTrust):
@@ -680,7 +685,7 @@ func (h *Handler) handleOrgs(w http.ResponseWriter, r *http.Request) {
 	handle := normalizeHandle(req.Handle)
 	displayName := strings.TrimSpace(req.DisplayName)
 	if !validateHandle(handle) {
-		writeError(w, http.StatusBadRequest, "invalid_handle", "handle must be a URL-safe identifier")
+		writeError(w, http.StatusBadRequest, "invalid_handle", "handle must be 2-64 chars, URL-safe (a-z, 0-9, ., _, -), and not blocked")
 		return
 	}
 	if displayName == "" {
@@ -697,7 +702,7 @@ func (h *Handler) handleOrgs(w http.ResponseWriter, r *http.Request) {
 		case errors.Is(err, store.ErrOrgHandleTaken), errors.Is(err, store.ErrOrgNameTaken):
 			writeError(w, http.StatusConflict, "org_handle_exists", "organization handle already exists")
 		case errors.Is(err, store.ErrInvalidHandle):
-			writeError(w, http.StatusBadRequest, "invalid_handle", "handle must be a URL-safe identifier")
+			writeError(w, http.StatusBadRequest, "invalid_handle", "handle must be 2-64 chars, URL-safe (a-z, 0-9, ., _, -), and not blocked")
 		default:
 			writeError(w, http.StatusInternalServerError, "store_error", "failed to create org")
 		}
@@ -1380,7 +1385,7 @@ func (h *Handler) handleRedeemBindToken(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	if !validateAgentID(req.AgentID) {
-		writeError(w, http.StatusBadRequest, "invalid_agent_id", "agent_id must be URL-safe (a-z, 0-9, ., _, -)")
+		writeError(w, http.StatusBadRequest, "invalid_agent_id", "agent_id must be 2-64 chars, URL-safe (a-z, 0-9, ., _, -), and not blocked")
 		return
 	}
 
@@ -1407,6 +1412,8 @@ func (h *Handler) handleRedeemBindToken(w http.ResponseWriter, r *http.Request) 
 			writeError(w, http.StatusConflict, "bind_used", "bind token already used")
 		case errors.Is(err, store.ErrAgentExists):
 			writeError(w, http.StatusConflict, "agent_exists", "agent_id already registered")
+		case errors.Is(err, store.ErrInvalidHandle):
+			writeError(w, http.StatusBadRequest, "invalid_agent_id", "agent_id must be 2-64 chars, URL-safe (a-z, 0-9, ., _, -), and not blocked")
 		case errors.Is(err, store.ErrMembershipNotFound):
 			writeError(w, http.StatusBadRequest, "invalid_owner_human_id", "owner_human_id is no longer active in org")
 		default:
@@ -1423,6 +1430,7 @@ func (h *Handler) handleRedeemBindToken(w http.ResponseWriter, r *http.Request) 
 	writeJSON(w, http.StatusCreated, map[string]any{
 		"status":         "ok",
 		"agent_id":       agent.AgentID,
+		"handle":         agent.Handle,
 		"org_id":         agent.OrgID,
 		"owner_human_id": agent.OwnerHumanID,
 		"token":          agentToken,
@@ -1463,7 +1471,7 @@ func (h *Handler) handleRegisterAgent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !validateAgentID(req.AgentID) {
-		writeError(w, http.StatusBadRequest, "invalid_agent_id", "agent_id must be URL-safe (a-z, 0-9, ., _, -)")
+		writeError(w, http.StatusBadRequest, "invalid_agent_id", "agent_id must be 2-64 chars, URL-safe (a-z, 0-9, ., _, -), and not blocked")
 		return
 	}
 	if req.OwnerHumanID != nil {
@@ -1487,6 +1495,8 @@ func (h *Handler) handleRegisterAgent(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusBadRequest, "invalid_owner_human_id", "owner_human_id must be active in org")
 		case errors.Is(err, store.ErrAgentExists):
 			writeError(w, http.StatusConflict, "agent_exists", "agent_id already registered")
+		case errors.Is(err, store.ErrInvalidHandle):
+			writeError(w, http.StatusBadRequest, "invalid_agent_id", "agent_id must be 2-64 chars, URL-safe (a-z, 0-9, ., _, -), and not blocked")
 		case errors.Is(err, store.ErrAgentLimitExceeded):
 			writeError(w, http.StatusConflict, "agent_limit_reached", "non-super-admin users can only own up to 2 active agents")
 		default:
@@ -1497,6 +1507,7 @@ func (h *Handler) handleRegisterAgent(w http.ResponseWriter, r *http.Request) {
 
 	writeJSON(w, http.StatusCreated, map[string]any{
 		"agent_id":       agent.AgentID,
+		"handle":         agent.Handle,
 		"org_id":         agent.OrgID,
 		"owner_human_id": agent.OwnerHumanID,
 		"token":          token,
@@ -1505,12 +1516,28 @@ func (h *Handler) handleRegisterAgent(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) handleAgentsSubroutes(w http.ResponseWriter, r *http.Request) {
-	parts := splitPath(r.URL.Path)
-	if len(parts) < 3 || parts[0] != "v1" || parts[1] != "agents" {
+	path := strings.TrimSuffix(r.URL.Path, "/")
+	const prefix = "/v1/agents/"
+	if !strings.HasPrefix(path, prefix) {
 		writeError(w, http.StatusNotFound, "not_found", "route not found")
 		return
 	}
-	agentID := parts[2]
+	tail := strings.Trim(strings.TrimPrefix(path, prefix), "/")
+	if tail == "" {
+		writeError(w, http.StatusNotFound, "not_found", "route not found")
+		return
+	}
+	agentID := tail
+	action := ""
+	if r.Method == http.MethodPost && strings.HasSuffix(tail, "/rotate-token") {
+		action = "rotate-token"
+		agentID = strings.Trim(strings.TrimSuffix(tail, "/rotate-token"), "/")
+	}
+	if agentID == "" {
+		writeError(w, http.StatusNotFound, "not_found", "route not found")
+		return
+	}
+
 	actor, err := h.authenticateHuman(r)
 	if err != nil {
 		writeError(w, http.StatusUnauthorized, "unauthorized", "missing or invalid human auth")
@@ -1520,7 +1547,7 @@ func (h *Handler) handleAgentsSubroutes(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	if len(parts) == 4 && parts[3] == "rotate-token" {
+	if action == "rotate-token" {
 		if r.Method != http.MethodPost {
 			writeMethodNotAllowed(w)
 			return
@@ -1534,6 +1561,8 @@ func (h *Handler) handleAgentsSubroutes(w http.ResponseWriter, r *http.Request) 
 			switch {
 			case errors.Is(err, store.ErrAgentNotFound):
 				writeError(w, http.StatusNotFound, "unknown_agent", "agent_id is not registered")
+			case errors.Is(err, store.ErrAgentAmbiguous):
+				writeError(w, http.StatusConflict, "ambiguous_agent_id", "agent_id matched multiple agents; use canonical agent URI")
 			case errors.Is(err, store.ErrUnauthorizedRole):
 				writeError(w, http.StatusForbidden, "forbidden", "admin/owner required")
 			default:
@@ -1549,59 +1578,59 @@ func (h *Handler) handleAgentsSubroutes(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	if len(parts) == 3 {
-		switch r.Method {
-		case http.MethodDelete:
-			if err := h.control.RevokeAgent(agentID, actor.Human.HumanID, h.now().UTC(), actor.IsSuperAdmin); err != nil {
-				switch {
-				case errors.Is(err, store.ErrAgentNotFound):
-					writeError(w, http.StatusNotFound, "unknown_agent", "agent_id is not registered")
-				case errors.Is(err, store.ErrUnauthorizedRole):
-					writeError(w, http.StatusForbidden, "forbidden", "admin/owner required")
-				default:
-					writeError(w, http.StatusInternalServerError, "store_error", "failed to revoke agent")
-				}
-				return
+	switch r.Method {
+	case http.MethodDelete:
+		if err := h.control.RevokeAgent(agentID, actor.Human.HumanID, h.now().UTC(), actor.IsSuperAdmin); err != nil {
+			switch {
+			case errors.Is(err, store.ErrAgentNotFound):
+				writeError(w, http.StatusNotFound, "unknown_agent", "agent_id is not registered")
+			case errors.Is(err, store.ErrAgentAmbiguous):
+				writeError(w, http.StatusConflict, "ambiguous_agent_id", "agent_id matched multiple agents; use canonical agent URI")
+			case errors.Is(err, store.ErrUnauthorizedRole):
+				writeError(w, http.StatusForbidden, "forbidden", "admin/owner required")
+			default:
+				writeError(w, http.StatusInternalServerError, "store_error", "failed to revoke agent")
 			}
-			writeJSON(w, http.StatusOK, map[string]any{
-				"status":   "ok",
-				"agent_id": agentID,
-				"result":   "revoked",
-			})
-			return
-		case http.MethodPatch:
-			var req updateVisibilityRequest
-			if err := decodeJSON(r, &req); err != nil {
-				writeError(w, http.StatusBadRequest, "invalid_request", "invalid JSON request")
-				return
-			}
-			if req.IsPublic == nil {
-				writeError(w, http.StatusBadRequest, "invalid_request", "is_public is required")
-				return
-			}
-			agent, err := h.control.SetAgentVisibility(agentID, *req.IsPublic, actor.Human.HumanID, h.now().UTC(), actor.IsSuperAdmin)
-			if err != nil {
-				switch {
-				case errors.Is(err, store.ErrAgentNotFound):
-					writeError(w, http.StatusNotFound, "unknown_agent", "agent_id is not registered")
-				case errors.Is(err, store.ErrUnauthorizedRole):
-					writeError(w, http.StatusForbidden, "forbidden", "admin/owner required")
-				default:
-					writeError(w, http.StatusInternalServerError, "store_error", "failed to update agent visibility")
-				}
-				return
-			}
-			writeJSON(w, http.StatusOK, map[string]any{
-				"agent": agent,
-			})
-			return
-		default:
-			writeMethodNotAllowed(w)
 			return
 		}
+		writeJSON(w, http.StatusOK, map[string]any{
+			"status":   "ok",
+			"agent_id": agentID,
+			"result":   "revoked",
+		})
+		return
+	case http.MethodPatch:
+		var req updateVisibilityRequest
+		if err := decodeJSON(r, &req); err != nil {
+			writeError(w, http.StatusBadRequest, "invalid_request", "invalid JSON request")
+			return
+		}
+		if req.IsPublic == nil {
+			writeError(w, http.StatusBadRequest, "invalid_request", "is_public is required")
+			return
+		}
+		agent, err := h.control.SetAgentVisibility(agentID, *req.IsPublic, actor.Human.HumanID, h.now().UTC(), actor.IsSuperAdmin)
+		if err != nil {
+			switch {
+			case errors.Is(err, store.ErrAgentNotFound):
+				writeError(w, http.StatusNotFound, "unknown_agent", "agent_id is not registered")
+			case errors.Is(err, store.ErrAgentAmbiguous):
+				writeError(w, http.StatusConflict, "ambiguous_agent_id", "agent_id matched multiple agents; use canonical agent URI")
+			case errors.Is(err, store.ErrUnauthorizedRole):
+				writeError(w, http.StatusForbidden, "forbidden", "admin/owner required")
+			default:
+				writeError(w, http.StatusInternalServerError, "store_error", "failed to update agent visibility")
+			}
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{
+			"agent": agent,
+		})
+		return
+	default:
+		writeMethodNotAllowed(w)
+		return
 	}
-
-	writeError(w, http.StatusNotFound, "not_found", "route not found")
 }
 
 func (h *Handler) handleOrgTrusts(w http.ResponseWriter, r *http.Request) {
@@ -1730,10 +1759,10 @@ func (h *Handler) handleAgentTrusts(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	req.OrgID = strings.TrimSpace(req.OrgID)
-	req.AgentID = normalizeHandle(req.AgentID)
-	req.PeerAgentID = normalizeHandle(req.PeerAgentID)
-	if !validateAgentID(req.AgentID) || !validateAgentID(req.PeerAgentID) {
-		writeError(w, http.StatusBadRequest, "invalid_agent_id", "agent ids must be URL-safe (a-z, 0-9, ., _, -)")
+	req.AgentID = normalizeAgentRef(req.AgentID)
+	req.PeerAgentID = normalizeAgentRef(req.PeerAgentID)
+	if !validateAgentRef(req.AgentID) || !validateAgentRef(req.PeerAgentID) {
+		writeError(w, http.StatusBadRequest, "invalid_agent_id", "agent refs must be handle (2-64 chars) or URI (org/agent or org/human/agent)")
 		return
 	}
 	edgeID, err := h.idFactory()
@@ -1746,6 +1775,8 @@ func (h *Handler) handleAgentTrusts(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case errors.Is(err, store.ErrAgentNotFound):
 			writeError(w, http.StatusNotFound, "unknown_agent", "agent_id or peer_agent_id is not registered")
+		case errors.Is(err, store.ErrAgentAmbiguous):
+			writeError(w, http.StatusConflict, "ambiguous_agent_id", "agent_id or peer_agent_id matched multiple agents; use canonical agent URI")
 		case errors.Is(err, store.ErrUnauthorizedRole):
 			writeError(w, http.StatusForbidden, "forbidden", "owner/admin required in org")
 		case errors.Is(err, store.ErrSelfTrust):
@@ -1829,6 +1860,8 @@ func (h *Handler) writeTrustErr(w http.ResponseWriter, err error, kind string) {
 		writeError(w, http.StatusNotFound, "unknown_trust", kind+"_trust id is not registered")
 	case errors.Is(err, store.ErrUnauthorizedRole):
 		writeError(w, http.StatusForbidden, "forbidden", "owner/admin required")
+	case errors.Is(err, store.ErrAgentAmbiguous):
+		writeError(w, http.StatusConflict, "ambiguous_agent_id", "agent reference matched multiple agents; use canonical agent URI")
 	case errors.Is(err, store.ErrAgentNotFound):
 		writeError(w, http.StatusNotFound, "unknown_agent", "agent not found")
 	default:

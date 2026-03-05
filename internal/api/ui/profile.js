@@ -238,7 +238,7 @@ async function saveProfile() {
       return;
     }
     if (err === "invalid_handle") {
-      setStatus("Handle must be URL-safe (a-z, 0-9, ., _, -).", true);
+      setStatus("Handle must be 2-64 chars, URL-safe (a-z, 0-9, ., _, -), and not blocked.", true);
       return;
     }
     setStatus("Could not update profile.", true);

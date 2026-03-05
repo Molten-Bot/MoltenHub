@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"statocyst/internal/handles"
 	"statocyst/internal/model"
 )
 
@@ -28,6 +29,7 @@ var (
 	ErrCannotRevokeOwner    = errors.New("cannot revoke owner membership")
 	ErrAgentExists          = errors.New("agent already exists")
 	ErrAgentNotFound        = errors.New("agent not found")
+	ErrAgentAmbiguous       = errors.New("agent reference is ambiguous")
 	ErrAgentRevoked         = errors.New("agent revoked")
 	ErrTrustNotFound        = errors.New("trust edge not found")
 	ErrUnauthorizedRole     = errors.New("unauthorized role")
@@ -64,7 +66,7 @@ type MemoryStore struct {
 	agents               map[string]model.Agent
 	agentTokenIdx        map[string]string
 	orgOwnedAgentNameIdx map[string]string
-	// humanOwnedAgentNameIdx enforces unique human-owned agent names across all humans.
+	// humanOwnedAgentNameIdx enforces unique human-owned agent names within org+human scope.
 	humanOwnedAgentNameIdx map[string]string
 	queues                 map[string][]model.Message
 
@@ -165,7 +167,7 @@ func (s *MemoryStore) UpdateHumanProfile(humanID, handle string, isPublic *bool,
 	}
 	if handle != "" {
 		nextHandle := normalizeHumanHandleCandidate(handle)
-		if nextHandle == "" {
+		if err := handles.ValidateHandle(nextHandle); err != nil {
 			return model.Human{}, ErrInvalidHandle
 		}
 		if ownerID, exists := s.humanByHandle[nextHandle]; exists && ownerID != humanID {
@@ -197,7 +199,7 @@ func (s *MemoryStore) CreateOrg(handle, displayName string, creatorHumanID strin
 	}
 
 	handleKey := normalizeOrgHandleKey(handle)
-	if handleKey == "" {
+	if err := handles.ValidateHandle(handleKey); err != nil {
 		return model.Organization{}, model.Membership{}, ErrInvalidHandle
 	}
 	if existingOrgID, ok := s.orgByHandle[handleKey]; ok && existingOrgID != "" {
@@ -254,6 +256,10 @@ func (s *MemoryStore) ensurePersonalOrgLocked(humanID string, now time.Time, idF
 	baseHandle := normalizeOrgHandleKey(fmt.Sprintf("personal-%s", s.humans[humanID].Handle))
 	if strings.TrimSpace(baseHandle) == "" || baseHandle == "personal-" {
 		baseHandle = normalizeOrgHandleKey(fmt.Sprintf("personal-%s", humanID))
+	}
+	if err := handles.ValidateHandle(baseHandle); err != nil {
+		baseHandle = "personal-" + humanID
+		baseHandle = normalizeOrgHandleKey(baseHandle)
 	}
 	handle := baseHandle
 	for i := 2; ; i++ {
@@ -737,32 +743,50 @@ func (s *MemoryStore) RegisterAgent(orgID, agentID string, ownerHumanID *string,
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	if _, ok := s.orgs[orgID]; !ok {
+	org, ok := s.orgs[orgID]
+	if !ok {
 		return model.Agent{}, ErrOrgNotFound
 	}
 	if !isSuperAdmin && !hasRoleAtLeast(s.membershipRoleLocked(orgID, actorHumanID), model.RoleMember) {
 		return model.Agent{}, ErrUnauthorizedRole
 	}
-	if _, ok := s.agents[agentID]; ok {
-		return model.Agent{}, ErrAgentExists
+	agentHandle := normalizeAgentNameKey(agentID)
+	if err := handles.ValidateHandle(agentHandle); err != nil {
+		return model.Agent{}, ErrInvalidHandle
 	}
+
+	var ownerHandle *string
 	if ownerHumanID != nil {
 		if s.membershipRoleLocked(orgID, *ownerHumanID) == "" {
 			return model.Agent{}, ErrMembershipNotFound
 		}
-		key := humanOwnedAgentNameKey(agentID)
+		human, ok := s.humans[*ownerHumanID]
+		if !ok {
+			return model.Agent{}, ErrHumanNotFound
+		}
+		if err := handles.ValidateHandle(human.Handle); err != nil {
+			return model.Agent{}, ErrInvalidHandle
+		}
+		oh := human.Handle
+		ownerHandle = &oh
+		key := humanOwnedAgentNameKey(orgID, *ownerHumanID, agentHandle)
 		if _, exists := s.humanOwnedAgentNameIdx[key]; exists {
 			return model.Agent{}, ErrAgentExists
 		}
 	} else {
-		key := orgOwnedAgentNameKey(orgID, agentID)
+		key := orgOwnedAgentNameKey(orgID, agentHandle)
 		if _, exists := s.orgOwnedAgentNameIdx[key]; exists {
 			return model.Agent{}, ErrAgentExists
 		}
 	}
+	agentURI := handles.BuildAgentURI(org.Handle, ownerHandle, agentHandle)
+	if _, exists := s.agents[agentURI]; exists {
+		return model.Agent{}, ErrAgentExists
+	}
 
 	agent := model.Agent{
-		AgentID:      agentID,
+		AgentID:      agentURI,
+		Handle:       agentHandle,
 		OrgID:        orgID,
 		OwnerHumanID: ownerHumanID,
 		TokenHash:    tokenHash,
@@ -771,16 +795,17 @@ func (s *MemoryStore) RegisterAgent(orgID, agentID string, ownerHumanID *string,
 		CreatedBy:    actorHumanID,
 		CreatedAt:    now,
 	}
-	s.agents[agentID] = agent
-	s.agentTokenIdx[tokenHash] = agentID
+	s.agents[agentURI] = agent
+	s.agentTokenIdx[tokenHash] = agentURI
 	if ownerHumanID != nil {
-		s.humanOwnedAgentNameIdx[humanOwnedAgentNameKey(agentID)] = agentID
+		s.humanOwnedAgentNameIdx[humanOwnedAgentNameKey(orgID, *ownerHumanID, agentHandle)] = agentURI
 	} else {
-		s.orgOwnedAgentNameIdx[orgOwnedAgentNameKey(orgID, agentID)] = agentID
+		s.orgOwnedAgentNameIdx[orgOwnedAgentNameKey(orgID, agentHandle)] = agentURI
 	}
-	s.queues[agentID] = s.queues[agentID]
+	s.queues[agentURI] = s.queues[agentURI]
 	s.appendAuditLocked(orgID, actorHumanID, "agent", "register", agent.AgentID, map[string]any{
 		"owner_human_id": ownerHumanID,
+		"handle":         agentHandle,
 	}, now)
 	return agent, nil
 }
@@ -838,24 +863,44 @@ func (s *MemoryStore) RedeemBindToken(bindTokenHash, agentID, agentTokenHash str
 	if now.After(bind.ExpiresAt) {
 		return model.Agent{}, ErrBindExpired
 	}
-	if _, exists := s.agents[agentID]; exists {
-		return model.Agent{}, ErrAgentExists
+	agentHandle := normalizeAgentNameKey(agentID)
+	if err := handles.ValidateHandle(agentHandle); err != nil {
+		return model.Agent{}, ErrInvalidHandle
 	}
+	org, ok := s.orgs[bind.OrgID]
+	if !ok {
+		return model.Agent{}, ErrOrgNotFound
+	}
+	var ownerHandle *string
 	if bind.OwnerHumanID != nil {
 		if s.membershipRoleLocked(bind.OrgID, *bind.OwnerHumanID) == "" {
 			return model.Agent{}, ErrMembershipNotFound
 		}
-		if _, exists := s.humanOwnedAgentNameIdx[humanOwnedAgentNameKey(agentID)]; exists {
+		human, ok := s.humans[*bind.OwnerHumanID]
+		if !ok {
+			return model.Agent{}, ErrHumanNotFound
+		}
+		if err := handles.ValidateHandle(human.Handle); err != nil {
+			return model.Agent{}, ErrInvalidHandle
+		}
+		oh := human.Handle
+		ownerHandle = &oh
+		if _, exists := s.humanOwnedAgentNameIdx[humanOwnedAgentNameKey(bind.OrgID, *bind.OwnerHumanID, agentHandle)]; exists {
 			return model.Agent{}, ErrAgentExists
 		}
 	} else {
-		if _, exists := s.orgOwnedAgentNameIdx[orgOwnedAgentNameKey(bind.OrgID, agentID)]; exists {
+		if _, exists := s.orgOwnedAgentNameIdx[orgOwnedAgentNameKey(bind.OrgID, agentHandle)]; exists {
 			return model.Agent{}, ErrAgentExists
 		}
 	}
+	agentURI := handles.BuildAgentURI(org.Handle, ownerHandle, agentHandle)
+	if _, exists := s.agents[agentURI]; exists {
+		return model.Agent{}, ErrAgentExists
+	}
 
 	agent := model.Agent{
-		AgentID:      agentID,
+		AgentID:      agentURI,
+		Handle:       agentHandle,
 		OrgID:        bind.OrgID,
 		OwnerHumanID: bind.OwnerHumanID,
 		TokenHash:    agentTokenHash,
@@ -867,9 +912,9 @@ func (s *MemoryStore) RedeemBindToken(bindTokenHash, agentID, agentTokenHash str
 	s.agents[agent.AgentID] = agent
 	s.agentTokenIdx[agentTokenHash] = agent.AgentID
 	if bind.OwnerHumanID != nil {
-		s.humanOwnedAgentNameIdx[humanOwnedAgentNameKey(agent.AgentID)] = agent.AgentID
+		s.humanOwnedAgentNameIdx[humanOwnedAgentNameKey(bind.OrgID, *bind.OwnerHumanID, agent.Handle)] = agent.AgentID
 	} else {
-		s.orgOwnedAgentNameIdx[orgOwnedAgentNameKey(bind.OrgID, agent.AgentID)] = agent.AgentID
+		s.orgOwnedAgentNameIdx[orgOwnedAgentNameKey(bind.OrgID, agent.Handle)] = agent.AgentID
 	}
 	s.queues[agent.AgentID] = s.queues[agent.AgentID]
 	used := now
@@ -885,7 +930,14 @@ func (s *MemoryStore) RotateAgentToken(agentID, actorHumanID, tokenHash string, 
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	agent, ok := s.agents[agentID]
+	resolvedAgentID, err := s.resolveAgentRefLocked(agentID)
+	if err != nil {
+		if errors.Is(err, ErrAgentAmbiguous) {
+			return ErrAgentAmbiguous
+		}
+		return ErrAgentNotFound
+	}
+	agent, ok := s.agents[resolvedAgentID]
 	if !ok {
 		return ErrAgentNotFound
 	}
@@ -894,9 +946,9 @@ func (s *MemoryStore) RotateAgentToken(agentID, actorHumanID, tokenHash string, 
 	}
 	delete(s.agentTokenIdx, agent.TokenHash)
 	agent.TokenHash = tokenHash
-	s.agents[agentID] = agent
-	s.agentTokenIdx[tokenHash] = agentID
-	s.appendAuditLocked(agent.OrgID, actorHumanID, "agent", "rotate_token", agentID, nil, now)
+	s.agents[resolvedAgentID] = agent
+	s.agentTokenIdx[tokenHash] = resolvedAgentID
+	s.appendAuditLocked(agent.OrgID, actorHumanID, "agent", "rotate_token", resolvedAgentID, nil, now)
 	return nil
 }
 
@@ -904,7 +956,14 @@ func (s *MemoryStore) RevokeAgent(agentID, actorHumanID string, now time.Time, i
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	agent, ok := s.agents[agentID]
+	resolvedAgentID, err := s.resolveAgentRefLocked(agentID)
+	if err != nil {
+		if errors.Is(err, ErrAgentAmbiguous) {
+			return ErrAgentAmbiguous
+		}
+		return ErrAgentNotFound
+	}
+	agent, ok := s.agents[resolvedAgentID]
 	if !ok {
 		return ErrAgentNotFound
 	}
@@ -916,15 +975,15 @@ func (s *MemoryStore) RevokeAgent(agentID, actorHumanID string, now time.Time, i
 	}
 	delete(s.agentTokenIdx, agent.TokenHash)
 	if agent.OwnerHumanID != nil {
-		delete(s.humanOwnedAgentNameIdx, humanOwnedAgentNameKey(agent.AgentID))
+		delete(s.humanOwnedAgentNameIdx, humanOwnedAgentNameKey(agent.OrgID, *agent.OwnerHumanID, agent.Handle))
 	} else {
-		delete(s.orgOwnedAgentNameIdx, orgOwnedAgentNameKey(agent.OrgID, agent.AgentID))
+		delete(s.orgOwnedAgentNameIdx, orgOwnedAgentNameKey(agent.OrgID, agent.Handle))
 	}
 	agent.Status = model.StatusRevoked
 	revokedAt := now
 	agent.RevokedAt = &revokedAt
-	s.agents[agentID] = agent
-	s.appendAuditLocked(agent.OrgID, actorHumanID, "agent", "revoke", agentID, nil, now)
+	s.agents[resolvedAgentID] = agent
+	s.appendAuditLocked(agent.OrgID, actorHumanID, "agent", "revoke", resolvedAgentID, nil, now)
 	return nil
 }
 
@@ -949,7 +1008,14 @@ func (s *MemoryStore) SetAgentVisibility(agentID string, isPublic bool, actorHum
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	agent, ok := s.agents[agentID]
+	resolvedAgentID, err := s.resolveAgentRefLocked(agentID)
+	if err != nil {
+		if errors.Is(err, ErrAgentAmbiguous) {
+			return model.Agent{}, ErrAgentAmbiguous
+		}
+		return model.Agent{}, ErrAgentNotFound
+	}
+	agent, ok := s.agents[resolvedAgentID]
 	if !ok {
 		return model.Agent{}, ErrAgentNotFound
 	}
@@ -957,8 +1023,8 @@ func (s *MemoryStore) SetAgentVisibility(agentID string, isPublic bool, actorHum
 		return model.Agent{}, ErrUnauthorizedRole
 	}
 	agent.IsPublic = isPublic
-	s.agents[agentID] = agent
-	s.appendAuditLocked(agent.OrgID, actorHumanID, "agent", "set_visibility", agentID, map[string]any{"is_public": isPublic}, now)
+	s.agents[resolvedAgentID] = agent
+	s.appendAuditLocked(agent.OrgID, actorHumanID, "agent", "set_visibility", resolvedAgentID, map[string]any{"is_public": isPublic}, now)
 	return agent, nil
 }
 
@@ -992,7 +1058,14 @@ func (s *MemoryStore) GetAgent(agentID string) (model.Agent, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	agent, ok := s.agents[agentID]
+	resolvedAgentID, err := s.resolveAgentRefLocked(agentID)
+	if err != nil {
+		if errors.Is(err, ErrAgentAmbiguous) {
+			return model.Agent{}, ErrAgentAmbiguous
+		}
+		return model.Agent{}, ErrAgentNotFound
+	}
+	agent, ok := s.agents[resolvedAgentID]
 	if !ok || agent.Status == model.StatusRevoked {
 		return model.Agent{}, ErrAgentNotFound
 	}
@@ -1038,14 +1111,18 @@ func (s *MemoryStore) ListTalkablePeers(agentID string) ([]string, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	agent, ok := s.agents[agentID]
+	resolvedAgentID, err := s.resolveAgentRefLocked(agentID)
+	if err != nil {
+		return nil, ErrAgentNotFound
+	}
+	agent, ok := s.agents[resolvedAgentID]
 	if !ok || agent.Status == model.StatusRevoked {
 		return nil, ErrAgentNotFound
 	}
 
 	out := make([]string, 0)
 	for peerID, peer := range s.agents {
-		if peerID == agentID || peer.Status == model.StatusRevoked {
+		if peerID == resolvedAgentID || peer.Status == model.StatusRevoked {
 			continue
 		}
 		if s.canPublishLocked(agent, peer) {
@@ -1066,7 +1143,22 @@ func (s *MemoryStore) CreateOrJoinAgentTrust(orgID, agentID, peerAgentID, actorH
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	a, ok := s.agents[agentID]
+	resolvedAgentID, err := s.resolveAgentRefLocked(agentID)
+	if err != nil {
+		if errors.Is(err, ErrAgentAmbiguous) {
+			return model.TrustEdge{}, false, ErrAgentAmbiguous
+		}
+		return model.TrustEdge{}, false, ErrAgentNotFound
+	}
+	resolvedPeerAgentID, err := s.resolveAgentRefLocked(peerAgentID)
+	if err != nil {
+		if errors.Is(err, ErrAgentAmbiguous) {
+			return model.TrustEdge{}, false, ErrAgentAmbiguous
+		}
+		return model.TrustEdge{}, false, ErrAgentNotFound
+	}
+
+	a, ok := s.agents[resolvedAgentID]
 	if !ok {
 		return model.TrustEdge{}, false, ErrAgentNotFound
 	}
@@ -1076,10 +1168,10 @@ func (s *MemoryStore) CreateOrJoinAgentTrust(orgID, agentID, peerAgentID, actorH
 	if !isSuperAdmin && !s.canManageAgentLocked(a, actorHumanID) {
 		return model.TrustEdge{}, false, ErrUnauthorizedRole
 	}
-	if _, ok := s.agents[peerAgentID]; !ok {
+	if _, ok := s.agents[resolvedPeerAgentID]; !ok {
 		return model.TrustEdge{}, false, ErrAgentNotFound
 	}
-	return s.createOrJoinTrustLocked("agent", agentID, peerAgentID, actorHumanID, edgeID, now, isSuperAdmin)
+	return s.createOrJoinTrustLocked("agent", resolvedAgentID, resolvedPeerAgentID, actorHumanID, edgeID, now, isSuperAdmin)
 }
 
 func (s *MemoryStore) ApproveOrgTrust(edgeID, actorHumanID string, now time.Time, isSuperAdmin bool) (model.TrustEdge, error) {
@@ -1284,11 +1376,23 @@ func (s *MemoryStore) CanPublish(senderAgentID, receiverAgentID string) (string,
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	sender, ok := s.agents[senderAgentID]
+	resolvedSenderID, err := s.resolveAgentRefLocked(senderAgentID)
+	if err != nil {
+		return "", "", ErrAgentNotFound
+	}
+	resolvedReceiverID, err := s.resolveAgentRefLocked(receiverAgentID)
+	if err != nil {
+		if errors.Is(err, ErrAgentAmbiguous) {
+			return "", "", ErrAgentAmbiguous
+		}
+		return "", "", ErrAgentNotFound
+	}
+
+	sender, ok := s.agents[resolvedSenderID]
 	if !ok || sender.Status == model.StatusRevoked {
 		return "", "", ErrAgentNotFound
 	}
-	receiver, ok := s.agents[receiverAgentID]
+	receiver, ok := s.agents[resolvedReceiverID]
 	if !ok || receiver.Status == model.StatusRevoked {
 		return "", "", ErrAgentNotFound
 	}
@@ -1348,6 +1452,11 @@ func (s *MemoryStore) Enqueue(message model.Message) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	resolvedToAgentID, err := s.resolveAgentRefLocked(message.ToAgentID)
+	if err != nil {
+		return ErrAgentNotFound
+	}
+	message.ToAgentID = resolvedToAgentID
 	if _, ok := s.agents[message.ToAgentID]; !ok {
 		return ErrAgentNotFound
 	}
@@ -1622,6 +1731,39 @@ func (s *MemoryStore) canManageAgentLockedByID(agentID, humanID string) bool {
 	return s.canManageAgentLocked(agent, humanID)
 }
 
+func (s *MemoryStore) resolveAgentRefLocked(agentRef string) (string, error) {
+	ref := handles.NormalizeAgentRef(agentRef)
+	if ref == "" {
+		return "", ErrAgentNotFound
+	}
+
+	if _, ok := s.agents[ref]; ok {
+		return ref, nil
+	}
+	if strings.Contains(ref, "/") {
+		return "", ErrAgentNotFound
+	}
+
+	match := ""
+	for id, agent := range s.agents {
+		if agent.Status == model.StatusRevoked {
+			continue
+		}
+		if agent.Handle != ref {
+			continue
+		}
+		if match == "" {
+			match = id
+			continue
+		}
+		return "", ErrAgentAmbiguous
+	}
+	if match == "" {
+		return "", ErrAgentNotFound
+	}
+	return match, nil
+}
+
 func (s *MemoryStore) appendAuditLocked(orgID, actorHumanID, category, action, subjectID string, details map[string]any, now time.Time) {
 	events := s.auditByOrg[orgID]
 	events = append(events, model.AuditEvent{
@@ -1790,55 +1932,24 @@ func orgHumanKey(orgID, humanID string) string {
 }
 
 func orgOwnedAgentNameKey(orgID, agentID string) string {
-	return orgID + "\x00" + strings.ToLower(agentID)
+	return orgID + "\x00" + normalizeAgentNameKey(agentID)
 }
 
-func humanOwnedAgentNameKey(agentID string) string {
-	return normalizeAgentNameKey(agentID)
+func humanOwnedAgentNameKey(orgID, humanID, agentID string) string {
+	return orgID + "\x00" + humanID + "\x00" + normalizeAgentNameKey(agentID)
 }
 
 func normalizeAgentNameKey(agentID string) string {
-	return strings.ToLower(strings.TrimSpace(agentID))
+	return handles.Normalize(agentID)
 }
 
 func normalizeHumanHandleCandidate(input string) string {
-	trimmed := strings.TrimSpace(strings.ToLower(input))
-	if trimmed == "" {
-		return ""
-	}
-	var b strings.Builder
-	prevSep := false
-	for _, r := range trimmed {
-		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') {
-			b.WriteRune(r)
-			prevSep = false
-			continue
-		}
-		switch r {
-		case '-', '_', '.':
-			if b.Len() == 0 || prevSep {
-				continue
-			}
-			b.WriteRune(r)
-			prevSep = true
-		default:
-			if b.Len() == 0 || prevSep {
-				continue
-			}
-			b.WriteRune('-')
-			prevSep = true
-		}
-	}
-	out := strings.Trim(b.String(), "._-")
-	if len(out) > 64 {
-		out = strings.Trim(out[:64], "._-")
-	}
-	return out
+	return handles.Normalize(input)
 }
 
 func (s *MemoryStore) claimUniqueHumanHandleLocked(base string, humanID string) string {
 	candidate := normalizeHumanHandleCandidate(base)
-	if candidate == "" {
+	if err := handles.ValidateHandle(candidate); err != nil {
 		candidate = "human"
 	}
 	if existingID, exists := s.humanByHandle[candidate]; !exists || existingID == humanID {
@@ -1858,6 +1969,9 @@ func (s *MemoryStore) claimUniqueHumanHandleLocked(base string, humanID string) 
 			}
 		}
 		next := prefix + suffix
+		if err := handles.ValidateHandle(next); err != nil {
+			continue
+		}
 		if existingID, exists := s.humanByHandle[next]; !exists || existingID == humanID {
 			return next
 		}

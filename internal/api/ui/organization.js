@@ -173,7 +173,7 @@ async function createOrg() {
       return;
     }
     if (err === "invalid_handle") {
-      setStatus("orgStatus", "Organization handle must be URL-safe (a-z, 0-9, ., _, -).", true);
+      setStatus("orgStatus", "Organization handle must be 2-64 chars, URL-safe (a-z, 0-9, ., _, -), and not blocked.", true);
       return;
     }
     setStatus("orgStatus", "Could not create organization.", true);

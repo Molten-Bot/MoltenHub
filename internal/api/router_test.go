@@ -578,7 +578,11 @@ func TestMyAgentBindTokenRedeemWithAgentChosenName(t *testing.T) {
 	found := false
 	for _, item := range agents {
 		agent, _ := item.(map[string]any)
-		if agent["agent_id"] == "alice-agent-picked-name" {
+		if agent["handle"] == "alice-agent-picked-name" {
+			agentID, _ := agent["agent_id"].(string)
+			if !strings.HasSuffix(agentID, "/alice-agent-picked-name") {
+				t.Fatalf("expected canonical URI to end with /alice-agent-picked-name, got %q", agentID)
+			}
 			found = true
 			break
 		}
@@ -886,12 +890,12 @@ func TestHumanBoundAgentNameUniqueAcrossHumans(t *testing.T) {
 		"agent_id":       "ALPHA-AGENT",
 		"owner_human_id": bobHumanID,
 	}, humanHeaders("bob", "bob@b.test"))
-	if dup.Code != http.StatusConflict {
-		t.Fatalf("expected 409 for duplicate human-bound agent name, got %d %s", dup.Code, dup.Body.String())
+	if dup.Code != http.StatusCreated {
+		t.Fatalf("expected 201 for same handle in a different human scope, got %d %s", dup.Code, dup.Body.String())
 	}
 	body := decodeJSONMap(t, dup.Body.Bytes())
-	if body["error"] != "agent_exists" {
-		t.Fatalf("expected agent_exists for duplicate human-bound name, got %v", body["error"])
+	if body["handle"] != "alpha-agent" {
+		t.Fatalf("expected normalized handle alpha-agent, got %v", body["handle"])
 	}
 }
 

@@ -32,7 +32,7 @@ function buildAgentBindPrompt(bindToken, expiresAt, redeemURL) {
     `Bind API URL: ${redeemURL}`,
     "",
     "Instructions for agent:",
-    "1. Pick your stable agent_id (URL-safe: a-z, 0-9, ., _, -).",
+    "1. Pick your stable agent_id handle (2-64 chars, URL-safe: a-z, 0-9, ., _, -, and not blocked).",
     "2. Redeem the bind code with this command (replace <agent_id>):",
     "",
     `curl -sS -X POST "${redeemURL}" \\`,
