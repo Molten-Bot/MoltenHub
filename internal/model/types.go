@@ -63,7 +63,8 @@ type Invite struct {
 }
 
 type Agent struct {
-	AgentID      string     `json:"agent_id"`
+	AgentID      string     `json:"agent_id"` // canonical URI: org/agent or org/human/agent
+	Handle       string     `json:"handle"`
 	OrgID        string     `json:"org_id"`
 	OwnerHumanID *string    `json:"owner_human_id,omitempty"`
 	TokenHash    string     `json:"-"`

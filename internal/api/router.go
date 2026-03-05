@@ -4,13 +4,13 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
-	"regexp"
 	"sort"
 	"strconv"
 	"strings"
 	"time"
 
 	"statocyst/internal/auth"
+	"statocyst/internal/handles"
 	"statocyst/internal/longpoll"
 	"statocyst/internal/model"
 	"statocyst/internal/store"
@@ -20,9 +20,6 @@ const (
 	maxPullTimeoutMS     = 30000
 	defaultPullTimeoutMS = 5000
 )
-
-var agentIDRegex = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]{0,63}$`)
-var handleRegex = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]{0,63}$`)
 
 type Handler struct {
 	control           store.ControlPlaneStore
@@ -146,46 +143,23 @@ func decodeJSON(r *http.Request, out any) error {
 }
 
 func validateAgentID(agentID string) bool {
-	return agentIDRegex.MatchString(agentID)
+	return handles.ValidateHandle(agentID) == nil
+}
+
+func validateAgentRef(agentRef string) bool {
+	return handles.ValidateAgentRef(agentRef) == nil
 }
 
 func validateHandle(handle string) bool {
-	return handleRegex.MatchString(handle)
+	return handles.ValidateHandle(handle) == nil
 }
 
 func normalizeHandle(raw string) string {
-	in := strings.TrimSpace(strings.ToLower(raw))
-	if in == "" {
-		return ""
-	}
-	var b strings.Builder
-	prevSep := false
-	for _, r := range in {
-		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') {
-			b.WriteRune(r)
-			prevSep = false
-			continue
-		}
-		switch r {
-		case '-', '_', '.':
-			if b.Len() == 0 || prevSep {
-				continue
-			}
-			b.WriteRune(r)
-			prevSep = true
-		default:
-			if b.Len() == 0 || prevSep {
-				continue
-			}
-			b.WriteRune('-')
-			prevSep = true
-		}
-	}
-	out := strings.Trim(b.String(), "._-")
-	if len(out) > 64 {
-		out = strings.Trim(out[:64], "._-")
-	}
-	return out
+	return handles.Normalize(raw)
+}
+
+func normalizeAgentRef(raw string) string {
+	return handles.NormalizeAgentRef(raw)
 }
 
 func parsePullTimeout(r *http.Request) (time.Duration, error) {

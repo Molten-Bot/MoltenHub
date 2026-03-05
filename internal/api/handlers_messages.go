@@ -42,11 +42,11 @@ func (h *Handler) handlePublish(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	req.ToAgentID = normalizeHandle(req.ToAgentID)
+	req.ToAgentID = normalizeAgentRef(req.ToAgentID)
 	req.ContentType = strings.TrimSpace(req.ContentType)
 
-	if !validateAgentID(req.ToAgentID) {
-		writeError(w, http.StatusBadRequest, "invalid_to_agent_id", "to_agent_id must be URL-safe (a-z, 0-9, ., _, -)")
+	if !validateAgentRef(req.ToAgentID) {
+		writeError(w, http.StatusBadRequest, "invalid_to_agent_id", "to_agent_id must be handle (2-64 chars) or URI (org/agent or org/human/agent)")
 		return
 	}
 	if _, ok := allowedContentTypes[req.ContentType]; !ok {
@@ -54,11 +54,26 @@ func (h *Handler) handlePublish(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	senderOrgID, receiverOrgID, err := h.control.CanPublish(senderAgentID, req.ToAgentID)
+	targetAgent, err := h.control.GetAgent(req.ToAgentID)
 	if err != nil {
 		switch {
 		case errors.Is(err, store.ErrAgentNotFound):
 			writeError(w, http.StatusNotFound, "unknown_receiver", "to_agent_id is not registered")
+		case errors.Is(err, store.ErrAgentAmbiguous):
+			writeError(w, http.StatusConflict, "ambiguous_to_agent_id", "to_agent_id matched multiple agents; use canonical agent URI")
+		default:
+			writeError(w, http.StatusInternalServerError, "store_error", "failed to resolve receiver")
+		}
+		return
+	}
+
+	senderOrgID, receiverOrgID, err := h.control.CanPublish(senderAgentID, targetAgent.AgentID)
+	if err != nil {
+		switch {
+		case errors.Is(err, store.ErrAgentNotFound):
+			writeError(w, http.StatusNotFound, "unknown_receiver", "to_agent_id is not registered")
+		case errors.Is(err, store.ErrAgentAmbiguous):
+			writeError(w, http.StatusConflict, "ambiguous_to_agent_id", "to_agent_id matched multiple agents; use canonical agent URI")
 		case errors.Is(err, store.ErrNoTrustPath):
 			h.control.RecordMessageDropped(senderOrgID)
 			writeJSON(w, http.StatusAccepted, map[string]string{
@@ -80,7 +95,7 @@ func (h *Handler) handlePublish(w http.ResponseWriter, r *http.Request) {
 	message := model.Message{
 		MessageID:     messageID,
 		FromAgentID:   senderAgentID,
-		ToAgentID:     req.ToAgentID,
+		ToAgentID:     targetAgent.AgentID,
 		SenderOrgID:   senderOrgID,
 		ReceiverOrgID: receiverOrgID,
 		ContentType:   req.ContentType,
@@ -99,7 +114,7 @@ func (h *Handler) handlePublish(w http.ResponseWriter, r *http.Request) {
 	}
 
 	h.control.RecordMessageQueued(senderOrgID)
-	h.waiters.Notify(req.ToAgentID)
+	h.waiters.Notify(targetAgent.AgentID)
 	writeJSON(w, http.StatusAccepted, map[string]string{
 		"message_id": messageID,
 		"status":     "queued",
