@@ -1,6 +1,15 @@
 package store
 
-import "testing"
+import (
+	"encoding/xml"
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"sort"
+	"strings"
+	"sync"
+	"testing"
+)
 
 func TestNewStoresFromEnv_DefaultsToMemory(t *testing.T) {
 	t.Setenv("STATOCYST_STATE_BACKEND", "")
@@ -64,4 +73,104 @@ func TestNewStoresFromEnv_S3QueueRequiresBucketAndEndpoint(t *testing.T) {
 	if _, _, err := NewStoresFromEnv(); err == nil {
 		t.Fatalf("expected error for missing s3 queue config")
 	}
+}
+
+func TestNewStoresFromEnv_S3StateConfigured(t *testing.T) {
+	server := newFakeS3StoreServer(t)
+	defer server.Close()
+
+	t.Setenv("STATOCYST_STATE_BACKEND", "s3")
+	t.Setenv("STATOCYST_QUEUE_BACKEND", "memory")
+	t.Setenv("STATOCYST_STATE_S3_ENDPOINT", server.URL)
+	t.Setenv("STATOCYST_STATE_S3_BUCKET", "state-bucket")
+	t.Setenv("STATOCYST_STATE_S3_PREFIX", "statocyst-state")
+	t.Setenv("STATOCYST_STATE_S3_PATH_STYLE", "true")
+
+	control, queue, err := NewStoresFromEnv()
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+	state, ok := control.(*s3StateStore)
+	if !ok {
+		t.Fatalf("expected s3 state control store, got %T", control)
+	}
+	if queue != state {
+		t.Fatalf("expected queue to reuse s3 state store when queue backend=memory")
+	}
+}
+
+func newFakeS3StoreServer(t *testing.T) *httptest.Server {
+	t.Helper()
+	type obj struct {
+		key  string
+		data []byte
+	}
+	var (
+		mu      sync.Mutex
+		objects = make(map[string][]byte)
+	)
+
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		path := strings.TrimPrefix(r.URL.Path, "/")
+		if strings.HasPrefix(path, "state-bucket/") {
+			key := strings.TrimPrefix(path, "state-bucket/")
+			switch r.Method {
+			case http.MethodPut:
+				body, _ := io.ReadAll(r.Body)
+				mu.Lock()
+				objects[key] = body
+				mu.Unlock()
+				w.WriteHeader(http.StatusOK)
+				return
+			case http.MethodGet:
+				mu.Lock()
+				body, ok := objects[key]
+				mu.Unlock()
+				if !ok {
+					http.NotFound(w, r)
+					return
+				}
+				w.WriteHeader(http.StatusOK)
+				_, _ = w.Write(body)
+				return
+			case http.MethodDelete:
+				mu.Lock()
+				delete(objects, key)
+				mu.Unlock()
+				w.WriteHeader(http.StatusNoContent)
+				return
+			}
+		}
+
+		if path == "state-bucket" && r.Method == http.MethodGet && r.URL.Query().Get("list-type") == "2" {
+			prefix := r.URL.Query().Get("prefix")
+			mu.Lock()
+			items := make([]obj, 0)
+			for key, data := range objects {
+				if strings.HasPrefix(key, prefix) {
+					items = append(items, obj{key: key, data: data})
+				}
+			}
+			mu.Unlock()
+			sort.Slice(items, func(i, j int) bool { return items[i].key < items[j].key })
+			type content struct {
+				Key string `xml:"Key"`
+			}
+			type listResult struct {
+				XMLName     xml.Name  `xml:"ListBucketResult"`
+				IsTruncated bool      `xml:"IsTruncated"`
+				Contents    []content `xml:"Contents"`
+			}
+			out := listResult{IsTruncated: false}
+			for _, item := range items {
+				_ = item.data
+				out.Contents = append(out.Contents, content{Key: item.key})
+			}
+			w.WriteHeader(http.StatusOK)
+			_ = xml.NewEncoder(w).Encode(out)
+			return
+		}
+
+		http.NotFound(w, r)
+	}))
 }

@@ -7,7 +7,7 @@ This version provides:
 - Manual bilateral org and agent trust approvals.
 - Message authorization requiring active org trust + active agent trust.
 - Supabase-capable human auth provider interface, plus local dev auth.
-- In-memory-only runtime (single process, volatile state).
+- Configurable state backend: `memory` or S3-backed beta state store.
 - Built-in admin web UI.
 
 ## Runtime Modes
@@ -27,9 +27,13 @@ This version provides:
   - `SUPER_ADMIN_REVIEW_MODE=true`: super-admin identities can read across orgs but remain read-only for writes.
 - Bind token TTL minutes: `BIND_TOKEN_TTL_MINUTES=15` (default `15`).
 
-### In-memory warning
+### State backend
 
-State resets on restart. No HA, no horizontal scaling guarantees in this phase.
+- `STATOCYST_STATE_BACKEND=memory` (default): in-process volatile control-plane state.
+- `STATOCYST_STATE_BACKEND=s3`: S3-backed beta control-plane state using decomposed JSON objects and persisted secondary indexes.
+  - Required: `STATOCYST_STATE_S3_ENDPOINT`, `STATOCYST_STATE_S3_BUCKET`
+  - Optional: `STATOCYST_STATE_S3_REGION` (default `us-east-1`), `STATOCYST_STATE_S3_PREFIX` (default `statocyst-state`), `STATOCYST_STATE_S3_PATH_STYLE=true`
+  - Current implementation is designed for a single writer instance (beta), with direct multi-object overwrites and no startup recovery journal.
 
 ### Queue backend
 
