@@ -102,7 +102,8 @@ func TestValidateAgentRef_Table(t *testing.T) {
 		{name: "single too short", ref: "a", ok: false},
 		{name: "org slash agent", ref: "org/agent", ok: true},
 		{name: "org slash human slash agent", ref: "org/human/agent", ok: true},
-		{name: "wrong segments", ref: "org/human/agent/extra", ok: false},
+		{name: "human scoped", ref: "human/alice/agent/bot", ok: true},
+		{name: "wrong segments", ref: "org/human/agent/extra/more", ok: false},
 		{name: "blocked segment", ref: "org/fuck", ok: false},
 		{name: "short segment", ref: "o/agent", ok: false},
 	}
@@ -131,6 +132,14 @@ func TestBuildAgentURI(t *testing.T) {
 	h := "Human"
 	if got := BuildAgentURI("Org", &h, "Agent"); got != "org/human/agent" {
 		t.Fatalf("unexpected human-owned URI: %q", got)
+	}
+}
+
+func TestBuildHumanAgentURI(t *testing.T) {
+	t.Parallel()
+
+	if got := BuildHumanAgentURI("Alice", "Agent"); got != "human/alice/agent/agent" {
+		t.Fatalf("unexpected human-scoped URI: %q", got)
 	}
 }
 

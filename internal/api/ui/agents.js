@@ -14,6 +14,36 @@ function setBindCodeStatus(message, warn = false) {
   el.className = warn ? "status warn code" : "status code";
 }
 
+async function loadBindOrganizations() {
+  const select = UI.$("bindOrgSelect");
+  if (!select) return;
+
+  const result = await UI.req("/v1/me/orgs");
+  if (result.status !== 200 || !Array.isArray(result?.data?.memberships)) {
+    setBindCodeStatus("Could not load organizations.", true);
+    return;
+  }
+
+  select.innerHTML = "";
+  const personal = document.createElement("option");
+  personal.value = "";
+  personal.textContent = "Personal (human-owned)";
+  select.appendChild(personal);
+
+  for (const membership of result.data.memberships) {
+    const org = membership?.org;
+    const role = membership?.membership?.role || "member";
+    if (!org?.org_id) continue;
+    const option = document.createElement("option");
+    option.value = org.org_id;
+    option.textContent = `${org.display_name || org.handle} (${role})`;
+    select.appendChild(option);
+  }
+
+  select.value = "";
+  setBindCodeStatus("No bind code issued yet.");
+}
+
 function formatDateTime(raw) {
   if (!raw) return "unknown";
   const d = new Date(raw);
@@ -197,8 +227,10 @@ async function loadAgents() {
 }
 
 async function createBindCode() {
+  const orgID = UI.selectedOrg("bindOrgSelect");
   setBindCodeStatus("Creating one-time bind code...");
-  const result = await UI.req("/v1/me/agents/bind-tokens", "POST", {});
+  const body = orgID ? { org_id: orgID } : {};
+  const result = await UI.req("/v1/me/agents/bind-tokens", "POST", body);
   if (result.status !== 201) {
     setBindCodeStatus("Could not create bind code.", true);
     return;
@@ -428,8 +460,7 @@ async function init() {
     await runTrustAction(edgeID, action);
   });
 
-  await loadAgents();
-  await loadPendingTrusts();
+  await Promise.all([loadBindOrganizations(), loadAgents(), loadPendingTrusts()]);
 }
 
 init().catch((err) => {

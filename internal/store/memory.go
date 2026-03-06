@@ -747,13 +747,6 @@ func (s *MemoryStore) RegisterAgent(orgID, agentID string, ownerHumanID *string,
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	org, ok := s.orgs[orgID]
-	if !ok {
-		return model.Agent{}, ErrOrgNotFound
-	}
-	if !isSuperAdmin && !hasRoleAtLeast(s.membershipRoleLocked(orgID, actorHumanID), model.RoleMember) {
-		return model.Agent{}, ErrUnauthorizedRole
-	}
 	agentHandle := normalizeAgentNameKey(agentID)
 	if err := handles.ValidateHandle(agentHandle); err != nil {
 		return model.Agent{}, ErrInvalidHandle
@@ -761,8 +754,11 @@ func (s *MemoryStore) RegisterAgent(orgID, agentID string, ownerHumanID *string,
 
 	var ownerHandle *string
 	if ownerHumanID != nil {
-		if s.membershipRoleLocked(orgID, *ownerHumanID) == "" {
+		if orgID != "" && s.membershipRoleLocked(orgID, *ownerHumanID) == "" {
 			return model.Agent{}, ErrMembershipNotFound
+		}
+		if orgID == "" && !isSuperAdmin && actorHumanID != *ownerHumanID {
+			return model.Agent{}, ErrUnauthorizedRole
 		}
 		human, ok := s.humans[*ownerHumanID]
 		if !ok {
@@ -778,12 +774,31 @@ func (s *MemoryStore) RegisterAgent(orgID, agentID string, ownerHumanID *string,
 			return model.Agent{}, ErrAgentExists
 		}
 	} else {
+		if orgID == "" {
+			return model.Agent{}, ErrMembershipNotFound
+		}
 		key := orgOwnedAgentNameKey(orgID, agentHandle)
 		if _, exists := s.orgOwnedAgentNameIdx[key]; exists {
 			return model.Agent{}, ErrAgentExists
 		}
 	}
-	agentURI := handles.BuildAgentURI(org.Handle, ownerHandle, agentHandle)
+
+	var agentURI string
+	if orgID == "" {
+		if ownerHandle == nil {
+			return model.Agent{}, ErrMembershipNotFound
+		}
+		agentURI = handles.BuildHumanAgentURI(*ownerHandle, agentHandle)
+	} else {
+		org, ok := s.orgs[orgID]
+		if !ok {
+			return model.Agent{}, ErrOrgNotFound
+		}
+		if !isSuperAdmin && !hasRoleAtLeast(s.membershipRoleLocked(orgID, actorHumanID), model.RoleMember) {
+			return model.Agent{}, ErrUnauthorizedRole
+		}
+		agentURI = handles.BuildAgentURI(org.Handle, ownerHandle, agentHandle)
+	}
 	if _, exists := s.agentByURI[agentURI]; exists {
 		return model.Agent{}, ErrAgentExists
 	}
@@ -813,12 +828,14 @@ func (s *MemoryStore) RegisterAgent(orgID, agentID string, ownerHumanID *string,
 		s.orgOwnedAgentNameIdx[orgOwnedAgentNameKey(orgID, agentHandle)] = agentUUID
 	}
 	s.queues[agentUUID] = s.queues[agentUUID]
-	s.appendAuditLocked(orgID, actorHumanID, "agent", "register", agent.AgentUUID, map[string]any{
-		"agent_id":       agent.AgentID,
-		"agent_uuid":     agent.AgentUUID,
-		"owner_human_id": ownerHumanID,
-		"handle":         agentHandle,
-	}, now)
+	if orgID != "" {
+		s.appendAuditLocked(orgID, actorHumanID, "agent", "register", agent.AgentUUID, map[string]any{
+			"agent_id":       agent.AgentID,
+			"agent_uuid":     agent.AgentUUID,
+			"owner_human_id": ownerHumanID,
+			"handle":         agentHandle,
+		}, now)
+	}
 	return agent, nil
 }
 
@@ -826,14 +843,26 @@ func (s *MemoryStore) CreateBindToken(orgID string, ownerHumanID *string, actorH
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	if _, ok := s.orgs[orgID]; !ok {
-		return model.BindToken{}, ErrOrgNotFound
-	}
-	if !isSuperAdmin && !hasRoleAtLeast(s.membershipRoleLocked(orgID, actorHumanID), model.RoleMember) {
-		return model.BindToken{}, ErrUnauthorizedRole
-	}
-	if ownerHumanID != nil && s.membershipRoleLocked(orgID, *ownerHumanID) == "" {
-		return model.BindToken{}, ErrMembershipNotFound
+	if orgID != "" {
+		if _, ok := s.orgs[orgID]; !ok {
+			return model.BindToken{}, ErrOrgNotFound
+		}
+		if !isSuperAdmin && !hasRoleAtLeast(s.membershipRoleLocked(orgID, actorHumanID), model.RoleMember) {
+			return model.BindToken{}, ErrUnauthorizedRole
+		}
+		if ownerHumanID != nil && s.membershipRoleLocked(orgID, *ownerHumanID) == "" {
+			return model.BindToken{}, ErrMembershipNotFound
+		}
+	} else {
+		if ownerHumanID == nil || strings.TrimSpace(*ownerHumanID) == "" {
+			return model.BindToken{}, ErrMembershipNotFound
+		}
+		if _, ok := s.humans[*ownerHumanID]; !ok {
+			return model.BindToken{}, ErrMembershipNotFound
+		}
+		if !isSuperAdmin && actorHumanID != *ownerHumanID {
+			return model.BindToken{}, ErrUnauthorizedRole
+		}
 	}
 	if _, exists := s.bindByHash[bindTokenHash]; exists {
 		return model.BindToken{}, ErrInvalidToken
@@ -850,10 +879,12 @@ func (s *MemoryStore) CreateBindToken(orgID string, ownerHumanID *string, actorH
 	}
 	s.binds[bind.BindID] = bind
 	s.bindByHash[bindTokenHash] = bind.BindID
-	s.appendAuditLocked(orgID, actorHumanID, "agent_bind", "create", bind.BindID, map[string]any{
-		"owner_human_id": ownerHumanID,
-		"expires_at":     expiresAt,
-	}, now)
+	if orgID != "" {
+		s.appendAuditLocked(orgID, actorHumanID, "agent_bind", "create", bind.BindID, map[string]any{
+			"owner_human_id": ownerHumanID,
+			"expires_at":     expiresAt,
+		}, now)
+	}
 	return bind, nil
 }
 
@@ -879,13 +910,10 @@ func (s *MemoryStore) RedeemBindToken(bindTokenHash, agentID, agentTokenHash str
 	if err := handles.ValidateHandle(agentHandle); err != nil {
 		return model.Agent{}, ErrInvalidHandle
 	}
-	org, ok := s.orgs[bind.OrgID]
-	if !ok {
-		return model.Agent{}, ErrOrgNotFound
-	}
+
 	var ownerHandle *string
 	if bind.OwnerHumanID != nil {
-		if s.membershipRoleLocked(bind.OrgID, *bind.OwnerHumanID) == "" {
+		if bind.OrgID != "" && s.membershipRoleLocked(bind.OrgID, *bind.OwnerHumanID) == "" {
 			return model.Agent{}, ErrMembershipNotFound
 		}
 		human, ok := s.humans[*bind.OwnerHumanID]
@@ -901,11 +929,27 @@ func (s *MemoryStore) RedeemBindToken(bindTokenHash, agentID, agentTokenHash str
 			return model.Agent{}, ErrAgentExists
 		}
 	} else {
+		if bind.OrgID == "" {
+			return model.Agent{}, ErrMembershipNotFound
+		}
 		if _, exists := s.orgOwnedAgentNameIdx[orgOwnedAgentNameKey(bind.OrgID, agentHandle)]; exists {
 			return model.Agent{}, ErrAgentExists
 		}
 	}
-	agentURI := handles.BuildAgentURI(org.Handle, ownerHandle, agentHandle)
+
+	var agentURI string
+	if bind.OrgID == "" {
+		if ownerHandle == nil {
+			return model.Agent{}, ErrMembershipNotFound
+		}
+		agentURI = handles.BuildHumanAgentURI(*ownerHandle, agentHandle)
+	} else {
+		org, ok := s.orgs[bind.OrgID]
+		if !ok {
+			return model.Agent{}, ErrOrgNotFound
+		}
+		agentURI = handles.BuildAgentURI(org.Handle, ownerHandle, agentHandle)
+	}
 	if _, exists := s.agentByURI[agentURI]; exists {
 		return model.Agent{}, ErrAgentExists
 	}
@@ -938,10 +982,12 @@ func (s *MemoryStore) RedeemBindToken(bindTokenHash, agentID, agentTokenHash str
 	used := now
 	bind.UsedAt = &used
 	s.binds[bind.BindID] = bind
-	s.appendAuditLocked(bind.OrgID, bind.CreatedBy, "agent_bind", "redeem", bind.BindID, map[string]any{
-		"agent_id":   agent.AgentID,
-		"agent_uuid": agent.AgentUUID,
-	}, now)
+	if bind.OrgID != "" {
+		s.appendAuditLocked(bind.OrgID, bind.CreatedBy, "agent_bind", "redeem", bind.BindID, map[string]any{
+			"agent_id":   agent.AgentID,
+			"agent_uuid": agent.AgentUUID,
+		}, now)
+	}
 	return agent, nil
 }
 

@@ -182,7 +182,9 @@
             <tbody id="agentsBody"></tbody>
           </table>
 
-          <p class="muted">Create a short-lived one-time bind code. Agents choose their own name when redeeming.</p>
+          <label class="muted" for="bindOrgSelect">Organization</label>
+          <select id="bindOrgSelect"></select>
+          <p class="muted">Create a short-lived one-time bind code for the selected scope (personal or organization). Agents choose their own name when redeeming.</p>
           <button id="btnCreateBindCode">Add Agent (Generate Agent Prompt)</button>
           <div id="bindCodeStatus" class="status code">No bind code issued yet.</div>
         </section>

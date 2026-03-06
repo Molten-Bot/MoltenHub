@@ -239,16 +239,6 @@ func (h *Handler) handleMyAgents(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		orgID := req.OrgID
-		if orgID == "" {
-			org, err := h.control.EnsurePersonalOrg(actor.Human.HumanID, h.now().UTC(), h.idFactory)
-			if err != nil {
-				writeError(w, http.StatusInternalServerError, "store_error", "failed to provision personal organization")
-				return
-			}
-			orgID = org.OrgID
-		}
-
 		ownerHumanID := actor.Human.HumanID
 		if h.ensureHumanOwnedAgentLimit(w, ownerHumanID) {
 			return
@@ -258,7 +248,7 @@ func (h *Handler) handleMyAgents(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusInternalServerError, "token_generation_failed", "failed to generate token")
 			return
 		}
-		agent, err := h.control.RegisterAgent(orgID, req.AgentID, &ownerHumanID, auth.HashToken(token), actor.Human.HumanID, h.now().UTC(), actor.IsSuperAdmin)
+		agent, err := h.control.RegisterAgent(req.OrgID, req.AgentID, &ownerHumanID, auth.HashToken(token), actor.Human.HumanID, h.now().UTC(), actor.IsSuperAdmin)
 		if err != nil {
 			switch {
 			case errors.Is(err, store.ErrOrgNotFound):
@@ -316,16 +306,6 @@ func (h *Handler) handleMyAgentBindTokens(w http.ResponseWriter, r *http.Request
 	}
 	req.OrgID = strings.TrimSpace(req.OrgID)
 
-	orgID := req.OrgID
-	if orgID == "" {
-		org, err := h.control.EnsurePersonalOrg(actor.Human.HumanID, h.now().UTC(), h.idFactory)
-		if err != nil {
-			writeError(w, http.StatusInternalServerError, "store_error", "failed to provision personal organization")
-			return
-		}
-		orgID = org.OrgID
-	}
-
 	ownerHumanID := actor.Human.HumanID
 	if h.ensureHumanOwnedAgentLimit(w, ownerHumanID) {
 		return
@@ -341,7 +321,7 @@ func (h *Handler) handleMyAgentBindTokens(w http.ResponseWriter, r *http.Request
 		return
 	}
 	expiresAt := h.now().UTC().Add(h.bindTokenTTL)
-	bind, err := h.control.CreateBindToken(orgID, &ownerHumanID, actor.Human.HumanID, bindID, auth.HashToken(bindSecret), expiresAt, h.now().UTC(), actor.IsSuperAdmin)
+	bind, err := h.control.CreateBindToken(req.OrgID, &ownerHumanID, actor.Human.HumanID, bindID, auth.HashToken(bindSecret), expiresAt, h.now().UTC(), actor.IsSuperAdmin)
 	if err != nil {
 		switch {
 		case errors.Is(err, store.ErrOrgNotFound):

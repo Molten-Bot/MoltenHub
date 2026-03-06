@@ -106,7 +106,7 @@ func ValidateHandle(handle string) error {
 func ValidateAgentRef(ref string) error {
 	if strings.Contains(ref, "/") {
 		parts := strings.Split(strings.Trim(ref, "/"), "/")
-		if len(parts) != 2 && len(parts) != 3 {
+		if len(parts) != 2 && len(parts) != 3 && len(parts) != 4 {
 			return ErrInvalidAgentRef
 		}
 		for _, p := range parts {
@@ -130,6 +130,12 @@ func BuildAgentURI(orgHandle string, ownerHumanHandle *string, agentHandle strin
 	}
 	human := Normalize(*ownerHumanHandle)
 	return org + "/" + human + "/" + agent
+}
+
+func BuildHumanAgentURI(ownerHumanHandle string, agentHandle string) string {
+	human := Normalize(ownerHumanHandle)
+	agent := Normalize(agentHandle)
+	return "human/" + human + "/agent/" + agent
 }
 
 func IsBlocked(handle string) bool {

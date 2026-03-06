@@ -292,12 +292,16 @@ func registerAgent(t *testing.T, router http.Handler, humanID, email, orgID, age
 	return token
 }
 
-func registerMyAgent(t *testing.T, router http.Handler, humanID, email, agentID string) (string, string, string) {
+func registerMyAgent(t *testing.T, router http.Handler, humanID, email, orgID, agentID string) (string, string, string) {
 	t.Helper()
 	ensureHandleConfirmed(t, router, humanID, email)
-	resp := doJSONRequest(t, router, http.MethodPost, "/v1/me/agents", map[string]any{
+	body := map[string]any{
 		"agent_id": agentID,
-	}, humanHeaders(humanID, email))
+	}
+	if strings.TrimSpace(orgID) != "" {
+		body["org_id"] = orgID
+	}
+	resp := doJSONRequest(t, router, http.MethodPost, "/v1/me/agents", body, humanHeaders(humanID, email))
 	if resp.Code != http.StatusCreated {
 		t.Fatalf("register my agent failed: %d %s", resp.Code, resp.Body.String())
 	}
@@ -306,12 +310,15 @@ func registerMyAgent(t *testing.T, router http.Handler, humanID, email, agentID 
 		t.Fatalf("decode register my agent: %v", err)
 	}
 	token, _ := payload["token"].(string)
-	orgID, _ := payload["org_id"].(string)
+	returnedOrgID, _ := payload["org_id"].(string)
 	agentUUID, _ := payload["agent_uuid"].(string)
-	if token == "" || orgID == "" || agentUUID == "" {
+	if token == "" || agentUUID == "" {
 		t.Fatalf("missing token or org_id or agent_uuid")
 	}
-	return token, orgID, agentUUID
+	if strings.TrimSpace(orgID) != "" && returnedOrgID != orgID {
+		t.Fatalf("expected response org_id %q, got %q", orgID, returnedOrgID)
+	}
+	return token, returnedOrgID, agentUUID
 }
 
 func createOrgAccessKey(t *testing.T, router http.Handler, humanID, email, orgID, label string, scopes []string) (string, string) {
@@ -594,10 +601,10 @@ func TestAgentRegisterHumanAndOrgOwned(t *testing.T) {
 
 func TestMyAgentsAndImmediateSelfBond(t *testing.T) {
 	router := newTestRouter()
-	tokenA, orgA, agentUUIDA := registerMyAgent(t, router, "alice", "alice@a.test", "alice-agent-a")
-	_, orgB, agentUUIDB := registerMyAgent(t, router, "alice", "alice@a.test", "alice-agent-b")
-	if orgA != orgB {
-		t.Fatalf("expected personal org reuse, got %q and %q", orgA, orgB)
+	tokenA, orgA, agentUUIDA := registerMyAgent(t, router, "alice", "alice@a.test", "", "alice-agent-a")
+	_, orgB, agentUUIDB := registerMyAgent(t, router, "alice", "alice@a.test", "", "alice-agent-b")
+	if orgA != "" || orgB != "" {
+		t.Fatalf("expected human-scoped agents without org, got %q and %q", orgA, orgB)
 	}
 
 	listResp := doJSONRequest(t, router, http.MethodGet, "/v1/me/agents", nil, humanHeaders("alice", "alice@a.test"))
@@ -652,7 +659,6 @@ func TestMyAgentsAndImmediateSelfBond(t *testing.T) {
 func TestMyAgentBindTokenRedeemWithAgentChosenName(t *testing.T) {
 	router := newTestRouter()
 	ensureHandleConfirmed(t, router, "alice", "alice@a.test")
-
 	createResp := doJSONRequest(t, router, http.MethodPost, "/v1/me/agents/bind-tokens", map[string]any{}, humanHeaders("alice", "alice@a.test"))
 	if createResp.Code != http.StatusCreated {
 		t.Fatalf("create my bind token failed: %d %s", createResp.Code, createResp.Body.String())
@@ -1352,8 +1358,8 @@ func TestAgentLimitAndSuperAdminBypass(t *testing.T) {
 	ensureHandleConfirmed(t, router, "alice", "alice@a.test")
 	ensureHandleConfirmed(t, router, "root", "root@molten.bot")
 
-	_, _, _ = registerMyAgent(t, router, "alice", "alice@a.test", "alice-agent-1")
-	_, _, _ = registerMyAgent(t, router, "alice", "alice@a.test", "alice-agent-2")
+	_, _, _ = registerMyAgent(t, router, "alice", "alice@a.test", "", "alice-agent-1")
+	_, _, _ = registerMyAgent(t, router, "alice", "alice@a.test", "", "alice-agent-2")
 	third := doJSONRequest(t, router, http.MethodPost, "/v1/me/agents", map[string]any{
 		"agent_id": "alice-agent-3",
 	}, humanHeaders("alice", "alice@a.test"))

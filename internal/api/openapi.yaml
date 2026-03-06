@@ -128,7 +128,8 @@ paths:
         '200':
           description: Agent list
     post:
-      summary: Register agent for current human (auto personal org if org_id omitted)
+      summary: Register agent for current human
+      description: If `org_id` is omitted, creates a human-scoped agent (not attached to an organization).
       security:
         - humanAuth: []
       requestBody:
@@ -149,6 +150,7 @@ paths:
   /v1/me/agents/bind-tokens:
     post:
       summary: Create short-lived one-time agent bind token for current human
+      description: If `org_id` is omitted, creates a token for a human-scoped agent.
       security:
         - humanAuth: []
       requestBody:

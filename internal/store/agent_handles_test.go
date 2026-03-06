@@ -225,3 +225,48 @@ func TestMemoryStoreGeneratedAgentUUIDLooksUUIDLike(t *testing.T) {
 		t.Fatalf("expected uuid-like shape, got %q", agent.AgentUUID)
 	}
 }
+
+func TestMemoryStoreHumanScopedAgentAndBindWithoutOrg(t *testing.T) {
+	now := time.Date(2026, 3, 6, 0, 0, 0, 0, time.UTC)
+	ids := &seqID{}
+	mem := NewMemoryStore()
+
+	alice := mustCreateHuman(t, mem, ids, "alice", "alice@a.test", "alice", now)
+	bob := mustCreateHuman(t, mem, ids, "bob", "bob@b.test", "bob", now)
+
+	agent, err := mem.RegisterAgent("", "alpha", &alice.HumanID, "tok-alpha", alice.HumanID, now, false)
+	if err != nil {
+		t.Fatalf("register human-scoped agent failed: %v", err)
+	}
+	if agent.OrgID != "" {
+		t.Fatalf("expected empty org_id for human-scoped agent, got %q", agent.OrgID)
+	}
+	if agent.AgentID != "human/alice/agent/alpha" {
+		t.Fatalf("expected human-scoped URI, got %q", agent.AgentID)
+	}
+	if _, err := mem.RegisterAgent("", "alpha", &alice.HumanID, "tok-alpha-2", alice.HumanID, now, false); !errors.Is(err, ErrAgentExists) {
+		t.Fatalf("expected duplicate human-scoped handle to fail with ErrAgentExists, got %v", err)
+	}
+
+	bind, err := mem.CreateBindToken("", &alice.HumanID, alice.HumanID, ids.mustID(t), "bind-human", now.Add(time.Hour), now, false)
+	if err != nil {
+		t.Fatalf("create human-scoped bind token failed: %v", err)
+	}
+	if bind.OrgID != "" {
+		t.Fatalf("expected bind token org_id empty, got %q", bind.OrgID)
+	}
+	redeemed, err := mem.RedeemBindToken("bind-human", "beta", "tok-beta", now)
+	if err != nil {
+		t.Fatalf("redeem human-scoped bind token failed: %v", err)
+	}
+	if redeemed.AgentID != "human/alice/agent/beta" {
+		t.Fatalf("expected human-scoped redeemed URI, got %q", redeemed.AgentID)
+	}
+	if redeemed.OrgID != "" {
+		t.Fatalf("expected redeemed agent org_id empty, got %q", redeemed.OrgID)
+	}
+
+	if _, err := mem.CreateBindToken("", &alice.HumanID, bob.HumanID, ids.mustID(t), "bind-unauthorized", now.Add(time.Hour), now, false); !errors.Is(err, ErrUnauthorizedRole) {
+		t.Fatalf("expected non-owner create human-scoped bind token to fail with ErrUnauthorizedRole, got %v", err)
+	}
+}
