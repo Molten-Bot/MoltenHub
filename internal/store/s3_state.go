@@ -171,9 +171,24 @@ func (s *s3StateStore) UpsertHuman(provider, subject, email string, emailVerifie
 	s.persistMu.Lock()
 	defer s.persistMu.Unlock()
 
+	var existing model.Human
+	existingFound := false
+	authLookupKey := authKey(provider, subject)
+	s.MemoryStore.mu.RLock()
+	if humanID, ok := s.MemoryStore.humanByAuthKey[authLookupKey]; ok {
+		if human, ok := s.MemoryStore.humans[humanID]; ok {
+			existing = human
+			existingFound = true
+		}
+	}
+	s.MemoryStore.mu.RUnlock()
+
 	human, err := s.MemoryStore.UpsertHuman(provider, subject, email, emailVerified, now, idFactory)
 	if err != nil {
 		return model.Human{}, err
+	}
+	if existingFound && existing == human {
+		return human, nil
 	}
 	if err := s.persistAll(context.Background()); err != nil {
 		return model.Human{}, err
