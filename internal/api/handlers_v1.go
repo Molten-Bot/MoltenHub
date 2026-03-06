@@ -1,6 +1,7 @@
 package api
 
 import (
+	"crypto/subtle"
 	"errors"
 	"fmt"
 	"net/http"
@@ -99,20 +100,42 @@ func (h *Handler) handleUIConfig(w http.ResponseWriter, r *http.Request) {
 		writeMethodNotAllowed(w)
 		return
 	}
+
+	supabaseAnonKey := ""
+	devHumanEmail := ""
+	superAdminEmails := []string{}
+	if hasUIConfigPrivilegedAccess(r) {
+		supabaseAnonKey = h.supabaseAnonKey
+		devHumanEmail = strings.TrimSpace(strings.ToLower(os.Getenv("DEV_LOGIN_HUMAN_EMAIL")))
+		superAdminEmails = setToSortedSlice(h.superAdminEmails)
+	}
+
 	writeJSON(w, http.StatusOK, map[string]any{
 		"human_auth_provider":      h.humanAuth.Name(),
 		"supabase_url":             h.supabaseURL,
-		"supabase_anon_key":        h.supabaseAnonKey,
+		"supabase_anon_key":        supabaseAnonKey,
 		"dev_human_id":             strings.TrimSpace(os.Getenv("DEV_LOGIN_HUMAN_ID")),
-		"dev_human_email":          strings.TrimSpace(strings.ToLower(os.Getenv("DEV_LOGIN_HUMAN_EMAIL"))),
+		"dev_human_email":          devHumanEmail,
 		"dev_auto_login":           strings.EqualFold(strings.TrimSpace(os.Getenv("DEV_LOGIN_AUTO")), "true"),
-		"super_admin_emails":       setToSortedSlice(h.superAdminEmails),
+		"super_admin_emails":       superAdminEmails,
 		"super_admin_domains":      setToSortedSlice(h.superAdminDomains),
 		"super_admin_review_mode":  h.superAdminReview,
 		"super_admin_write_policy": "global_write",
 		"bind_token_ttl_sec":       int(h.bindTokenTTL.Seconds()),
 		"headless_mode":            h.headlessMode,
 	})
+}
+
+func hasUIConfigPrivilegedAccess(r *http.Request) bool {
+	expectedKey := strings.TrimSpace(os.Getenv("UI_CONFIG_API_KEY"))
+	if expectedKey == "" {
+		return false
+	}
+	presentedKey := strings.TrimSpace(r.Header.Get("X-UI-Config-Key"))
+	if presentedKey == "" {
+		return false
+	}
+	return subtle.ConstantTimeCompare([]byte(presentedKey), []byte(expectedKey)) == 1
 }
 
 func uiAppName() string {

@@ -25,6 +25,10 @@ This version provides:
 - Super-admin review toggle:
   - `SUPER_ADMIN_REVIEW_MODE=false` (default): super-admin identities behave like normal users.
   - `SUPER_ADMIN_REVIEW_MODE=true`: super-admin identities can read across orgs but remain read-only for writes.
+- Optional UI config privileged key:
+  - `UI_CONFIG_API_KEY=<secret>` enables privileged access to sensitive `/v1/ui/config` fields for trusted setup callers.
+  - Callers must send `X-UI-Config-Key: <secret>` to receive unredacted `supabase_anon_key`, `dev_human_email`, and `super_admin_emails`.
+  - Without that header (or with a wrong key), those fields are redacted.
 - Bind token TTL minutes: `BIND_TOKEN_TTL_MINUTES=15` (default `15`).
 
 ### State backend

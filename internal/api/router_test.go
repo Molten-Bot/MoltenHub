@@ -98,6 +98,141 @@ func TestHealthReportsDegradedStorageStatus(t *testing.T) {
 	}
 }
 
+func TestUIConfigRedactsSensitiveFields(t *testing.T) {
+	t.Setenv("DEV_LOGIN_HUMAN_ID", "dev-human")
+	t.Setenv("DEV_LOGIN_HUMAN_EMAIL", "dev@local.test")
+
+	mem := store.NewMemoryStore()
+	waiters := longpoll.NewWaiters()
+	h := NewHandler(
+		mem,
+		mem,
+		waiters,
+		auth.NewDevHumanAuthProvider(),
+		"https://example.supabase.co",
+		"should-not-leak",
+		"admin1@molten.bot,admin2@molten.bot",
+		"molten.bot",
+		true,
+		15*time.Minute,
+		false,
+	)
+	router := NewRouter(h)
+
+	resp := doJSONRequest(t, router, http.MethodGet, "/v1/ui/config", nil, nil)
+	if resp.Code != http.StatusOK {
+		t.Fatalf("expected /v1/ui/config 200, got %d %s", resp.Code, resp.Body.String())
+	}
+
+	payload := decodeJSONMap(t, resp.Body.Bytes())
+	if got, _ := payload["supabase_anon_key"].(string); got != "" {
+		t.Fatalf("expected supabase_anon_key redacted, got %q", got)
+	}
+	if got, _ := payload["dev_human_email"].(string); got != "" {
+		t.Fatalf("expected dev_human_email redacted, got %q", got)
+	}
+
+	adminEmails, ok := payload["super_admin_emails"].([]any)
+	if !ok {
+		t.Fatalf("expected super_admin_emails array, got %T", payload["super_admin_emails"])
+	}
+	if len(adminEmails) != 0 {
+		t.Fatalf("expected super_admin_emails redacted, got %v", adminEmails)
+	}
+
+	domains, ok := payload["super_admin_domains"].([]any)
+	if !ok || len(domains) != 1 || domains[0] != "molten.bot" {
+		t.Fatalf("expected super_admin_domains preserved, got %v", payload["super_admin_domains"])
+	}
+}
+
+func TestUIConfigReturnsSensitiveFieldsWithPrivilegedKey(t *testing.T) {
+	t.Setenv("DEV_LOGIN_HUMAN_ID", "dev-human")
+	t.Setenv("DEV_LOGIN_HUMAN_EMAIL", "dev@local.test")
+	t.Setenv("UI_CONFIG_API_KEY", "ui-config-secret")
+
+	mem := store.NewMemoryStore()
+	waiters := longpoll.NewWaiters()
+	h := NewHandler(
+		mem,
+		mem,
+		waiters,
+		auth.NewDevHumanAuthProvider(),
+		"https://example.supabase.co",
+		"should-leak-only-to-privileged-caller",
+		"admin1@molten.bot,admin2@molten.bot",
+		"molten.bot",
+		true,
+		15*time.Minute,
+		false,
+	)
+	router := NewRouter(h)
+
+	resp := doJSONRequest(t, router, http.MethodGet, "/v1/ui/config", nil, map[string]string{
+		"X-UI-Config-Key": "ui-config-secret",
+	})
+	if resp.Code != http.StatusOK {
+		t.Fatalf("expected /v1/ui/config 200, got %d %s", resp.Code, resp.Body.String())
+	}
+
+	payload := decodeJSONMap(t, resp.Body.Bytes())
+	if got, _ := payload["supabase_anon_key"].(string); got != "should-leak-only-to-privileged-caller" {
+		t.Fatalf("expected supabase_anon_key for privileged caller, got %q", got)
+	}
+	if got, _ := payload["dev_human_email"].(string); got != "dev@local.test" {
+		t.Fatalf("expected dev_human_email for privileged caller, got %q", got)
+	}
+
+	adminEmails, ok := payload["super_admin_emails"].([]any)
+	if !ok {
+		t.Fatalf("expected super_admin_emails array, got %T", payload["super_admin_emails"])
+	}
+	if len(adminEmails) != 2 || adminEmails[0] != "admin1@molten.bot" || adminEmails[1] != "admin2@molten.bot" {
+		t.Fatalf("expected super_admin_emails for privileged caller, got %v", adminEmails)
+	}
+}
+
+func TestUIConfigRemainsRedactedWithWrongPrivilegedKey(t *testing.T) {
+	t.Setenv("DEV_LOGIN_HUMAN_EMAIL", "dev@local.test")
+	t.Setenv("UI_CONFIG_API_KEY", "ui-config-secret")
+
+	mem := store.NewMemoryStore()
+	waiters := longpoll.NewWaiters()
+	h := NewHandler(
+		mem,
+		mem,
+		waiters,
+		auth.NewDevHumanAuthProvider(),
+		"https://example.supabase.co",
+		"should-not-leak",
+		"admin1@molten.bot,admin2@molten.bot",
+		"molten.bot",
+		true,
+		15*time.Minute,
+		false,
+	)
+	router := NewRouter(h)
+
+	resp := doJSONRequest(t, router, http.MethodGet, "/v1/ui/config", nil, map[string]string{
+		"X-UI-Config-Key": "wrong-key",
+	})
+	if resp.Code != http.StatusOK {
+		t.Fatalf("expected /v1/ui/config 200, got %d %s", resp.Code, resp.Body.String())
+	}
+
+	payload := decodeJSONMap(t, resp.Body.Bytes())
+	if got, _ := payload["supabase_anon_key"].(string); got != "" {
+		t.Fatalf("expected redacted supabase_anon_key for wrong key, got %q", got)
+	}
+	if got, _ := payload["dev_human_email"].(string); got != "" {
+		t.Fatalf("expected redacted dev_human_email for wrong key, got %q", got)
+	}
+	adminEmails, ok := payload["super_admin_emails"].([]any)
+	if !ok || len(adminEmails) != 0 {
+		t.Fatalf("expected redacted super_admin_emails for wrong key, got %v", payload["super_admin_emails"])
+	}
+}
+
 func doJSONRequest(t *testing.T, router http.Handler, method, path string, body any, headers map[string]string) *httptest.ResponseRecorder {
 	t.Helper()
 
