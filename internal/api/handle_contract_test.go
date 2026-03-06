@@ -121,7 +121,7 @@ func TestHandleContractValidationRejectsShortAndBlocked(t *testing.T) {
 		t.Fatalf("bind_token missing")
 	}
 
-	blockedRedeem := doJSONRequest(t, router, http.MethodPost, "/v1/agents/bind/redeem", map[string]any{
+	blockedRedeem := doJSONRequest(t, router, http.MethodPost, "/v1/agents/bind", map[string]any{
 		"bind_token": bindToken,
 		"agent_id":   "f-u-c-k",
 	}, nil)

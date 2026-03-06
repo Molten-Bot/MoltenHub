@@ -206,7 +206,7 @@ async function createBindCode() {
 
   const token = String(result?.data?.bind_token || "").trim();
   const expiresAt = formatDateTime(result?.data?.expires_at);
-  const redeemURL = `${window.location.origin}/v1/agents/bind/redeem`;
+  const redeemURL = `${window.location.origin}/v1/agents/bind`;
   if (!token) {
     setBindCodeStatus("Bind code was not returned.", true);
     return;
