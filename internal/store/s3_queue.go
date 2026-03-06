@@ -1,6 +1,7 @@
 package store
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"encoding/xml"
@@ -29,6 +30,7 @@ type s3QueueStore struct {
 	region     string
 	prefix     string
 	pathStyle  bool
+	signer     *s3Signer
 
 	dequeueMu sync.Mutex
 }
@@ -45,6 +47,8 @@ func NewS3QueueStoreFromEnv() (MessageQueueStore, error) {
 	region := strings.TrimSpace(os.Getenv("STATOCYST_QUEUE_S3_REGION"))
 	prefix := strings.Trim(strings.TrimSpace(os.Getenv("STATOCYST_QUEUE_S3_PREFIX")), "/")
 	pathStyleRaw := strings.TrimSpace(os.Getenv("STATOCYST_QUEUE_S3_PATH_STYLE"))
+	accessKeyID := strings.TrimSpace(os.Getenv("STATOCYST_QUEUE_S3_ACCESS_KEY_ID"))
+	secretAccessKey := strings.TrimSpace(os.Getenv("STATOCYST_QUEUE_S3_SECRET_ACCESS_KEY"))
 
 	if endpoint == "" {
 		return nil, fmt.Errorf("STATOCYST_QUEUE_S3_ENDPOINT is required for s3 queue backend")
@@ -57,6 +61,9 @@ func NewS3QueueStoreFromEnv() (MessageQueueStore, error) {
 	}
 	if prefix == "" {
 		prefix = defaultS3Prefix
+	}
+	if (accessKeyID == "") != (secretAccessKey == "") {
+		return nil, fmt.Errorf("STATOCYST_QUEUE_S3_ACCESS_KEY_ID and STATOCYST_QUEUE_S3_SECRET_ACCESS_KEY must be set together")
 	}
 	pathStyle := true
 	if pathStyleRaw != "" {
@@ -76,6 +83,7 @@ func NewS3QueueStoreFromEnv() (MessageQueueStore, error) {
 		region:     region,
 		prefix:     prefix,
 		pathStyle:  pathStyle,
+		signer:     newS3Signer(accessKeyID, secretAccessKey, region),
 	}, nil
 }
 
@@ -89,11 +97,14 @@ func (s *s3QueueStore) Enqueue(ctx context.Context, message model.Message) error
 		return fmt.Errorf("marshal message: %w", err)
 	}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPut, s.objectURL(key, nil), strings.NewReader(string(body)))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPut, s.objectURL(key, nil), bytes.NewReader(body))
 	if err != nil {
 		return fmt.Errorf("build put request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
+	if err := s.signRequest(req, body); err != nil {
+		return err
+	}
 	resp, err := s.httpClient.Do(req)
 	if err != nil {
 		return fmt.Errorf("put object: %w", err)
@@ -154,6 +165,9 @@ func (s *s3QueueStore) listOldestKey(ctx context.Context, agentUUID string) (str
 	if err != nil {
 		return "", false, fmt.Errorf("build list request: %w", err)
 	}
+	if err := s.signRequest(req, nil); err != nil {
+		return "", false, err
+	}
 	resp, err := s.httpClient.Do(req)
 	if err != nil {
 		return "", false, fmt.Errorf("list objects: %w", err)
@@ -179,6 +193,9 @@ func (s *s3QueueStore) readMessage(ctx context.Context, key string) (model.Messa
 	if err != nil {
 		return model.Message{}, fmt.Errorf("build get request: %w", err)
 	}
+	if err := s.signRequest(req, nil); err != nil {
+		return model.Message{}, err
+	}
 	resp, err := s.httpClient.Do(req)
 	if err != nil {
 		return model.Message{}, fmt.Errorf("get object: %w", err)
@@ -199,6 +216,9 @@ func (s *s3QueueStore) deleteObject(ctx context.Context, key string) error {
 	req, err := http.NewRequestWithContext(ctx, http.MethodDelete, s.objectURL(key, nil), nil)
 	if err != nil {
 		return fmt.Errorf("build delete request: %w", err)
+	}
+	if err := s.signRequest(req, nil); err != nil {
+		return err
 	}
 	resp, err := s.httpClient.Do(req)
 	if err != nil {
@@ -227,6 +247,16 @@ func (s *s3QueueStore) objectURL(key string, query url.Values) string {
 		u.RawQuery = query.Encode()
 	}
 	return u.String()
+}
+
+func (s *s3QueueStore) signRequest(req *http.Request, payload []byte) error {
+	if s.signer == nil {
+		return nil
+	}
+	if err := s.signer.Sign(req, payload, time.Now().UTC()); err != nil {
+		return fmt.Errorf("sign request: %w", err)
+	}
+	return nil
 }
 
 func escapeS3Path(key string) string {
