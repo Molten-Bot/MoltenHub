@@ -32,7 +32,8 @@ This version provides:
 - `STATOCYST_STATE_BACKEND=memory` (default): in-process volatile control-plane state.
 - `STATOCYST_STATE_BACKEND=s3`: S3-backed beta control-plane state using decomposed JSON objects and persisted secondary indexes.
   - Required: `STATOCYST_STATE_S3_ENDPOINT`, `STATOCYST_STATE_S3_BUCKET`
-  - Optional: `STATOCYST_STATE_S3_REGION` (default `us-east-1`), `STATOCYST_STATE_S3_PREFIX` (default `statocyst-state`), `STATOCYST_STATE_S3_PATH_STYLE=true`
+  - Optional: `STATOCYST_STATE_S3_REGION` (default `us-east-1`), `STATOCYST_STATE_S3_PREFIX` (default `statocyst-state`), `STATOCYST_STATE_S3_PATH_STYLE=true`, `STATOCYST_STATE_S3_ACCESS_KEY_ID`, `STATOCYST_STATE_S3_SECRET_ACCESS_KEY`
+  - Requests are SigV4-signed when state access-key + secret-key are provided; if both are omitted, requests are unsigned.
   - Current implementation is designed for a single writer instance (beta), with direct multi-object overwrites and no startup recovery journal.
 - Startup mode:
   - `STATOCYST_STORAGE_STARTUP_MODE=strict` (default): startup fails when configured storage backends are invalid/unreachable.
@@ -43,8 +44,8 @@ This version provides:
 - `STATOCYST_QUEUE_BACKEND=memory` (default): in-process volatile queue.
 - `STATOCYST_QUEUE_BACKEND=s3`: object-backed queue keyed by `agent_uuid`.
   - Required: `STATOCYST_QUEUE_S3_ENDPOINT`, `STATOCYST_QUEUE_S3_BUCKET`
-  - Optional: `STATOCYST_QUEUE_S3_REGION` (default `us-east-1`), `STATOCYST_QUEUE_S3_PREFIX` (default `statocyst-queue`), `STATOCYST_QUEUE_S3_PATH_STYLE=true`
-  - Current implementation uses path-style, unsigned HTTP object operations (suitable for local/private S3-compatible deployments behind trusted network controls).
+  - Optional: `STATOCYST_QUEUE_S3_REGION` (default `us-east-1`), `STATOCYST_QUEUE_S3_PREFIX` (default `statocyst-queue`), `STATOCYST_QUEUE_S3_PATH_STYLE=true`, `STATOCYST_QUEUE_S3_ACCESS_KEY_ID`, `STATOCYST_QUEUE_S3_SECRET_ACCESS_KEY`
+  - Requests are SigV4-signed when queue access-key + secret-key are provided; if both are omitted, requests are unsigned (suitable for local/private S3-compatible deployments behind trusted network controls).
 
 ## Run Locally
 
