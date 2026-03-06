@@ -101,11 +101,10 @@ func (h *Handler) handleUIConfig(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	supabaseAnonKey := ""
+	supabaseAnonKey := h.supabaseAnonKey
 	devHumanEmail := ""
 	superAdminEmails := []string{}
 	if hasUIConfigPrivilegedAccess(r) {
-		supabaseAnonKey = h.supabaseAnonKey
 		devHumanEmail = strings.TrimSpace(strings.ToLower(os.Getenv("DEV_LOGIN_HUMAN_EMAIL")))
 		superAdminEmails = setToSortedSlice(h.superAdminEmails)
 	}

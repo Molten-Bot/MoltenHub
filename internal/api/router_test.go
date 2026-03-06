@@ -98,7 +98,7 @@ func TestHealthReportsDegradedStorageStatus(t *testing.T) {
 	}
 }
 
-func TestUIConfigRedactsSensitiveFields(t *testing.T) {
+func TestUIConfigExposesSupabaseAnonKeyAndRedactsPrivilegedFields(t *testing.T) {
 	t.Setenv("DEV_LOGIN_HUMAN_ID", "dev-human")
 	t.Setenv("DEV_LOGIN_HUMAN_EMAIL", "dev@local.test")
 
@@ -125,8 +125,8 @@ func TestUIConfigRedactsSensitiveFields(t *testing.T) {
 	}
 
 	payload := decodeJSONMap(t, resp.Body.Bytes())
-	if got, _ := payload["supabase_anon_key"].(string); got != "" {
-		t.Fatalf("expected supabase_anon_key redacted, got %q", got)
+	if got, _ := payload["supabase_anon_key"].(string); got != "should-not-leak" {
+		t.Fatalf("expected supabase_anon_key to be exposed for UI bootstrap, got %q", got)
 	}
 	if got, _ := payload["dev_human_email"].(string); got != "" {
 		t.Fatalf("expected dev_human_email redacted, got %q", got)
@@ -192,7 +192,7 @@ func TestUIConfigReturnsSensitiveFieldsWithPrivilegedKey(t *testing.T) {
 	}
 }
 
-func TestUIConfigRemainsRedactedWithWrongPrivilegedKey(t *testing.T) {
+func TestUIConfigKeepsPrivilegedFieldsRedactedWithWrongPrivilegedKey(t *testing.T) {
 	t.Setenv("DEV_LOGIN_HUMAN_EMAIL", "dev@local.test")
 	t.Setenv("UI_CONFIG_API_KEY", "ui-config-secret")
 
@@ -221,8 +221,8 @@ func TestUIConfigRemainsRedactedWithWrongPrivilegedKey(t *testing.T) {
 	}
 
 	payload := decodeJSONMap(t, resp.Body.Bytes())
-	if got, _ := payload["supabase_anon_key"].(string); got != "" {
-		t.Fatalf("expected redacted supabase_anon_key for wrong key, got %q", got)
+	if got, _ := payload["supabase_anon_key"].(string); got != "should-not-leak" {
+		t.Fatalf("expected supabase_anon_key to remain available with wrong key, got %q", got)
 	}
 	if got, _ := payload["dev_human_email"].(string); got != "" {
 		t.Fatalf("expected redacted dev_human_email for wrong key, got %q", got)

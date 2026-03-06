@@ -68,8 +68,9 @@ paths:
       summary: UI auth runtime configuration
       description: |
         Runtime configuration consumed by bundled UI clients; external agents usually do not need this.
-        Sensitive fields are redacted by default.
-        When `UI_CONFIG_API_KEY` is configured server-side, callers can send header `X-UI-Config-Key` with the matching value to receive unredacted `supabase_anon_key`, `dev_human_email`, and `super_admin_emails`.
+        `supabase_anon_key` is intentionally included for browser auth bootstrap.
+        Privileged fields are redacted by default.
+        When `UI_CONFIG_API_KEY` is configured server-side, callers can send header `X-UI-Config-Key` with the matching value to receive unredacted `dev_human_email` and `super_admin_emails`.
       parameters:
         - in: header
           name: X-UI-Config-Key
