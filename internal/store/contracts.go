@@ -40,6 +40,7 @@ type ControlPlaneStore interface {
 	RevokeAgent(agentUUID, actorHumanID string, now time.Time, isSuperAdmin bool) error
 	SetOrgVisibility(orgID string, isPublic bool, actorHumanID string, isSuperAdmin bool, now time.Time) (model.Organization, error)
 	SetAgentVisibility(agentUUID string, isPublic bool, actorHumanID string, now time.Time, isSuperAdmin bool) (model.Agent, error)
+	SetAgentVisibilitySelf(agentUUID string, isPublic bool, now time.Time) (model.Agent, error)
 	AgentUUIDForTokenHash(tokenHash string) (string, error)
 	GetHuman(humanID string) (model.Human, error)
 	GetAgentByUUID(agentUUID string) (model.Agent, error)

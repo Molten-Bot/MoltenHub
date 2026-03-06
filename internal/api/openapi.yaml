@@ -583,6 +583,48 @@ paths:
           description: Agent capabilities
         '401':
           description: Unauthorized
+  /v1/agents/me:
+    patch:
+      summary: Update authenticated agent profile visibility
+      description: Agent runtime route. Updates `is_public` for the authenticated bearer-token agent only.
+      security:
+        - agentAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [is_public]
+              properties:
+                is_public:
+                  type: boolean
+      responses:
+        '200':
+          description: Agent updated
+        '401':
+          description: Unauthorized
+    post:
+      summary: Compatibility alias for PATCH /v1/agents/me
+      description: Backward-compatible alias that performs the same update as `PATCH /v1/agents/me`.
+      deprecated: true
+      security:
+        - agentAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [is_public]
+              properties:
+                is_public:
+                  type: boolean
+      responses:
+        '200':
+          description: Agent updated
+        '401':
+          description: Unauthorized
   /v1/agents/me/skill:
     get:
       summary: Agent skill document (JSON or markdown)

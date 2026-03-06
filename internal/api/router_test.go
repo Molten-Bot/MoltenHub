@@ -1167,6 +1167,46 @@ func TestAgentCapabilitiesAndSkillEndpoints(t *testing.T) {
 	}
 }
 
+func TestAgentMeVisibilityUpdateEndpoint(t *testing.T) {
+	router := newTestRouter()
+	_, _, tokenA, _, _, _, agentUUIDA, agentUUIDB := setupTrustedAgents(t, router)
+	headers := map[string]string{"Authorization": "Bearer " + tokenA}
+
+	patchResp := doJSONRequest(t, router, http.MethodPatch, "/v1/agents/me", map[string]any{
+		"is_public": false,
+	}, headers)
+	if patchResp.Code != http.StatusOK {
+		t.Fatalf("expected PATCH /v1/agents/me 200, got %d %s", patchResp.Code, patchResp.Body.String())
+	}
+	patchPayload := decodeJSONMap(t, patchResp.Body.Bytes())
+	patchAgent, _ := patchPayload["agent"].(map[string]any)
+	if patchAgent["agent_uuid"] != agentUUIDA {
+		t.Fatalf("expected PATCH /v1/agents/me to update authenticated agent %q, got %v", agentUUIDA, patchAgent["agent_uuid"])
+	}
+	if isPublic, ok := patchAgent["is_public"].(bool); !ok || isPublic {
+		t.Fatalf("expected PATCH /v1/agents/me to set is_public=false, got %v payload=%v", patchAgent["is_public"], patchPayload)
+	}
+
+	postResp := doJSONRequest(t, router, http.MethodPost, "/v1/agents/me", map[string]any{
+		"is_public": true,
+	}, headers)
+	if postResp.Code != http.StatusOK {
+		t.Fatalf("expected POST /v1/agents/me 200, got %d %s", postResp.Code, postResp.Body.String())
+	}
+	postPayload := decodeJSONMap(t, postResp.Body.Bytes())
+	postAgent, _ := postPayload["agent"].(map[string]any)
+	if isPublic, ok := postAgent["is_public"].(bool); !ok || !isPublic {
+		t.Fatalf("expected POST /v1/agents/me to set is_public=true, got %v payload=%v", postAgent["is_public"], postPayload)
+	}
+
+	humanRouteResp := doJSONRequest(t, router, http.MethodPatch, "/v1/agents/"+agentUUIDB, map[string]any{
+		"is_public": false,
+	}, headers)
+	if humanRouteResp.Code != http.StatusUnauthorized {
+		t.Fatalf("expected agent token on human control-plane route to return 401, got %d %s", humanRouteResp.Code, humanRouteResp.Body.String())
+	}
+}
+
 func TestOpenAPIYAMLHeaders(t *testing.T) {
 	router := newTestRouter()
 	req := httptest.NewRequest(http.MethodGet, "/openapi.yaml", nil)

@@ -12,6 +12,11 @@ func TestCallerContract_AgentRuntimeEndpointsRejectHumanHeaders(t *testing.T) {
 	router := newTestRouter()
 	headers := humanHeaders("alice", "alice@a.test")
 
+	profileResp := doJSONRequest(t, router, http.MethodPatch, "/v1/agents/me", map[string]any{
+		"is_public": false,
+	}, headers)
+	requireUnauthorized(t, profileResp)
+
 	capsResp := doJSONRequest(t, router, http.MethodGet, "/v1/agents/me/capabilities", nil, headers)
 	requireUnauthorized(t, capsResp)
 
@@ -79,6 +84,8 @@ func TestOpenAPICallerContractSecuritySchemes(t *testing.T) {
 		{Method: http.MethodGet, Path: "/v1/me"}:                       {"humanAuth"},
 		{Method: http.MethodPost, Path: "/v1/agent-trusts"}:            {"humanAuth"},
 		{Method: http.MethodPost, Path: "/v1/agents/bind"}:             nil,
+		{Method: http.MethodPatch, Path: "/v1/agents/me"}:              {"agentAuth"},
+		{Method: http.MethodPost, Path: "/v1/agents/me"}:               {"agentAuth"},
 		{Method: http.MethodGet, Path: "/v1/agents/me/capabilities"}:   {"agentAuth"},
 		{Method: http.MethodGet, Path: "/v1/agents/me/skill"}:          {"agentAuth"},
 		{Method: http.MethodPost, Path: "/v1/messages/publish"}:        {"agentAuth"},
@@ -98,7 +105,7 @@ func TestOpenAPICallerContractSecuritySchemes(t *testing.T) {
 	}
 
 	for op, schemes := range securityByOperation {
-		if strings.HasPrefix(op.Path, "/v1/messages/") || strings.HasPrefix(op.Path, "/v1/agents/me/") {
+		if strings.HasPrefix(op.Path, "/v1/messages/") || op.Path == "/v1/agents/me" || strings.HasPrefix(op.Path, "/v1/agents/me/") {
 			if !equalSecuritySchemes(schemes, []string{"agentAuth"}) {
 				t.Fatalf("runtime endpoint must require agentAuth: %s %s got=%v", op.Method, op.Path, schemes)
 			}

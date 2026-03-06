@@ -121,6 +121,33 @@
       "expected_error": "unauthorized"
     },
     {
+      "name": "agent_me_visibility_update_unauthorized",
+      "method": "PATCH",
+      "path": "/v1/agents/me",
+      "body": {
+        "is_public": false
+      },
+      "expected_status": 401,
+      "expected_error": "unauthorized"
+    },
+    {
+      "name": "agent_me_visibility_update_with_agent_token",
+      "setup": "trusted_agents",
+      "method": "PATCH",
+      "path": "/v1/agents/me",
+      "headers": {
+        "Authorization": "Bearer __TOKEN_A__"
+      },
+      "body": {
+        "is_public": false
+      },
+      "expected_status": 200,
+      "required_json_paths": ["agent.agent_uuid", "agent.is_public"],
+      "expected_json_values": {
+        "agent.is_public": false
+      }
+    },
+    {
       "name": "agent_runtime_publish_rejects_human_headers",
       "method": "POST",
       "path": "/v1/messages/publish",

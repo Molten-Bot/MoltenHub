@@ -1034,6 +1034,23 @@ func (s *MemoryStore) SetAgentVisibility(agentUUID string, isPublic bool, actorH
 	return agent, nil
 }
 
+func (s *MemoryStore) SetAgentVisibilitySelf(agentUUID string, isPublic bool, now time.Time) (model.Agent, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	agent, ok := s.agents[agentUUID]
+	if !ok {
+		return model.Agent{}, ErrAgentNotFound
+	}
+	agent.IsPublic = isPublic
+	s.agents[agentUUID] = agent
+	s.appendAuditLocked(agent.OrgID, "", "agent", "set_visibility_self", agentUUID, map[string]any{
+		"is_public": isPublic,
+		"agent_id":  agent.AgentID,
+	}, now)
+	return agent, nil
+}
+
 func (s *MemoryStore) AgentUUIDForTokenHash(tokenHash string) (string, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()

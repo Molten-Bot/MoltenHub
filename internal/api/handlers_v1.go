@@ -539,6 +539,44 @@ func (h *Handler) ensureHumanOwnedAgentLimit(w http.ResponseWriter, ownerHumanID
 	return false
 }
 
+func (h *Handler) handleAgentMe(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPatch && r.Method != http.MethodPost {
+		writeMethodNotAllowed(w)
+		return
+	}
+
+	agentUUID, err := h.authenticateAgent(r)
+	if err != nil {
+		writeError(w, http.StatusUnauthorized, "unauthorized", "missing or invalid bearer token")
+		return
+	}
+
+	var req updateVisibilityRequest
+	if err := decodeJSON(r, &req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_request", "invalid JSON request")
+		return
+	}
+	if req.IsPublic == nil {
+		writeError(w, http.StatusBadRequest, "invalid_request", "is_public is required")
+		return
+	}
+
+	agent, err := h.control.SetAgentVisibilitySelf(agentUUID, *req.IsPublic, h.now().UTC())
+	if err != nil {
+		switch {
+		case errors.Is(err, store.ErrAgentNotFound):
+			writeError(w, http.StatusNotFound, "unknown_agent", "agent_uuid is not registered")
+		default:
+			writeError(w, http.StatusInternalServerError, "store_error", "failed to update agent visibility")
+		}
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"agent": agent,
+	})
+}
+
 func (h *Handler) handleAgentMeCapabilities(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		writeMethodNotAllowed(w)
@@ -641,7 +679,7 @@ func (h *Handler) buildAgentControlPlane(r *http.Request, agent model.Agent) (ag
 		OrgID:        agent.OrgID,
 		OwnerHumanID: ownerHumanID,
 		CanTalkTo:    peers,
-		Capabilities: []string{"publish_messages", "pull_messages", "read_capabilities", "read_skill"},
+		Capabilities: []string{"publish_messages", "pull_messages", "read_capabilities", "read_skill", "update_profile"},
 	}, nil
 }
 
@@ -663,6 +701,7 @@ func (h *Handler) agentControlPlanePayload(cp agentControlPlaneView) map[string]
 		"endpoints": map[string]string{
 			"publish":      cp.APIBase + "/messages/publish",
 			"pull":         cp.APIBase + "/messages/pull",
+			"profile":      cp.APIBase + "/agents/me",
 			"capabilities": cp.APIBase + "/agents/me/capabilities",
 			"skill":        cp.APIBase + "/agents/me/skill",
 		},

@@ -424,6 +424,20 @@ func (s *s3StateStore) SetAgentVisibility(agentUUID string, isPublic bool, actor
 	return agent, nil
 }
 
+func (s *s3StateStore) SetAgentVisibilitySelf(agentUUID string, isPublic bool, now time.Time) (model.Agent, error) {
+	s.persistMu.Lock()
+	defer s.persistMu.Unlock()
+
+	agent, err := s.MemoryStore.SetAgentVisibilitySelf(agentUUID, isPublic, now)
+	if err != nil {
+		return model.Agent{}, err
+	}
+	if err := s.persistAll(context.Background()); err != nil {
+		return model.Agent{}, err
+	}
+	return agent, nil
+}
+
 func (s *s3StateStore) CreateOrJoinOrgTrust(orgID, peerOrgID, actorHumanID, edgeID string, now time.Time, isSuperAdmin bool) (model.TrustEdge, bool, error) {
 	s.persistMu.Lock()
 	defer s.persistMu.Unlock()
