@@ -1,6 +1,7 @@
 package store
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"strings"
@@ -163,6 +164,105 @@ func TestMemoryStoreAgentUUIDLookupAndTokenLifecycle(t *testing.T) {
 	}
 	if _, err := mem.GetAgentByUUID(agent.AgentUUID); !errors.Is(err, ErrAgentNotFound) {
 		t.Fatalf("expected revoked agent not found, got %v", err)
+	}
+	if err := mem.RotateAgentToken(agent.AgentUUID, alice.HumanID, "tok-revoked", now, false); !errors.Is(err, ErrAgentNotFound) {
+		t.Fatalf("expected rotate token for revoked agent to fail with ErrAgentNotFound, got %v", err)
+	}
+	if _, err := mem.UpdateAgentMetadata(agent.AgentUUID, map[string]any{"public": false}, alice.HumanID, now, false); !errors.Is(err, ErrAgentNotFound) {
+		t.Fatalf("expected metadata update for revoked agent to fail with ErrAgentNotFound, got %v", err)
+	}
+	if _, err := mem.UpdateAgentMetadataSelf(agent.AgentUUID, map[string]any{"public": false}, now); !errors.Is(err, ErrAgentNotFound) {
+		t.Fatalf("expected self metadata update for revoked agent to fail with ErrAgentNotFound, got %v", err)
+	}
+}
+
+func TestMemoryStoreRevokeAgentPurgesTrustAndQueuedMessages(t *testing.T) {
+	now := time.Date(2026, 3, 7, 0, 0, 0, 0, time.UTC)
+	ids := &seqID{}
+	mem := NewMemoryStore()
+
+	alice := mustCreateHuman(t, mem, ids, "alice", "alice@a.test", "alice", now)
+	bob := mustCreateHuman(t, mem, ids, "bob", "bob@b.test", "bob", now)
+	orgA := mustCreateOrg(t, mem, ids, alice, "org-a", "Org A", now)
+	orgB := mustCreateOrg(t, mem, ids, bob, "org-b", "Org B", now)
+
+	agentA, err := mem.RegisterAgent(orgA.OrgID, "agent-a", &alice.HumanID, "tok-agent-a", alice.HumanID, now, false)
+	if err != nil {
+		t.Fatalf("register agent A failed: %v", err)
+	}
+	agentB, err := mem.RegisterAgent(orgB.OrgID, "agent-b", &bob.HumanID, "tok-agent-b", bob.HumanID, now, false)
+	if err != nil {
+		t.Fatalf("register agent B failed: %v", err)
+	}
+
+	orgTrust, _, err := mem.CreateOrJoinOrgTrust(orgA.OrgID, orgB.OrgID, alice.HumanID, ids.mustID(t), now, false)
+	if err != nil {
+		t.Fatalf("CreateOrJoinOrgTrust failed: %v", err)
+	}
+	if _, err := mem.ApproveOrgTrust(orgTrust.EdgeID, bob.HumanID, now, false); err != nil {
+		t.Fatalf("ApproveOrgTrust failed: %v", err)
+	}
+
+	agentTrust, _, err := mem.CreateOrJoinAgentTrust(orgA.OrgID, agentA.AgentUUID, agentB.AgentUUID, alice.HumanID, ids.mustID(t), now, false)
+	if err != nil {
+		t.Fatalf("CreateOrJoinAgentTrust failed: %v", err)
+	}
+	if _, err := mem.ApproveAgentTrust(agentTrust.EdgeID, bob.HumanID, now, false); err != nil {
+		t.Fatalf("ApproveAgentTrust failed: %v", err)
+	}
+
+	if err := mem.Enqueue(context.Background(), model.Message{
+		MessageID:     ids.mustID(t),
+		FromAgentUUID: agentA.AgentUUID,
+		ToAgentUUID:   agentB.AgentUUID,
+		CreatedAt:     now,
+	}); err != nil {
+		t.Fatalf("enqueue A->B failed: %v", err)
+	}
+	if err := mem.Enqueue(context.Background(), model.Message{
+		MessageID:     ids.mustID(t),
+		FromAgentUUID: agentB.AgentUUID,
+		ToAgentUUID:   agentA.AgentUUID,
+		CreatedAt:     now,
+	}); err != nil {
+		t.Fatalf("enqueue B->A failed: %v", err)
+	}
+
+	if err := mem.RevokeAgent(agentA.AgentUUID, alice.HumanID, now, false); err != nil {
+		t.Fatalf("RevokeAgent failed: %v", err)
+	}
+
+	snapshot := mem.AdminSnapshot()
+	foundRevokedAgentTrust := false
+	for _, edge := range snapshot.AgentTrusts {
+		if edge.EdgeID != agentTrust.EdgeID {
+			continue
+		}
+		foundRevokedAgentTrust = true
+		if edge.State != model.StatusRevoked {
+			t.Fatalf("expected linked agent trust to be revoked, got %q", edge.State)
+		}
+	}
+	if !foundRevokedAgentTrust {
+		t.Fatalf("expected revoked trust edge %q to exist in snapshot", agentTrust.EdgeID)
+	}
+
+	if _, _, err := mem.CanPublish(agentA.AgentUUID, agentB.AgentUUID); !errors.Is(err, ErrAgentNotFound) {
+		t.Fatalf("expected CanPublish with revoked sender to fail with ErrAgentNotFound, got %v", err)
+	}
+	if _, _, err := mem.CreateOrJoinAgentTrust(orgA.OrgID, agentA.AgentUUID, agentB.AgentUUID, alice.HumanID, ids.mustID(t), now, false); !errors.Is(err, ErrAgentNotFound) {
+		t.Fatalf("expected trust create with revoked agent to fail with ErrAgentNotFound, got %v", err)
+	}
+
+	if _, ok, err := mem.Dequeue(context.Background(), agentB.AgentUUID); err != nil {
+		t.Fatalf("dequeue B failed: %v", err)
+	} else if ok {
+		t.Fatalf("expected outbound messages from revoked agent to be purged")
+	}
+	if _, ok, err := mem.Dequeue(context.Background(), agentA.AgentUUID); err != nil {
+		t.Fatalf("dequeue A failed: %v", err)
+	} else if ok {
+		t.Fatalf("expected inbound messages to revoked agent to be purged")
 	}
 }
 
