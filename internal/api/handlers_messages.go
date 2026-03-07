@@ -4,6 +4,7 @@ import (
 	"crypto/rand"
 	"errors"
 	"fmt"
+	"log"
 	"net/http"
 	"strings"
 	"time"
@@ -108,6 +109,14 @@ func (h *Handler) handlePublish(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := h.queue.Enqueue(r.Context(), message); err != nil {
+		h.setQueueRuntimeError(err)
+		log.Printf(
+			"publish enqueue failed: from_agent_uuid=%s to_agent_uuid=%s message_id=%s err=%v",
+			senderAgentUUID,
+			targetAgent.AgentUUID,
+			messageID,
+			err,
+		)
 		if errors.Is(err, store.ErrAgentNotFound) {
 			writeError(w, http.StatusNotFound, "unknown_receiver", "to_agent_uuid is not registered")
 			return
@@ -116,6 +125,7 @@ func (h *Handler) handlePublish(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	h.clearQueueRuntimeError()
 	h.control.RecordMessageQueued(senderOrgID)
 	h.waiters.Notify(targetAgent.AgentUUID)
 	writeJSON(w, http.StatusAccepted, map[string]string{
@@ -145,11 +155,16 @@ func (h *Handler) handlePull(w http.ResponseWriter, r *http.Request) {
 	deadline := h.now().Add(timeout)
 	for {
 		if message, ok, err := h.queue.Dequeue(r.Context(), receiverAgentUUID); err != nil {
+			h.setQueueRuntimeError(err)
+			log.Printf("pull dequeue failed: receiver_agent_uuid=%s err=%v", receiverAgentUUID, err)
 			writeError(w, http.StatusInternalServerError, "store_error", "failed to dequeue message")
 			return
 		} else if ok {
+			h.clearQueueRuntimeError()
 			writeJSON(w, http.StatusOK, map[string]any{"message": message})
 			return
+		} else {
+			h.clearQueueRuntimeError()
 		}
 
 		remaining := time.Until(deadline)
@@ -160,13 +175,18 @@ func (h *Handler) handlePull(w http.ResponseWriter, r *http.Request) {
 
 		notifyCh, cancel := h.waiters.Register(receiverAgentUUID)
 		if message, ok, err := h.queue.Dequeue(r.Context(), receiverAgentUUID); err != nil {
+			h.setQueueRuntimeError(err)
+			log.Printf("pull dequeue failed after waiter register: receiver_agent_uuid=%s err=%v", receiverAgentUUID, err)
 			cancel()
 			writeError(w, http.StatusInternalServerError, "store_error", "failed to dequeue message")
 			return
 		} else if ok {
+			h.clearQueueRuntimeError()
 			cancel()
 			writeJSON(w, http.StatusOK, map[string]any{"message": message})
 			return
+		} else {
+			h.clearQueueRuntimeError()
 		}
 
 		timer := time.NewTimer(remaining)

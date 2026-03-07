@@ -2,7 +2,9 @@ package api
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -13,6 +15,7 @@ import (
 
 	"statocyst/internal/auth"
 	"statocyst/internal/longpoll"
+	"statocyst/internal/model"
 	"statocyst/internal/store"
 )
 
@@ -95,6 +98,182 @@ func TestHealthReportsDegradedStorageStatus(t *testing.T) {
 	}
 	if _, ok := stateObj["error"].(string); !ok {
 		t.Fatalf("expected storage.state.error string, got %v payload=%v", stateObj["error"], payload)
+	}
+}
+
+type failOnceQueue struct {
+	base            store.MessageQueueStore
+	mu              sync.Mutex
+	failNextEnqueue bool
+	failNextDequeue bool
+}
+
+func (q *failOnceQueue) Enqueue(ctx context.Context, message model.Message) error {
+	q.mu.Lock()
+	fail := q.failNextEnqueue
+	if q.failNextEnqueue {
+		q.failNextEnqueue = false
+	}
+	q.mu.Unlock()
+	if fail {
+		return errors.New("enqueue unavailable")
+	}
+	return q.base.Enqueue(ctx, message)
+}
+
+func (q *failOnceQueue) Dequeue(ctx context.Context, agentUUID string) (model.Message, bool, error) {
+	q.mu.Lock()
+	fail := q.failNextDequeue
+	if q.failNextDequeue {
+		q.failNextDequeue = false
+	}
+	q.mu.Unlock()
+	if fail {
+		return model.Message{}, false, errors.New("dequeue unavailable")
+	}
+	return q.base.Dequeue(ctx, agentUUID)
+}
+
+func TestHealthReportsRuntimeQueueFailureAndRecovery(t *testing.T) {
+	mem := store.NewMemoryStore()
+	waiters := longpoll.NewWaiters()
+	queue := &failOnceQueue{
+		base:            mem,
+		failNextEnqueue: true,
+	}
+	h := NewHandler(mem, queue, waiters, auth.NewDevHumanAuthProvider(), "", "", "", "", "molten.bot", true, 15*time.Minute, false)
+	h.SetStorageHealth(store.StorageHealthStatus{
+		StartupMode: store.StorageStartupModeDegraded,
+		State: store.StorageBackendHealth{
+			Backend: "s3",
+			Healthy: true,
+		},
+		Queue: store.StorageBackendHealth{
+			Backend: "s3",
+			Healthy: true,
+		},
+	})
+	router := NewRouter(h)
+
+	_, _, tokenA, _, _, _, _, agentUUIDB := setupTrustedAgents(t, router)
+
+	failedPublish := publish(t, router, tokenA, agentUUIDB, "first")
+	if failedPublish.Code != http.StatusInternalServerError {
+		t.Fatalf("expected publish 500 on enqueue failure, got %d %s", failedPublish.Code, failedPublish.Body.String())
+	}
+
+	healthAfterFailure := doJSONRequest(t, router, http.MethodGet, "/health", nil, nil)
+	if healthAfterFailure.Code != http.StatusOK {
+		t.Fatalf("expected /health 200, got %d %s", healthAfterFailure.Code, healthAfterFailure.Body.String())
+	}
+	payload := decodeJSONMap(t, healthAfterFailure.Body.Bytes())
+	if got, _ := payload["status"].(string); got != "degraded" {
+		t.Fatalf("expected status degraded after runtime enqueue failure, got %q payload=%v", got, payload)
+	}
+	storageObj, _ := payload["storage"].(map[string]any)
+	queueObj, _ := storageObj["queue"].(map[string]any)
+	if healthy, _ := queueObj["healthy"].(bool); healthy {
+		t.Fatalf("expected queue health false after runtime enqueue failure, got %v payload=%v", queueObj["healthy"], payload)
+	}
+	queueErr, _ := queueObj["error"].(string)
+	if !strings.Contains(queueErr, "enqueue unavailable") {
+		t.Fatalf("expected runtime queue error to include enqueue failure, got %q payload=%v", queueErr, payload)
+	}
+
+	successfulPublish := publish(t, router, tokenA, agentUUIDB, "second")
+	if successfulPublish.Code != http.StatusAccepted {
+		t.Fatalf("expected publish 202 after queue recovers, got %d %s", successfulPublish.Code, successfulPublish.Body.String())
+	}
+
+	healthAfterRecovery := doJSONRequest(t, router, http.MethodGet, "/health", nil, nil)
+	if healthAfterRecovery.Code != http.StatusOK {
+		t.Fatalf("expected /health 200, got %d %s", healthAfterRecovery.Code, healthAfterRecovery.Body.String())
+	}
+	recoveryPayload := decodeJSONMap(t, healthAfterRecovery.Body.Bytes())
+	if got, _ := recoveryPayload["status"].(string); got != "ok" {
+		t.Fatalf("expected status ok after queue recovers, got %q payload=%v", got, recoveryPayload)
+	}
+	recoveryStorage, _ := recoveryPayload["storage"].(map[string]any)
+	recoveryQueue, _ := recoveryStorage["queue"].(map[string]any)
+	if healthy, _ := recoveryQueue["healthy"].(bool); !healthy {
+		t.Fatalf("expected queue health true after successful enqueue, got %v payload=%v", recoveryQueue["healthy"], recoveryPayload)
+	}
+	if _, exists := recoveryQueue["error"]; exists {
+		t.Fatalf("expected queue error cleared after recovery, got payload=%v", recoveryPayload)
+	}
+}
+
+func TestHealthReportsRuntimeDequeueFailureAndRecovery(t *testing.T) {
+	mem := store.NewMemoryStore()
+	waiters := longpoll.NewWaiters()
+	queue := &failOnceQueue{
+		base:            mem,
+		failNextDequeue: true,
+	}
+	h := NewHandler(mem, queue, waiters, auth.NewDevHumanAuthProvider(), "", "", "", "", "molten.bot", true, 15*time.Minute, false)
+	h.SetStorageHealth(store.StorageHealthStatus{
+		StartupMode: store.StorageStartupModeDegraded,
+		State: store.StorageBackendHealth{
+			Backend: "s3",
+			Healthy: true,
+		},
+		Queue: store.StorageBackendHealth{
+			Backend: "s3",
+			Healthy: true,
+		},
+	})
+	router := NewRouter(h)
+
+	_, _, tokenA, tokenB, _, _, _, agentUUIDB := setupTrustedAgents(t, router)
+
+	publishResp := publish(t, router, tokenA, agentUUIDB, "queued-before-pull")
+	if publishResp.Code != http.StatusAccepted {
+		t.Fatalf("expected publish 202, got %d %s", publishResp.Code, publishResp.Body.String())
+	}
+
+	failedPull := pull(t, router, tokenB, 10)
+	if failedPull.Code != http.StatusInternalServerError {
+		t.Fatalf("expected pull 500 on dequeue failure, got %d %s", failedPull.Code, failedPull.Body.String())
+	}
+
+	healthAfterFailure := doJSONRequest(t, router, http.MethodGet, "/health", nil, nil)
+	if healthAfterFailure.Code != http.StatusOK {
+		t.Fatalf("expected /health 200, got %d %s", healthAfterFailure.Code, healthAfterFailure.Body.String())
+	}
+	payload := decodeJSONMap(t, healthAfterFailure.Body.Bytes())
+	if got, _ := payload["status"].(string); got != "degraded" {
+		t.Fatalf("expected status degraded after runtime dequeue failure, got %q payload=%v", got, payload)
+	}
+	storageObj, _ := payload["storage"].(map[string]any)
+	queueObj, _ := storageObj["queue"].(map[string]any)
+	if healthy, _ := queueObj["healthy"].(bool); healthy {
+		t.Fatalf("expected queue health false after runtime dequeue failure, got %v payload=%v", queueObj["healthy"], payload)
+	}
+	queueErr, _ := queueObj["error"].(string)
+	if !strings.Contains(queueErr, "dequeue unavailable") {
+		t.Fatalf("expected runtime queue error to include dequeue failure, got %q payload=%v", queueErr, payload)
+	}
+
+	recoveredPull := pull(t, router, tokenB, 10)
+	if recoveredPull.Code != http.StatusOK {
+		t.Fatalf("expected pull 200 after queue recovers, got %d %s", recoveredPull.Code, recoveredPull.Body.String())
+	}
+
+	healthAfterRecovery := doJSONRequest(t, router, http.MethodGet, "/health", nil, nil)
+	if healthAfterRecovery.Code != http.StatusOK {
+		t.Fatalf("expected /health 200, got %d %s", healthAfterRecovery.Code, healthAfterRecovery.Body.String())
+	}
+	recoveryPayload := decodeJSONMap(t, healthAfterRecovery.Body.Bytes())
+	if got, _ := recoveryPayload["status"].(string); got != "ok" {
+		t.Fatalf("expected status ok after dequeue recovers, got %q payload=%v", got, recoveryPayload)
+	}
+	recoveryStorage, _ := recoveryPayload["storage"].(map[string]any)
+	recoveryQueue, _ := recoveryStorage["queue"].(map[string]any)
+	if healthy, _ := recoveryQueue["healthy"].(bool); !healthy {
+		t.Fatalf("expected queue health true after successful dequeue, got %v payload=%v", recoveryQueue["healthy"], recoveryPayload)
+	}
+	if _, exists := recoveryQueue["error"]; exists {
+		t.Fatalf("expected queue error cleared after dequeue recovery, got payload=%v", recoveryPayload)
 	}
 }
 

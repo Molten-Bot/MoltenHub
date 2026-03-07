@@ -8,6 +8,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"statocyst/internal/auth"
@@ -39,7 +40,9 @@ type Handler struct {
 	superAdminReview  bool
 	bindTokenTTL      time.Duration
 	headlessMode      bool
+	storageHealthMu   sync.RWMutex
 	storageHealth     store.StorageHealthStatus
+	queueRuntimeError string
 }
 
 type humanActor struct {
@@ -122,7 +125,7 @@ func (h *Handler) handleHealthz(w http.ResponseWriter, r *http.Request) {
 		writeMethodNotAllowed(w)
 		return
 	}
-	health := h.storageHealth
+	health := h.currentStorageHealth()
 	if health.StartupMode == "" {
 		health = store.DefaultStorageHealthStatus()
 	}
@@ -154,11 +157,49 @@ func (h *Handler) handleHealthz(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) SetStorageHealth(health store.StorageHealthStatus) {
+	h.storageHealthMu.Lock()
+	defer h.storageHealthMu.Unlock()
 	if health.StartupMode == "" {
 		h.storageHealth = store.DefaultStorageHealthStatus()
 		return
 	}
 	h.storageHealth = health
+}
+
+func (h *Handler) currentStorageHealth() store.StorageHealthStatus {
+	h.storageHealthMu.RLock()
+	health := h.storageHealth
+	runtimeErr := strings.TrimSpace(h.queueRuntimeError)
+	h.storageHealthMu.RUnlock()
+
+	if runtimeErr != "" {
+		health.Queue.Healthy = false
+		if strings.TrimSpace(health.Queue.Error) == "" {
+			health.Queue.Error = runtimeErr
+		} else {
+			health.Queue.Error = health.Queue.Error + "; runtime: " + runtimeErr
+		}
+	}
+	return health
+}
+
+func (h *Handler) setQueueRuntimeError(err error) {
+	if err == nil {
+		return
+	}
+	msg := strings.TrimSpace(err.Error())
+	if msg == "" {
+		return
+	}
+	h.storageHealthMu.Lock()
+	h.queueRuntimeError = msg
+	h.storageHealthMu.Unlock()
+}
+
+func (h *Handler) clearQueueRuntimeError() {
+	h.storageHealthMu.Lock()
+	h.queueRuntimeError = ""
+	h.storageHealthMu.Unlock()
 }
 
 func writeJSON(w http.ResponseWriter, status int, payload any) {
