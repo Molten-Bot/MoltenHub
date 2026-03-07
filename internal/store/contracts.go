@@ -45,6 +45,7 @@ type ControlPlaneStore interface {
 	FinalizeAgentHandleSelf(agentUUID, handle string, now time.Time) (model.Agent, error)
 	AgentUUIDForTokenHash(tokenHash string) (string, error)
 	GetHuman(humanID string) (model.Human, error)
+	GetOrganization(orgID string) (model.Organization, error)
 	GetAgentByUUID(agentUUID string) (model.Agent, error)
 	GetAgentURI(agentUUID string) (string, error)
 	ResolveAgentUUID(agentRef string) (string, error)

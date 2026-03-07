@@ -17,6 +17,9 @@ func TestCallerContract_AgentRuntimeEndpointsRejectHumanHeaders(t *testing.T) {
 	}, headers)
 	requireUnauthorized(t, profileResp)
 
+	profileReadResp := doJSONRequest(t, router, http.MethodGet, "/v1/agents/me", nil, headers)
+	requireUnauthorized(t, profileReadResp)
+
 	capsResp := doJSONRequest(t, router, http.MethodGet, "/v1/agents/me/capabilities", nil, headers)
 	requireUnauthorized(t, capsResp)
 

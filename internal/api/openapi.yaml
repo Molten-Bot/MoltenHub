@@ -115,6 +115,11 @@ paths:
       description: |
         Replaces the metadata object for the authenticated human.
         Metadata must be a JSON object and serialized size must be <= 65536 bytes.
+        Field constraints enforced by API:
+        - `metadata.title` <= 32 chars
+        - `metadata.status` <= 32 chars
+        - `metadata.emoji` <= 1 char
+        - `metadata.website` <= 256 chars
       security:
         - humanAuth: []
       requestBody:
@@ -277,6 +282,10 @@ paths:
       description: |
         Replaces the metadata object for an organization.
         Requires owner/admin role for the org or super-admin.
+        Field constraints enforced by API:
+        - `metadata.imageurl` <= 256 chars
+        - `metadata.location` <= 32 chars
+        - `metadata.website` <= 256 chars
       security:
         - humanAuth: []
       parameters:
@@ -630,6 +639,18 @@ paths:
         '409':
           description: Bind already used or supplied agent_id exists
   /v1/agents/me:
+    get:
+      summary: Read authenticated agent profile with bound owner/org context
+      description: |
+        Returns the authenticated agent plus read-only information for its bound organization
+        and owner human (if the agent is human-owned).
+      security:
+        - agentAuth: []
+      responses:
+        '200':
+          description: Agent profile with bound context
+        '401':
+          description: Unauthorized
     patch:
       summary: Update authenticated agent profile (alias)
       description: |

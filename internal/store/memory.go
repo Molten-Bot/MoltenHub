@@ -1290,6 +1290,17 @@ func (s *MemoryStore) GetHuman(humanID string) (model.Human, error) {
 	return h, nil
 }
 
+func (s *MemoryStore) GetOrganization(orgID string) (model.Organization, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	org, ok := s.orgs[orgID]
+	if !ok {
+		return model.Organization{}, ErrOrgNotFound
+	}
+	return org, nil
+}
+
 func (s *MemoryStore) GetAgentByUUID(agentUUID string) (model.Agent, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
