@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"sort"
 	"strings"
 	"time"
 
@@ -947,6 +948,190 @@ func (h *Handler) handleAdminSnapshot(w http.ResponseWriter, r *http.Request) {
 
 	writeJSON(w, http.StatusOK, map[string]any{
 		"snapshot": h.control.AdminSnapshot(),
+	})
+}
+
+func metadataPublicOrDefault(metadata map[string]any) bool {
+	raw, ok := metadata["public"]
+	if !ok {
+		return true
+	}
+	publicValue, ok := raw.(bool)
+	if !ok {
+		return true
+	}
+	return publicValue
+}
+
+func snapshotMetadataPublicView(metadata map[string]any) map[string]any {
+	out := map[string]any{}
+	if publicValue, ok := metadata["public"].(bool); ok {
+		out["public"] = publicValue
+	}
+	if description, ok := metadata["description"].(string); ok {
+		description = strings.TrimSpace(description)
+		if description != "" {
+			out["description"] = description
+		}
+	}
+	if image, ok := metadata["image"].(string); ok {
+		image = strings.TrimSpace(image)
+		if image != "" {
+			out["image"] = image
+		}
+	}
+	return out
+}
+
+func (h *Handler) handlePublicSnapshot(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeMethodNotAllowed(w)
+		return
+	}
+
+	admin := h.control.AdminSnapshot()
+
+	publicOrgs := make(map[string]model.Organization)
+	for _, org := range admin.Organizations {
+		if !metadataPublicOrDefault(org.Metadata) {
+			continue
+		}
+		publicOrgs[org.OrgID] = org
+	}
+
+	activeMembershipsByOrg := make(map[string]map[string]struct{})
+	for _, membership := range admin.Memberships {
+		if membership.Status != model.StatusActive {
+			continue
+		}
+		if _, ok := publicOrgs[membership.OrgID]; !ok {
+			continue
+		}
+		members := activeMembershipsByOrg[membership.OrgID]
+		if members == nil {
+			members = make(map[string]struct{})
+			activeMembershipsByOrg[membership.OrgID] = members
+		}
+		members[membership.HumanID] = struct{}{}
+	}
+
+	activePublicHumans := make(map[string]model.Human)
+	for _, human := range admin.Humans {
+		if !metadataPublicOrDefault(human.Metadata) {
+			continue
+		}
+		hasActivePublicMembership := false
+		for _, members := range activeMembershipsByOrg {
+			if _, ok := members[human.HumanID]; ok {
+				hasActivePublicMembership = true
+				break
+			}
+		}
+		if !hasActivePublicMembership {
+			continue
+		}
+		activePublicHumans[human.HumanID] = human
+	}
+
+	organizations := make([]map[string]any, 0, len(publicOrgs))
+	for _, org := range publicOrgs {
+		organizations = append(organizations, map[string]any{
+			"org_id":       org.OrgID,
+			"handle":       org.Handle,
+			"display_name": org.DisplayName,
+			"metadata":     snapshotMetadataPublicView(org.Metadata),
+		})
+	}
+	sort.Slice(organizations, func(i, j int) bool {
+		return fmt.Sprintf("%v", organizations[i]["handle"]) < fmt.Sprintf("%v", organizations[j]["handle"])
+	})
+
+	humans := make([]map[string]any, 0, len(activePublicHumans))
+	for _, human := range activePublicHumans {
+		humans = append(humans, map[string]any{
+			"human_id": human.HumanID,
+			"handle":   human.Handle,
+			"metadata": snapshotMetadataPublicView(human.Metadata),
+		})
+	}
+	sort.Slice(humans, func(i, j int) bool {
+		return fmt.Sprintf("%v", humans[i]["handle"]) < fmt.Sprintf("%v", humans[j]["handle"])
+	})
+
+	memberships := make([]map[string]any, 0)
+	for _, membership := range admin.Memberships {
+		if membership.Status != model.StatusActive {
+			continue
+		}
+		if _, ok := publicOrgs[membership.OrgID]; !ok {
+			continue
+		}
+		if _, ok := activePublicHumans[membership.HumanID]; !ok {
+			continue
+		}
+		memberships = append(memberships, map[string]any{
+			"org_id":   membership.OrgID,
+			"human_id": membership.HumanID,
+			"status":   membership.Status,
+		})
+	}
+	sort.Slice(memberships, func(i, j int) bool {
+		orgI := fmt.Sprintf("%v", memberships[i]["org_id"])
+		orgJ := fmt.Sprintf("%v", memberships[j]["org_id"])
+		if orgI != orgJ {
+			return orgI < orgJ
+		}
+		return fmt.Sprintf("%v", memberships[i]["human_id"]) < fmt.Sprintf("%v", memberships[j]["human_id"])
+	})
+
+	agents := make([]map[string]any, 0)
+	for _, agent := range admin.Agents {
+		if agent.Status != model.StatusActive {
+			continue
+		}
+		if _, ok := publicOrgs[agent.OrgID]; !ok {
+			continue
+		}
+		if !metadataPublicOrDefault(agent.Metadata) {
+			continue
+		}
+		if agent.OwnerHumanID != nil && strings.TrimSpace(*agent.OwnerHumanID) != "" {
+			if _, ok := activePublicHumans[*agent.OwnerHumanID]; !ok {
+				continue
+			}
+		}
+		row := map[string]any{
+			"agent_id": agent.AgentID,
+			"org_id":   agent.OrgID,
+			"status":   agent.Status,
+			"metadata": snapshotMetadataPublicView(agent.Metadata),
+		}
+		if agent.OwnerHumanID != nil && strings.TrimSpace(*agent.OwnerHumanID) != "" {
+			row["owner_human_id"] = *agent.OwnerHumanID
+		}
+		agents = append(agents, row)
+	}
+	sort.Slice(agents, func(i, j int) bool {
+		agentI := fmt.Sprintf("%v", agents[i]["agent_id"])
+		agentJ := fmt.Sprintf("%v", agents[j]["agent_id"])
+		if agentI != agentJ {
+			return agentI < agentJ
+		}
+		return fmt.Sprintf("%v", agents[i]["org_id"]) < fmt.Sprintf("%v", agents[j]["org_id"])
+	})
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"snapshot": map[string]any{
+			"generated_at":   h.now().UTC().Format(time.RFC3339Nano),
+			"organizations":  organizations,
+			"humans":         humans,
+			"memberships":    memberships,
+			"agents":         agents,
+			"org_trusts":     []any{},
+			"agent_trusts":   []any{},
+			"stats":          []any{},
+			"snapshot_scope": "public",
+		},
 	})
 }
 

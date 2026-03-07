@@ -151,6 +151,15 @@ paths:
           description: Global metadata snapshot
         '403':
           description: Super admin required
+  /v1/public/snapshot:
+    get:
+      summary: Public filtered snapshot
+      description: |
+        Public read-only snapshot for Hub Swarm pages.
+        Returns only entities marked public (`metadata.public` not false), with sensitive fields removed.
+      responses:
+        '200':
+          description: Public snapshot
   /v1/me/orgs:
     get:
       summary: List memberships for current human

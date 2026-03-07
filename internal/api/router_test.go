@@ -1681,6 +1681,84 @@ func TestAdminSnapshotHeaderKeyAccess(t *testing.T) {
 	}
 }
 
+func TestPublicSnapshotFiltersPrivateEntities(t *testing.T) {
+	router := newTestRouter()
+	aliceHumanID := currentHumanID(t, router, "alice", "alice@a.test")
+	bobHumanID := currentHumanID(t, router, "bob", "bob@b.test")
+
+	publicOrgID := createOrg(t, router, "alice", "alice@a.test", "Public Org")
+	privateOrgID := createOrg(t, router, "bob", "bob@b.test", "Private Org")
+
+	privateOrgResp := doJSONRequest(t, router, http.MethodPatch, "/v1/orgs/"+privateOrgID+"/metadata", map[string]any{
+		"metadata": map[string]any{"public": false},
+	}, humanHeaders("bob", "bob@b.test"))
+	if privateOrgResp.Code != http.StatusOK {
+		t.Fatalf("expected private org metadata patch 200, got %d %s", privateOrgResp.Code, privateOrgResp.Body.String())
+	}
+
+	inviteID := createInvite(t, router, "alice", "alice@a.test", publicOrgID, "bob@b.test", model.RoleMember)
+	acceptInvite(t, router, "bob", "bob@b.test", inviteID)
+
+	_, _ = registerAgentWithUUID(t, router, "alice", "alice@a.test", publicOrgID, "alice-agent", aliceHumanID)
+	_, _ = registerAgentWithUUID(t, router, "bob", "bob@b.test", publicOrgID, "bob-agent", bobHumanID)
+
+	privateAlice := doJSONRequest(t, router, http.MethodPatch, "/v1/me/metadata", map[string]any{
+		"metadata": map[string]any{"public": false},
+	}, humanHeaders("alice", "alice@a.test"))
+	if privateAlice.Code != http.StatusOK {
+		t.Fatalf("expected alice metadata patch 200, got %d %s", privateAlice.Code, privateAlice.Body.String())
+	}
+
+	publicSnap := doJSONRequest(t, router, http.MethodGet, "/v1/public/snapshot", nil, nil)
+	if publicSnap.Code != http.StatusOK {
+		t.Fatalf("expected public snapshot 200, got %d %s", publicSnap.Code, publicSnap.Body.String())
+	}
+	payload := decodeJSONMap(t, publicSnap.Body.Bytes())
+	snap, _ := payload["snapshot"].(map[string]any)
+	if scope, _ := snap["snapshot_scope"].(string); scope != "public" {
+		t.Fatalf("expected snapshot_scope=public, got %q payload=%v", scope, payload)
+	}
+
+	orgs, _ := snap["organizations"].([]any)
+	if len(orgs) != 1 {
+		t.Fatalf("expected 1 public org, got %d payload=%v", len(orgs), payload)
+	}
+	org, _ := orgs[0].(map[string]any)
+	if gotOrgID, _ := org["org_id"].(string); gotOrgID != publicOrgID {
+		t.Fatalf("expected public org_id %q, got %q payload=%v", publicOrgID, gotOrgID, payload)
+	}
+
+	humans, _ := snap["humans"].([]any)
+	if len(humans) != 1 {
+		t.Fatalf("expected 1 public human, got %d payload=%v", len(humans), payload)
+	}
+	human, _ := humans[0].(map[string]any)
+	if gotHumanID, _ := human["human_id"].(string); gotHumanID != bobHumanID {
+		t.Fatalf("expected public human_id %q, got %q payload=%v", bobHumanID, gotHumanID, payload)
+	}
+
+	memberships, _ := snap["memberships"].([]any)
+	if len(memberships) != 1 {
+		t.Fatalf("expected 1 public active membership, got %d payload=%v", len(memberships), payload)
+	}
+	membership, _ := memberships[0].(map[string]any)
+	if gotOrgID, _ := membership["org_id"].(string); gotOrgID != publicOrgID {
+		t.Fatalf("expected membership org_id %q, got %q payload=%v", publicOrgID, gotOrgID, payload)
+	}
+	if gotHumanID, _ := membership["human_id"].(string); gotHumanID != bobHumanID {
+		t.Fatalf("expected membership human_id %q, got %q payload=%v", bobHumanID, gotHumanID, payload)
+	}
+
+	agents, _ := snap["agents"].([]any)
+	if len(agents) != 1 {
+		t.Fatalf("expected 1 public agent after owner filtering, got %d payload=%v", len(agents), payload)
+	}
+	agent, _ := agents[0].(map[string]any)
+	if gotOwnerID, _ := agent["owner_human_id"].(string); gotOwnerID != bobHumanID {
+		t.Fatalf("expected public agent owner_human_id %q, got %q payload=%v", bobHumanID, gotOwnerID, payload)
+	}
+}
+
 func TestMetadataValidationRejectsNonObjectAndOversizedPayload(t *testing.T) {
 	router := newTestRouter()
 	ensureHandleConfirmed(t, router, "alice", "alice@a.test")
