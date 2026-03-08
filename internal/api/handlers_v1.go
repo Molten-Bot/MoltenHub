@@ -32,8 +32,9 @@ type createInviteRequest struct {
 	ExpiresInDays *int   `json:"expires_in_days,omitempty"`
 }
 
-type redeemInviteCodeRequest struct {
-	InviteCode string `json:"invite_code"`
+type redeemInviteRequest struct {
+	InviteID   string `json:"invite_id,omitempty"`
+	InviteCode string `json:"invite_code,omitempty"`
 }
 
 type createBindTokenRequest struct {
@@ -266,6 +267,69 @@ func decodeAgentProfileUpdateRequest(r *http.Request) (*string, map[string]any, 
 	return handle, metadata, nil
 }
 
+func meOnboardingPayload(handleConfirmedAt *time.Time) map[string]any {
+	if handleConfirmedAt != nil {
+		return nil
+	}
+	return map[string]any{
+		"handle_required":  true,
+		"handle_confirmed": false,
+		"next_step":        "set_handle",
+	}
+}
+
+func meResponsePayload(human model.Human, isAdmin bool) map[string]any {
+	payload := map[string]any{
+		"human": human,
+		"admin": isAdmin,
+	}
+	if onboarding := meOnboardingPayload(human.HandleConfirmedAt); onboarding != nil {
+		payload["onboarding"] = onboarding
+	}
+	return payload
+}
+
+func agentOwnerPayload(agent model.Agent) map[string]any {
+	if agent.OwnerHumanID != nil && strings.TrimSpace(*agent.OwnerHumanID) != "" {
+		return map[string]any{
+			"human_id": strings.TrimSpace(*agent.OwnerHumanID),
+		}
+	}
+	if strings.TrimSpace(agent.OrgID) != "" {
+		return map[string]any{
+			"org_id": strings.TrimSpace(agent.OrgID),
+		}
+	}
+	return nil
+}
+
+func agentResponsePayload(agent model.Agent) map[string]any {
+	payload := map[string]any{
+		"agent_uuid":          agent.AgentUUID,
+		"agent_id":            agent.AgentID,
+		"handle":              agent.Handle,
+		"handle_finalized_at": agent.HandleFinalizedAt,
+		"org_id":              agent.OrgID,
+		"status":              agent.Status,
+		"metadata":            agent.Metadata,
+		"created_by":          agent.CreatedBy,
+		"created_at":          agent.CreatedAt,
+		"revoked_at":          agent.RevokedAt,
+	}
+	if owner := agentOwnerPayload(agent); owner != nil {
+		payload["owner"] = owner
+	}
+	return payload
+}
+
+func agentListResponsePayload(agents []model.Agent) []map[string]any {
+	out := make([]map[string]any, 0, len(agents))
+	for _, agent := range agents {
+		out = append(out, agentResponsePayload(agent))
+	}
+	return out
+}
+
 func (h *Handler) handleMe(w http.ResponseWriter, r *http.Request) {
 	actor, err := h.authenticateHuman(r)
 	if err != nil {
@@ -275,21 +339,7 @@ func (h *Handler) handleMe(w http.ResponseWriter, r *http.Request) {
 
 	switch r.Method {
 	case http.MethodGet:
-		onboarding := map[string]any{
-			"handle_required":  true,
-			"handle_confirmed": actor.Human.HandleConfirmedAt != nil,
-			"next_step": func() string {
-				if actor.Human.HandleConfirmedAt == nil {
-					return "set_handle"
-				}
-				return "complete"
-			}(),
-		}
-		writeJSON(w, http.StatusOK, map[string]any{
-			"human":      actor.Human,
-			"admin":      actor.IsSuperAdmin,
-			"onboarding": onboarding,
-		})
+		writeJSON(w, http.StatusOK, meResponsePayload(actor.Human, actor.IsSuperAdmin))
 		return
 	case http.MethodPatch:
 		var req updateMyProfileRequest
@@ -321,15 +371,7 @@ func (h *Handler) handleMe(w http.ResponseWriter, r *http.Request) {
 			}
 			return
 		}
-		writeJSON(w, http.StatusOK, map[string]any{
-			"human": human,
-			"admin": actor.IsSuperAdmin,
-			"onboarding": map[string]any{
-				"handle_required":  true,
-				"handle_confirmed": human.HandleConfirmedAt != nil,
-				"next_step":        "complete",
-			},
-		})
+		writeJSON(w, http.StatusOK, meResponsePayload(human, actor.IsSuperAdmin))
 		return
 	default:
 		writeMethodNotAllowed(w)
@@ -397,66 +439,13 @@ func (h *Handler) handleMyAgents(w http.ResponseWriter, r *http.Request) {
 
 	switch r.Method {
 	case http.MethodGet:
+		agents := h.control.ListHumanAgents(actor.Human.HumanID)
 		writeJSON(w, http.StatusOK, map[string]any{
-			"agents": h.control.ListHumanAgents(actor.Human.HumanID),
+			"agents": agentListResponsePayload(agents),
 		})
 		return
 	case http.MethodPost:
-		if h.requireHandleConfirmedForWrite(w, actor) {
-			return
-		}
-		var req registerAgentRequest
-		if err := decodeJSON(r, &req); err != nil {
-			writeError(w, http.StatusBadRequest, "invalid_request", "invalid JSON request")
-			return
-		}
-
-		req.OrgID = strings.TrimSpace(req.OrgID)
-		req.AgentID = normalizeHandle(req.AgentID)
-		if !validateAgentID(req.AgentID) {
-			writeError(w, http.StatusBadRequest, "invalid_agent_id", "agent_id must be 2-64 chars, URL-safe (a-z, 0-9, ., _, -), and not blocked")
-			return
-		}
-
-		ownerHumanID := actor.Human.HumanID
-		if h.ensureHumanOwnedAgentLimit(w, ownerHumanID) {
-			return
-		}
-		token, err := auth.GenerateToken()
-		if err != nil {
-			writeError(w, http.StatusInternalServerError, "token_generation_failed", "failed to generate token")
-			return
-		}
-		agent, err := h.control.RegisterAgent(req.OrgID, req.AgentID, &ownerHumanID, auth.HashToken(token), actor.Human.HumanID, h.now().UTC(), actor.IsSuperAdmin)
-		if err != nil {
-			switch {
-			case errors.Is(err, store.ErrOrgNotFound):
-				writeError(w, http.StatusNotFound, "unknown_org", "org_id is not registered")
-			case errors.Is(err, store.ErrUnauthorizedRole):
-				writeError(w, http.StatusForbidden, "forbidden", "membership in org required")
-			case errors.Is(err, store.ErrMembershipNotFound):
-				writeError(w, http.StatusBadRequest, "invalid_owner_human_id", "owner_human_id must be active in org")
-			case errors.Is(err, store.ErrAgentExists):
-				writeError(w, http.StatusConflict, "agent_exists", "agent_id already registered")
-			case errors.Is(err, store.ErrInvalidHandle):
-				writeError(w, http.StatusBadRequest, "invalid_agent_id", "agent_id must be 2-64 chars, URL-safe (a-z, 0-9, ., _, -), and not blocked")
-			case errors.Is(err, store.ErrAgentLimitExceeded):
-				writeError(w, http.StatusConflict, "agent_limit_reached", "non-admin users can only own up to 2 active agents")
-			default:
-				writeError(w, http.StatusInternalServerError, "store_error", "failed to register agent")
-			}
-			return
-		}
-
-		writeJSON(w, http.StatusCreated, map[string]any{
-			"agent_uuid":     agent.AgentUUID,
-			"agent_id":       agent.AgentID,
-			"handle":         agent.Handle,
-			"org_id":         agent.OrgID,
-			"owner_human_id": agent.OwnerHumanID,
-			"token":          token,
-			"status":         agent.Status,
-		})
+		writeError(w, http.StatusGone, "agent_create_disabled", "use POST /v1/agents/bind-tokens and POST /v1/agents/bind")
 		return
 	default:
 		writeMethodNotAllowed(w)
@@ -715,14 +704,18 @@ func (h *Handler) handleAgentMe(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusInternalServerError, "store_error", "failed to load agent")
 			return
 		}
-		org, err := h.control.GetOrganization(agent.OrgID)
-		if err != nil {
-			if errors.Is(err, store.ErrOrgNotFound) {
-				writeError(w, http.StatusNotFound, "unknown_org", "org_id is not registered")
+		var organization any = nil
+		if strings.TrimSpace(agent.OrgID) != "" {
+			org, err := h.control.GetOrganization(agent.OrgID)
+			if err != nil {
+				if errors.Is(err, store.ErrOrgNotFound) {
+					writeError(w, http.StatusNotFound, "unknown_org", "org_id is not registered")
+					return
+				}
+				writeError(w, http.StatusInternalServerError, "store_error", "failed to load organization")
 				return
 			}
-			writeError(w, http.StatusInternalServerError, "store_error", "failed to load organization")
-			return
+			organization = org
 		}
 
 		var ownerHuman any = nil
@@ -739,11 +732,17 @@ func (h *Handler) handleAgentMe(w http.ResponseWriter, r *http.Request) {
 			ownerHuman = human
 		}
 
-		writeJSON(w, http.StatusOK, map[string]any{
-			"agent":        agent,
-			"organization": org,
-			"owner_human":  ownerHuman,
-		})
+		payload := map[string]any{
+			"agent": agentResponsePayload(agent),
+		}
+		if organization != nil {
+			payload["organization"] = organization
+		}
+		if ownerHuman != nil {
+			payload["human"] = ownerHuman
+		}
+
+		writeJSON(w, http.StatusOK, payload)
 		return
 	case http.MethodPatch:
 		h.handleAgentMetadataSelfPatch(w, r, "")
@@ -804,7 +803,7 @@ func (h *Handler) handleAgentMetadataSelfPatch(w http.ResponseWriter, r *http.Re
 	}
 
 	writeJSON(w, http.StatusOK, map[string]any{
-		"agent": agent,
+		"agent": agentResponsePayload(agent),
 	})
 }
 
@@ -842,12 +841,7 @@ func (h *Handler) handleAgentMeCapabilities(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"agent": map[string]any{
-			"agent_uuid":     cp.AgentUUID,
-			"agent_id":       cp.AgentID,
-			"org_id":         cp.OrgID,
-			"owner_human_id": cp.OwnerHumanID,
-		},
+		"agent":         agentResponsePayload(agent),
 		"control_plane": h.agentControlPlanePayload(cp),
 	})
 }
@@ -887,12 +881,7 @@ func (h *Handler) handleAgentMeSkill(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, map[string]any{
-		"agent": map[string]any{
-			"agent_uuid":     cp.AgentUUID,
-			"agent_id":       cp.AgentID,
-			"org_id":         cp.OrgID,
-			"owner_human_id": cp.OwnerHumanID,
-		},
+		"agent":         agentResponsePayload(agent),
 		"control_plane": h.agentControlPlanePayload(cp),
 		"skill": map[string]any{
 			"schema_version": "1",
@@ -923,17 +912,22 @@ func (h *Handler) buildAgentControlPlane(r *http.Request, agent model.Agent) (ag
 }
 
 func (h *Handler) agentControlPlanePayload(cp agentControlPlaneView) map[string]any {
+	var owner map[string]any
+	if strings.TrimSpace(cp.OwnerHumanID) != "" {
+		owner = map[string]any{
+			"human_id": strings.TrimSpace(cp.OwnerHumanID),
+		}
+	} else if strings.TrimSpace(cp.OrgID) != "" {
+		owner = map[string]any{
+			"org_id": strings.TrimSpace(cp.OrgID),
+		}
+	}
 	return map[string]any{
-		"api_base":   cp.APIBase,
-		"agent_uuid": cp.AgentUUID,
-		"agent_id":   cp.AgentID,
-		"org_id":     cp.OrgID,
-		"owner_human_id": func() any {
-			if cp.OwnerHumanID == "" {
-				return nil
-			}
-			return cp.OwnerHumanID
-		}(),
+		"api_base":        cp.APIBase,
+		"agent_uuid":      cp.AgentUUID,
+		"agent_id":        cp.AgentID,
+		"org_id":          cp.OrgID,
+		"owner":           owner,
 		"can_talk_to":     cp.CanTalkTo,
 		"capabilities":    cp.Capabilities,
 		"can_communicate": len(cp.CanTalkTo) > 0,
@@ -1314,8 +1308,8 @@ func (h *Handler) handlePublicSnapshot(w http.ResponseWriter, r *http.Request) {
 			"status":   agent.Status,
 			"metadata": snapshotMetadataPublicView(agent.Metadata),
 		}
-		if agent.OwnerHumanID != nil && strings.TrimSpace(*agent.OwnerHumanID) != "" {
-			row["owner_human_id"] = *agent.OwnerHumanID
+		if owner := agentOwnerPayload(agent); owner != nil {
+			row["owner"] = owner
 		}
 		agents = append(agents, row)
 	}
@@ -1407,7 +1401,29 @@ func (h *Handler) handleOrgSubroutes(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if len(parts) == 3 {
-		writeError(w, http.StatusNotFound, "not_found", "route not found")
+		if r.Method != http.MethodDelete {
+			writeMethodNotAllowed(w)
+			return
+		}
+		if h.requireHandleConfirmedForWrite(w, actor) {
+			return
+		}
+		if err := h.control.DeleteOrg(orgID, actor.Human.HumanID, actor.IsSuperAdmin, h.now().UTC()); err != nil {
+			switch {
+			case errors.Is(err, store.ErrOrgNotFound):
+				writeError(w, http.StatusNotFound, "unknown_org", "org_id is not registered")
+			case errors.Is(err, store.ErrUnauthorizedRole):
+				writeError(w, http.StatusForbidden, "forbidden", "owner role required")
+			default:
+				writeError(w, http.StatusInternalServerError, "store_error", "failed to delete organization")
+			}
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{
+			"status": "ok",
+			"org_id": orgID,
+			"result": "deleted",
+		})
 		return
 	}
 
@@ -1519,6 +1535,8 @@ func (h *Handler) handleOrgSubroutes(w http.ResponseWriter, r *http.Request) {
 					writeError(w, http.StatusNotFound, "unknown_org", "org_id is not registered")
 				case errors.Is(err, store.ErrUnauthorizedRole):
 					writeError(w, http.StatusForbidden, "forbidden", "owner role required")
+				case errors.Is(err, store.ErrInviteExists):
+					writeError(w, http.StatusConflict, "invite_exists", "invite already exists or invitee is already an active member")
 				case errors.Is(err, store.ErrInvalidRole):
 					writeError(w, http.StatusBadRequest, "invalid_role", "role must be admin|member|viewer")
 				case errors.Is(err, store.ErrInviteInvalid):
@@ -1529,8 +1547,7 @@ func (h *Handler) handleOrgSubroutes(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			writeJSON(w, http.StatusCreated, map[string]any{
-				"invite":      invite,
-				"invite_code": inviteCode,
+				"invite": invite,
 			})
 			return
 		default:
@@ -1720,7 +1737,7 @@ func (h *Handler) handleOrgSubroutes(w http.ResponseWriter, r *http.Request) {
 			}
 			return
 		}
-		writeJSON(w, http.StatusOK, map[string]any{"agents": agents})
+		writeJSON(w, http.StatusOK, map[string]any{"agents": agentListResponsePayload(agents)})
 		return
 	case "trust-graph":
 		if r.Method != http.MethodGet {
@@ -1836,7 +1853,7 @@ func (h *Handler) handleOrgAccessAgents(w http.ResponseWriter, r *http.Request) 
 	writeJSON(w, http.StatusOK, map[string]any{
 		"organization": org,
 		"access_key":   key,
-		"agents":       agents,
+		"agents":       agentListResponsePayload(agents),
 	})
 }
 
@@ -1904,25 +1921,31 @@ func (h *Handler) handleOrgInvites(w http.ResponseWriter, r *http.Request) {
 		if h.requireHandleConfirmedForWrite(w, actor) {
 			return
 		}
-		var req redeemInviteCodeRequest
+		var req redeemInviteRequest
 		if err := decodeJSON(r, &req); err != nil {
 			writeError(w, http.StatusBadRequest, "invalid_request", "invalid JSON request")
 			return
 		}
+		inviteID := strings.TrimSpace(req.InviteID)
 		inviteCode := strings.TrimSpace(req.InviteCode)
-		if inviteCode == "" {
-			writeError(w, http.StatusBadRequest, "invalid_invite_code", "invite_code is required")
+		if inviteID == "" && inviteCode == "" {
+			writeError(w, http.StatusBadRequest, "invalid_invite", "invite_id or invite_code is required")
 			return
 		}
-		membership, err := h.control.AcceptInviteBySecretHash(auth.HashToken(inviteCode), actor.Human.HumanID, actor.Human.Email, h.now().UTC(), h.idFactory)
+		var membership model.Membership
+		if inviteID != "" {
+			membership, err = h.control.AcceptInvite(inviteID, actor.Human.HumanID, actor.Human.Email, h.now().UTC(), h.idFactory)
+		} else {
+			membership, err = h.control.AcceptInviteBySecretHash(auth.HashToken(inviteCode), actor.Human.HumanID, actor.Human.Email, h.now().UTC(), h.idFactory)
+		}
 		if err != nil {
 			switch {
 			case errors.Is(err, store.ErrInviteNotFound):
-				writeError(w, http.StatusNotFound, "unknown_invite_code", "invite_code is not registered")
+				writeError(w, http.StatusNotFound, "unknown_invite", "invite is not registered")
 			case errors.Is(err, store.ErrInviteInvalid):
-				writeError(w, http.StatusBadRequest, "invalid_invite_code", "invite code cannot be redeemed by this user")
+				writeError(w, http.StatusBadRequest, "invalid_invite", "invite cannot be redeemed by this user")
 			default:
-				writeError(w, http.StatusInternalServerError, "store_error", "failed to redeem invite code")
+				writeError(w, http.StatusInternalServerError, "store_error", "failed to redeem invite")
 			}
 			return
 		}
@@ -1972,7 +1995,14 @@ func (h *Handler) handleOrgInvites(w http.ResponseWriter, r *http.Request) {
 			}
 			return
 		}
-		writeJSON(w, http.StatusOK, map[string]any{"invite": invite})
+		result := "revoked"
+		if strings.EqualFold(strings.TrimSpace(actor.Human.Email), strings.TrimSpace(invite.Email)) {
+			result = "denied"
+		}
+		writeJSON(w, http.StatusOK, map[string]any{
+			"invite": invite,
+			"result": result,
+		})
 		return
 	}
 
@@ -2177,6 +2207,10 @@ func (h *Handler) handleAgentsSubroutes(w http.ResponseWriter, r *http.Request) 
 		writeError(w, http.StatusBadRequest, "invalid_agent_uuid", "agent_uuid must be a valid UUID")
 		return
 	}
+	if action == "bind" {
+		writeError(w, http.StatusGone, "agent_bind_disabled", "use POST /v1/agent-trusts or POST /v1/me/agent-trusts")
+		return
+	}
 
 	actor, err := h.authenticateHuman(r)
 	if err != nil {
@@ -2184,21 +2218,6 @@ func (h *Handler) handleAgentsSubroutes(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	if h.requireHandleConfirmedForWrite(w, actor) {
-		return
-	}
-
-	if action == "bind" {
-		var req trustAgentRequest
-		if err := decodeJSON(r, &req); err != nil {
-			writeError(w, http.StatusBadRequest, "invalid_request", "invalid JSON request")
-			return
-		}
-		if validateUUID(normalizeUUID(agentRef)) {
-			req.AgentUUID = agentRef
-		} else {
-			req.AgentID = agentRef
-		}
-		h.handleAgentTrustCreate(w, actor, req, "owner required for initiating agent")
 		return
 	}
 

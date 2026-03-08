@@ -161,12 +161,8 @@ func TestAPIModelContract_OnboardingAndOrganizationShape(t *testing.T) {
 	if confirmedAt, _ := humanObj["handle_confirmed_at"].(string); strings.TrimSpace(confirmedAt) == "" {
 		t.Fatalf("expected non-empty human.handle_confirmed_at, got %v", humanObj["handle_confirmed_at"])
 	}
-	onboardingAfter, ok := afterPayload["onboarding"].(map[string]any)
-	if !ok {
-		t.Fatalf("missing onboarding object after patch: %v", afterPayload)
-	}
-	if onboardingAfter["handle_confirmed"] != true {
-		t.Fatalf("expected onboarding.handle_confirmed=true after patch, got %v", onboardingAfter["handle_confirmed"])
+	if _, ok := afterPayload["onboarding"]; ok {
+		t.Fatalf("expected onboarding object to be omitted after completion, got %v", afterPayload["onboarding"])
 	}
 
 	createOrgResp := doJSONRequest(t, router, http.MethodPost, "/v1/orgs", map[string]any{

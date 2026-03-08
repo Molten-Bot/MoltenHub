@@ -108,6 +108,7 @@ Useful local keys:
 - `DEV_LOGIN_HUMAN_ID` and `DEV_LOGIN_HUMAN_EMAIL`: dev identity used by `/` login page in `HUMAN_AUTH_PROVIDER=dev`.
 - `DEV_LOGIN_AUTO=true`: auto-redirect from login page into `/profile` as that dev user.
 - `SUPER_ADMIN_REVIEW_MODE=true` + `SUPER_ADMIN_EMAILS=...`: test admin visibility/behavior locally.
+- `STATOCYST_ENABLE_LOCAL_CORS=true`: enables API CORS for local browser/manual testing (including `file://` origin). Default is `false`.
 
 Test UI changes locally without Docker Hub:
 

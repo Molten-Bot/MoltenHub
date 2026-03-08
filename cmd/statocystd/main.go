@@ -64,6 +64,7 @@ func main() {
 			headlessMode = mode
 		}
 	}
+	enableLocalCORS := envBool("STATOCYST_ENABLE_LOCAL_CORS", false)
 	handler := api.NewHandler(
 		controlStore,
 		queueStore,
@@ -79,7 +80,9 @@ func main() {
 		headlessMode,
 	)
 	handler.SetStorageHealth(storageHealth)
-	router := api.NewRouter(handler)
+	router := api.NewRouterWithOptions(handler, api.RouterOptions{
+		EnableLocalCORS: enableLocalCORS,
+	})
 
 	server := &http.Server{
 		Addr:    addr,
@@ -87,9 +90,22 @@ func main() {
 	}
 
 	log.Printf("statocyst listening on %s", addr)
+	log.Printf("local CORS enabled: %t", enableLocalCORS)
 	if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 		log.Fatalf("server failed: %v", err)
 	}
+}
+
+func envBool(name string, fallback bool) bool {
+	raw := strings.TrimSpace(os.Getenv(name))
+	if raw == "" {
+		return fallback
+	}
+	v, err := strconv.ParseBool(raw)
+	if err != nil {
+		return fallback
+	}
+	return v
 }
 
 func loadDotEnv(path string) {

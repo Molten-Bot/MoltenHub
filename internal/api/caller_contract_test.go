@@ -84,15 +84,14 @@ func TestCallerContract_BindRedeemBootstrapWorksWithoutAuth(t *testing.T) {
 func TestOpenAPICallerContractSecuritySchemes(t *testing.T) {
 	securityByOperation := parseOpenAPIOperationSecurity(t)
 	expected := map[openAPIOperation][]string{
-		{Method: http.MethodGet, Path: "/v1/me"}:                       {"humanAuth"},
-		{Method: http.MethodPost, Path: "/v1/agent-trusts"}:            {"humanAuth"},
-		{Method: http.MethodPost, Path: "/v1/agents/bind"}:             nil,
-		{Method: http.MethodPatch, Path: "/v1/agents/me/metadata"}:     {"agentAuth"},
-		{Method: http.MethodGet, Path: "/v1/agents/me/capabilities"}:   {"agentAuth"},
-		{Method: http.MethodGet, Path: "/v1/agents/me/skill"}:          {"agentAuth"},
-		{Method: http.MethodPost, Path: "/v1/messages/publish"}:        {"agentAuth"},
-		{Method: http.MethodGet, Path: "/v1/messages/pull"}:            {"agentAuth"},
-		{Method: http.MethodPost, Path: "/v1/agents/{agent_ref}/bind"}: {"humanAuth"},
+		{Method: http.MethodGet, Path: "/v1/me"}:                     {"humanAuth"},
+		{Method: http.MethodPost, Path: "/v1/agent-trusts"}:          {"humanAuth"},
+		{Method: http.MethodPost, Path: "/v1/agents/bind"}:           nil,
+		{Method: http.MethodPatch, Path: "/v1/agents/me/metadata"}:   {"agentAuth"},
+		{Method: http.MethodGet, Path: "/v1/agents/me/capabilities"}: {"agentAuth"},
+		{Method: http.MethodGet, Path: "/v1/agents/me/skill"}:        {"agentAuth"},
+		{Method: http.MethodPost, Path: "/v1/messages/publish"}:      {"agentAuth"},
+		{Method: http.MethodGet, Path: "/v1/messages/pull"}:          {"agentAuth"},
 	}
 
 	for op, want := range expected {

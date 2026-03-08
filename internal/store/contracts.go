@@ -13,6 +13,7 @@ type ControlPlaneStore interface {
 	UpdateHumanProfile(humanID, handle string, confirmHandle bool, now time.Time) (model.Human, error)
 	UpdateHumanMetadata(humanID string, metadata map[string]any, now time.Time) (model.Human, error)
 	CreateOrg(handle, displayName string, creatorHumanID string, orgID string, now time.Time) (model.Organization, model.Membership, error)
+	DeleteOrg(orgID, actorHumanID string, isSuperAdmin bool, now time.Time) error
 	EnsurePersonalOrg(humanID string, now time.Time, idFactory func() (string, error)) (model.Organization, error)
 	UpdateOrgMetadata(orgID string, metadata map[string]any, actorHumanID string, isSuperAdmin bool, now time.Time) (model.Organization, error)
 	ListMyMemberships(humanID string) []model.MembershipWithOrg

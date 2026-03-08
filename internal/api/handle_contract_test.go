@@ -9,42 +9,23 @@ import (
 func registerAgentWithDetails(t *testing.T, router http.Handler, humanID, email, orgID, agentID, ownerHumanID string) (string, string, string, string) {
 	t.Helper()
 	ensureHandleConfirmed(t, router, humanID, email)
-	if ownerHumanID == "" {
-		token, _ := bindAgentWithUUID(t, router, humanID, email, orgID, agentID)
-		capsResp := doJSONRequest(t, router, http.MethodGet, "/v1/agents/me/capabilities", nil, map[string]string{
-			"Authorization": "Bearer " + token,
-		})
-		if capsResp.Code != http.StatusOK {
-			t.Fatalf("agent capabilities failed: %d %s", capsResp.Code, capsResp.Body.String())
-		}
-		capsPayload := decodeJSONMap(t, capsResp.Body.Bytes())
-		agentObj, _ := capsPayload["agent"].(map[string]any)
-		agentUUID, _ := agentObj["agent_uuid"].(string)
-		canonicalID, _ := agentObj["agent_id"].(string)
-		handle := canonicalID
-		if idx := strings.LastIndex(canonicalID, "/"); idx >= 0 && idx < len(canonicalID)-1 {
-			handle = canonicalID[idx+1:]
-		}
-		if token == "" || agentUUID == "" || canonicalID == "" || handle == "" {
-			t.Fatalf("missing token/agent_uuid/agent_id/handle: %v", capsPayload)
-		}
-		return token, agentUUID, canonicalID, handle
+	token, _ := bindAgentWithUUIDForOwner(t, router, humanID, email, orgID, agentID, ownerHumanID)
+	capsResp := doJSONRequest(t, router, http.MethodGet, "/v1/agents/me/capabilities", nil, map[string]string{
+		"Authorization": "Bearer " + token,
+	})
+	if capsResp.Code != http.StatusOK {
+		t.Fatalf("agent capabilities failed: %d %s", capsResp.Code, capsResp.Body.String())
 	}
-
-	resp := doJSONRequest(t, router, http.MethodPost, "/v1/me/agents", map[string]any{
-		"org_id":   orgID,
-		"agent_id": agentID,
-	}, humanHeaders(humanID, email))
-	if resp.Code != http.StatusCreated {
-		t.Fatalf("register my agent failed: %d %s", resp.Code, resp.Body.String())
+	capsPayload := decodeJSONMap(t, capsResp.Body.Bytes())
+	agentObj, _ := capsPayload["agent"].(map[string]any)
+	agentUUID, _ := agentObj["agent_uuid"].(string)
+	canonicalID, _ := agentObj["agent_id"].(string)
+	handle := canonicalID
+	if idx := strings.LastIndex(canonicalID, "/"); idx >= 0 && idx < len(canonicalID)-1 {
+		handle = canonicalID[idx+1:]
 	}
-	payload := decodeJSONMap(t, resp.Body.Bytes())
-	token, _ := payload["token"].(string)
-	agentUUID, _ := payload["agent_uuid"].(string)
-	canonicalID, _ := payload["agent_id"].(string)
-	handle, _ := payload["handle"].(string)
 	if token == "" || agentUUID == "" || canonicalID == "" || handle == "" {
-		t.Fatalf("missing token/agent_uuid/agent_id/handle: %v", payload)
+		t.Fatalf("missing token/agent_uuid/agent_id/handle: %v", capsPayload)
 	}
 	return token, agentUUID, canonicalID, handle
 }
@@ -93,43 +74,45 @@ func TestHandleContractValidationRejectsShortAndBlocked(t *testing.T) {
 
 	orgID := createOrg(t, router, "alice", "alice@a.test", "Valid Org")
 
-	shortAgent := doJSONRequest(t, router, http.MethodPost, "/v1/me/agents", map[string]any{
-		"org_id":   orgID,
-		"agent_id": "a",
-	}, humanHeaders("alice", "alice@a.test"))
-	if shortAgent.Code != http.StatusBadRequest {
-		t.Fatalf("expected short agent handle to fail with 400, got %d %s", shortAgent.Code, shortAgent.Body.String())
-	}
-
-	blockedAgent := doJSONRequest(t, router, http.MethodPost, "/v1/me/agents", map[string]any{
-		"org_id":   orgID,
-		"agent_id": "f.u.c.k",
-	}, humanHeaders("alice", "alice@a.test"))
-	if blockedAgent.Code != http.StatusBadRequest {
-		t.Fatalf("expected blocked agent handle to fail with 400, got %d %s", blockedAgent.Code, blockedAgent.Body.String())
-	}
-
-	bindResp := doJSONRequest(t, router, http.MethodPost, "/v1/agents/bind-tokens", map[string]any{
+	createResp := doJSONRequest(t, router, http.MethodPost, "/v1/agents/bind-tokens", map[string]any{
 		"org_id":         orgID,
 		"owner_human_id": aliceHumanID,
 	}, humanHeaders("alice", "alice@a.test"))
-	if bindResp.Code != http.StatusCreated {
-		t.Fatalf("expected bind token creation success, got %d %s", bindResp.Code, bindResp.Body.String())
+	if createResp.Code != http.StatusCreated {
+		t.Fatalf("expected bind token creation success, got %d %s", createResp.Code, createResp.Body.String())
 	}
-	bindToken, _ := decodeJSONMap(t, bindResp.Body.Bytes())["bind_token"].(string)
+	bindToken, _ := decodeJSONMap(t, createResp.Body.Bytes())["bind_token"].(string)
 	if bindToken == "" {
 		t.Fatalf("bind_token missing")
 	}
 
-	blockedRedeem := doJSONRequest(t, router, http.MethodPost, "/v1/agents/bind", map[string]any{
+	redeemResp := doJSONRequest(t, router, http.MethodPost, "/v1/agents/bind", map[string]any{
 		"bind_token": bindToken,
-		"agent_id":   "f-u-c-k",
 	}, nil)
-	if blockedRedeem.Code != http.StatusCreated {
-		t.Fatalf("expected bind redeem to ignore supplied agent_id and succeed, got %d %s", blockedRedeem.Code, blockedRedeem.Body.String())
+	if redeemResp.Code != http.StatusCreated {
+		t.Fatalf("expected bind redeem success, got %d %s", redeemResp.Code, redeemResp.Body.String())
 	}
-	if token, _ := decodeJSONMap(t, blockedRedeem.Body.Bytes())["token"].(string); strings.TrimSpace(token) == "" {
+	token, _ := decodeJSONMap(t, redeemResp.Body.Bytes())["token"].(string)
+	if strings.TrimSpace(token) == "" {
 		t.Fatalf("expected bind redeem success payload to include token")
+	}
+
+	shortAgent := doJSONRequest(t, router, http.MethodPatch, "/v1/agents/me", map[string]any{
+		"handle": "a",
+	}, map[string]string{
+		"Authorization": "Bearer " + token,
+	})
+	if shortAgent.Code != http.StatusBadRequest {
+		t.Fatalf("expected short agent handle to fail with 400, got %d %s", shortAgent.Code, shortAgent.Body.String())
+	}
+
+	blockedAgent := doJSONRequest(t, router, http.MethodPatch, "/v1/agents/me", map[string]any{
+		"handle": "f.u.c.k",
+	}, map[string]string{
+		"Authorization": "Bearer " + token,
+	})
+	if blockedAgent.Code != http.StatusBadRequest {
+		t.Fatalf("expected blocked agent handle to fail with 400, got %d %s", blockedAgent.Code, blockedAgent.Body.String())
 	}
 }
 
@@ -242,11 +225,11 @@ func TestAgentBindPathSupportsAgentRef(t *testing.T) {
 		"org_id":        orgA,
 		"peer_agent_id": peerID,
 	}, humanHeaders("alice", "alice@a.test"))
-	if resp.Code != http.StatusCreated {
-		t.Fatalf("expected /v1/agents/{agent_ref}/bind to return 201, got %d %s", resp.Code, resp.Body.String())
+	if resp.Code != http.StatusGone {
+		t.Fatalf("expected /v1/agents/{agent_ref}/bind to return 410, got %d %s", resp.Code, resp.Body.String())
 	}
-	if decodeJSONMap(t, resp.Body.Bytes())["trust"] == nil {
-		t.Fatalf("expected trust payload from bind route")
+	if decodeJSONMap(t, resp.Body.Bytes())["error"] != "agent_bind_disabled" {
+		t.Fatalf("expected agent_bind_disabled error")
 	}
 }
 

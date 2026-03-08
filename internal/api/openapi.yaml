@@ -9,7 +9,7 @@ info:
     - Agent runtime APIs (`/v1/agents/me/*`, `/v1/messages/*`) using agent bearer tokens.
     Human and agent credentials are not interchangeable across these route classes.
     Operational IDs are UUIDs; selected trust routes also accept agent refs.
-    Empty JSON objects, arrays, and string fields are omitted from API responses to keep payloads compact.
+    Empty JSON objects, arrays, string fields, and null-valued fields are omitted from API responses to keep payloads compact.
     API routes (`/health`, `/openapi.yaml`, `/v1/*`) support gzip compression when
     clients send `Accept-Encoding: gzip`; compressed responses include
     `Content-Encoding: gzip` and `Vary: Accept-Encoding`.
@@ -74,7 +74,7 @@ paths:
         Runtime configuration consumed by bundled UI clients; external agents usually do not need this.
         `auth.human` declares the active human auth provider.
         When provider is `supabase`, `auth.supabase` is included and `anon_key` is intentionally exposed for browser auth bootstrap.
-        Empty string/array fields are omitted from the JSON response.
+        Empty string/array fields and null-valued fields are omitted from the JSON response.
         Privileged fields are redacted by default.
         When `UI_CONFIG_API_KEY` is configured server-side, callers can send header `X-UI-Config-Key` with the matching value to receive unredacted `admin.emails`.
       parameters:
@@ -140,18 +140,44 @@ paths:
       summary: Current human identity
       description: |
         Human control-plane route.
-        Returns authenticated human profile + onboarding state, including `admin`
+        Returns authenticated human profile, including `admin`
         for statocyst-host administrator privileges.
+        The `onboarding` object is included only while onboarding is incomplete.
       security:
         - humanAuth: []
       responses:
         '200':
           description: Human
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [human, admin]
+                properties:
+                  human:
+                    type: object
+                    additionalProperties: true
+                  admin:
+                    type: boolean
+                  onboarding:
+                    type: object
+                    description: Present only while onboarding is incomplete.
+                    required: [handle_required, handle_confirmed, next_step]
+                    properties:
+                      handle_required:
+                        type: boolean
+                      handle_confirmed:
+                        type: boolean
+                      next_step:
+                        type: string
+                        enum: [set_handle]
         '401':
           description: Unauthorized
     patch:
       summary: Update current human profile
-      description: Updates mutable human profile fields.
+      description: |
+        Updates mutable human profile fields.
+        Returns `onboarding` only if onboarding is still incomplete after the update.
       security:
         - humanAuth: []
       requestBody:
@@ -166,6 +192,29 @@ paths:
       responses:
         '200':
           description: Human updated
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [human, admin]
+                properties:
+                  human:
+                    type: object
+                    additionalProperties: true
+                  admin:
+                    type: boolean
+                  onboarding:
+                    type: object
+                    description: Present only while onboarding is incomplete.
+                    required: [handle_required, handle_confirmed, next_step]
+                    properties:
+                      handle_required:
+                        type: boolean
+                      handle_confirmed:
+                        type: boolean
+                      next_step:
+                        type: string
+                        enum: [set_handle]
   /v1/me/metadata:
     patch:
       summary: Update current human metadata
@@ -269,29 +318,23 @@ paths:
         '200':
           description: Agent list
     post:
-      summary: Register agent for current human
-      description: If `org_id` is omitted, creates a human-scoped agent (not attached to an organization).
+      summary: Agent create route disabled
+      description: |
+        Direct human-created agents are disabled.
+        Use bind flow: `POST /v1/agents/bind-tokens` then agent-side `POST /v1/agents/bind`.
       security:
         - humanAuth: []
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required: [agent_id]
-              properties:
-                agent_id:
-                  type: string
-                org_id:
-                  type: string
       responses:
-        '201':
-          description: Agent registered
+        '410':
+          description: Gone (`agent_create_disabled`)
   /v1/me/agents/bind-tokens:
     post:
       summary: Create short-lived one-time agent bind token for current human
-      description: If `org_id` is omitted, creates a token for a human-scoped agent.
+      description: |
+        Human-auth route to mint a bind token for agent onboarding.
+        If `org_id` is provided, the token is scoped to that organization.
+        If `org_id` is omitted/empty, the token is for a human-owned (no-org) agent.
+        The token is then redeemed by the agent at `POST /v1/agents/bind`.
       security:
         - humanAuth: []
       requestBody:
@@ -363,6 +406,24 @@ paths:
           description: Organization created
         '409':
           description: Duplicate handle
+  /v1/orgs/{org_id}:
+    delete:
+      summary: Delete organization
+      description: |
+        Permanently deletes organization state and related memberships, invites, agents,
+        org access keys, and trust edges.
+        Requires owner role for the org or statocyst admin.
+      security:
+        - humanAuth: []
+      parameters:
+        - in: path
+          name: org_id
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Organization deleted
   /v1/orgs/{org_id}/metadata:
     patch:
       summary: Update organization metadata
@@ -409,7 +470,11 @@ paths:
         '200':
           description: Invite list
     post:
-      summary: Create invite with shareable code
+      summary: Create invite
+      description: |
+        Creates one active invite for `email` in the organization.
+        A second active invite for the same org+email is rejected.
+        Invites for already-active members are also rejected.
       security:
         - humanAuth: []
       parameters:
@@ -437,7 +502,9 @@ paths:
                   maximum: 365
       responses:
         '201':
-          description: Invite created (invite_code returned once)
+          description: Invite created
+        '409':
+          description: Invite already exists or invitee already active
   /v1/org-invites:
     get:
       summary: List invites for current human
@@ -448,7 +515,11 @@ paths:
           description: Invite list
   /v1/org-invites/redeem:
     post:
-      summary: Redeem an invite code
+      summary: Redeem an invite
+      description: |
+        Accept invite via payload.
+        Preferred: `invite_id`.
+        Legacy compatibility: `invite_code`.
       security:
         - humanAuth: []
       requestBody:
@@ -457,16 +528,23 @@ paths:
           application/json:
             schema:
               type: object
-              required: [invite_code]
               properties:
+                invite_id:
+                  type: string
                 invite_code:
                   type: string
+              anyOf:
+                - required: [invite_id]
+                - required: [invite_code]
       responses:
         '200':
           description: Invite redeemed
   /v1/org-invites/{invite_id}:
     delete:
-      summary: Revoke invite
+      summary: Revoke or deny invite
+      description: |
+        Invite owner/admin/super-admin can revoke.
+        Invite recipient can deny.
       security:
         - humanAuth: []
       parameters:
@@ -477,10 +555,22 @@ paths:
             type: string
       responses:
         '200':
-          description: Invite revoked
+          description: Invite revoked or denied
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [invite, result]
+                properties:
+                  invite:
+                    type: object
+                    additionalProperties: true
+                  result:
+                    type: string
+                    enum: [revoked, denied]
   /v1/org-invites/{invite_id}/accept:
     post:
-      summary: Accept invite
+      summary: Accept invite by ID
       security:
         - humanAuth: []
       parameters:
@@ -726,10 +816,12 @@ paths:
           description: Bind already used or supplied agent_id exists
   /v1/agents/me:
     get:
-      summary: Read authenticated agent profile with bound owner/org context
+      summary: Read authenticated agent profile with human/org context
       description: |
-        Returns the authenticated agent plus read-only information for its bound organization
-        and owner human (if the agent is human-owned).
+        Returns the authenticated agent plus read-only context objects:
+        `agent`, and optionally `organization` and `human`.
+        The `agent.owner` object is always present and has either `human_id` or `org_id`.
+        Fields with null/empty values are omitted from responses.
       security:
         - agentAuth: []
       responses:
@@ -865,40 +957,6 @@ paths:
       responses:
         '403':
           description: Forbidden
-  /v1/agents/{agent_ref}/bind:
-    post:
-      summary: Agent trust bind compatibility route
-      description: |
-        Human-auth trust-management endpoint (not onboarding).
-        Creates/updates trust edge between initiating `agent_ref` and peer agent in request body.
-        Prefer `POST /v1/agent-trusts` for new integrations.
-      deprecated: true
-      security:
-        - humanAuth: []
-      parameters:
-        - in: path
-          name: agent_ref
-          required: true
-          schema:
-            type: string
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              properties:
-                org_id:
-                  type: string
-                peer_agent_uuid:
-                  type: string
-                peer_agent_id:
-                  type: string
-      responses:
-        '201':
-          description: Trust edge created
-        '200':
-          description: Trust edge updated
   /v1/org-trusts:
     post:
       summary: Create or join org trust request

@@ -516,11 +516,8 @@ func createInviteWithCode(t *testing.T, router http.Handler, humanID, email, org
 	if inviteID == "" {
 		t.Fatalf("missing invite_id")
 	}
-	inviteCode, _ := payload["invite_code"].(string)
-	if inviteCode == "" {
-		t.Fatalf("missing invite_code")
-	}
-	return inviteID, inviteCode
+	// Invite secret is no longer returned on create; redeem flows should use invite_id.
+	return inviteID, ""
 }
 
 func acceptInvite(t *testing.T, router http.Handler, humanID, email, inviteID string) {
@@ -535,33 +532,23 @@ func acceptInvite(t *testing.T, router http.Handler, humanID, email, inviteID st
 func registerAgentWithUUID(t *testing.T, router http.Handler, humanID, email, orgID, agentID, ownerHumanID string) (string, string) {
 	t.Helper()
 	ensureHandleConfirmed(t, router, humanID, email)
-	if ownerHumanID == "" {
-		return bindAgentWithUUID(t, router, humanID, email, orgID, agentID)
-	}
-	resp := doJSONRequest(t, router, http.MethodPost, "/v1/me/agents", map[string]any{
-		"org_id":   orgID,
-		"agent_id": agentID,
-	}, humanHeaders(humanID, email))
-	if resp.Code != http.StatusCreated {
-		t.Fatalf("register my agent failed: %d %s", resp.Code, resp.Body.String())
-	}
-	var payload map[string]any
-	if err := json.Unmarshal(resp.Body.Bytes(), &payload); err != nil {
-		t.Fatalf("decode register my agent: %v", err)
-	}
-	token, _ := payload["token"].(string)
-	agentUUID, _ := payload["agent_uuid"].(string)
-	if token == "" || agentUUID == "" {
-		t.Fatalf("missing token or agent_uuid")
-	}
-	return token, agentUUID
+	return bindAgentWithUUIDForOwner(t, router, humanID, email, orgID, agentID, ownerHumanID)
 }
 
 func bindAgentWithUUID(t *testing.T, router http.Handler, humanID, email, orgID, agentID string) (string, string) {
 	t.Helper()
-	createResp := doJSONRequest(t, router, http.MethodPost, "/v1/agents/bind-tokens", map[string]any{
+	return bindAgentWithUUIDForOwner(t, router, humanID, email, orgID, agentID, "")
+}
+
+func bindAgentWithUUIDForOwner(t *testing.T, router http.Handler, humanID, email, orgID, agentID, ownerHumanID string) (string, string) {
+	t.Helper()
+	bindReq := map[string]any{
 		"org_id": orgID,
-	}, humanHeaders(humanID, email))
+	}
+	if strings.TrimSpace(ownerHumanID) != "" {
+		bindReq["owner_human_id"] = ownerHumanID
+	}
+	createResp := doJSONRequest(t, router, http.MethodPost, "/v1/agents/bind-tokens", bindReq, humanHeaders(humanID, email))
 	if createResp.Code != http.StatusCreated {
 		t.Fatalf("create bind token failed: %d %s", createResp.Code, createResp.Body.String())
 	}
@@ -571,30 +558,40 @@ func bindAgentWithUUID(t *testing.T, router http.Handler, humanID, email, orgID,
 		t.Fatalf("bind token missing")
 	}
 
-	bindResp := doJSONRequest(t, router, http.MethodPost, "/v1/agents/bind", map[string]any{
+	redeemResp := doJSONRequest(t, router, http.MethodPost, "/v1/agents/bind", map[string]any{
 		"bind_token": bindToken,
 		"agent_id":   agentID,
 	}, nil)
-	if bindResp.Code != http.StatusCreated {
-		t.Fatalf("bind redeem failed: %d %s", bindResp.Code, bindResp.Body.String())
+	if redeemResp.Code != http.StatusCreated {
+		t.Fatalf("bind redeem failed: %d %s", redeemResp.Code, redeemResp.Body.String())
 	}
-	bindPayload := decodeJSONMap(t, bindResp.Body.Bytes())
-	token, _ := bindPayload["token"].(string)
+	redeemPayload := decodeJSONMap(t, redeemResp.Body.Bytes())
+	token, _ := redeemPayload["token"].(string)
 	if token == "" {
 		t.Fatalf("bind response missing token")
 	}
 
-	capsResp := doJSONRequest(t, router, http.MethodGet, "/v1/agents/me/capabilities", nil, map[string]string{
+	// Bind redeem now ignores supplied agent_id; finalize desired handle explicitly.
+	finalizeResp := doJSONRequest(t, router, http.MethodPatch, "/v1/agents/me", map[string]any{
+		"handle": agentID,
+	}, map[string]string{
 		"Authorization": "Bearer " + token,
 	})
-	if capsResp.Code != http.StatusOK {
-		t.Fatalf("agent capabilities failed: %d %s", capsResp.Code, capsResp.Body.String())
+	if finalizeResp.Code != http.StatusOK {
+		t.Fatalf("agent finalize handle failed: %d %s", finalizeResp.Code, finalizeResp.Body.String())
 	}
-	capsPayload := decodeJSONMap(t, capsResp.Body.Bytes())
-	agent, _ := capsPayload["agent"].(map[string]any)
+
+	meResp := doJSONRequest(t, router, http.MethodGet, "/v1/agents/me", nil, map[string]string{
+		"Authorization": "Bearer " + token,
+	})
+	if meResp.Code != http.StatusOK {
+		t.Fatalf("agent me failed: %d %s", meResp.Code, meResp.Body.String())
+	}
+	mePayload := decodeJSONMap(t, meResp.Body.Bytes())
+	agent, _ := mePayload["agent"].(map[string]any)
 	agentUUID, _ := agent["agent_uuid"].(string)
 	if agentUUID == "" {
-		t.Fatalf("capabilities missing agent_uuid")
+		t.Fatalf("agent me missing agent_uuid")
 	}
 	return token, agentUUID
 }
@@ -608,27 +605,55 @@ func registerAgent(t *testing.T, router http.Handler, humanID, email, orgID, age
 func registerMyAgent(t *testing.T, router http.Handler, humanID, email, orgID, agentID string) (string, string, string) {
 	t.Helper()
 	ensureHandleConfirmed(t, router, humanID, email)
-	body := map[string]any{
-		"agent_id": agentID,
+	createBody := map[string]any{
+		"org_id": orgID,
 	}
-	if strings.TrimSpace(orgID) != "" {
-		body["org_id"] = orgID
+	createResp := doJSONRequest(t, router, http.MethodPost, "/v1/me/agents/bind-tokens", createBody, humanHeaders(humanID, email))
+	if createResp.Code != http.StatusCreated {
+		t.Fatalf("create my bind token failed: %d %s", createResp.Code, createResp.Body.String())
 	}
-	resp := doJSONRequest(t, router, http.MethodPost, "/v1/me/agents", body, humanHeaders(humanID, email))
-	if resp.Code != http.StatusCreated {
-		t.Fatalf("register my agent failed: %d %s", resp.Code, resp.Body.String())
+	createPayload := decodeJSONMap(t, createResp.Body.Bytes())
+	bindToken, _ := createPayload["bind_token"].(string)
+	if bindToken == "" {
+		t.Fatalf("bind token missing")
 	}
-	var payload map[string]any
-	if err := json.Unmarshal(resp.Body.Bytes(), &payload); err != nil {
-		t.Fatalf("decode register my agent: %v", err)
+
+	redeemResp := doJSONRequest(t, router, http.MethodPost, "/v1/agents/bind", map[string]any{
+		"bind_token": bindToken,
+		"agent_id":   agentID,
+	}, nil)
+	if redeemResp.Code != http.StatusCreated {
+		t.Fatalf("redeem my bind token failed: %d %s", redeemResp.Code, redeemResp.Body.String())
 	}
-	token, _ := payload["token"].(string)
-	returnedOrgID, _ := payload["org_id"].(string)
-	agentUUID, _ := payload["agent_uuid"].(string)
+	redeemPayload := decodeJSONMap(t, redeemResp.Body.Bytes())
+	token, _ := redeemPayload["token"].(string)
+	if token == "" {
+		t.Fatalf("redeem response missing token")
+	}
+
+	finalizeResp := doJSONRequest(t, router, http.MethodPatch, "/v1/agents/me", map[string]any{
+		"handle": agentID,
+	}, map[string]string{
+		"Authorization": "Bearer " + token,
+	})
+	if finalizeResp.Code != http.StatusOK {
+		t.Fatalf("finalize my agent handle failed: %d %s", finalizeResp.Code, finalizeResp.Body.String())
+	}
+
+	meResp := doJSONRequest(t, router, http.MethodGet, "/v1/agents/me", nil, map[string]string{
+		"Authorization": "Bearer " + token,
+	})
+	if meResp.Code != http.StatusOK {
+		t.Fatalf("agent me failed: %d %s", meResp.Code, meResp.Body.String())
+	}
+	mePayload := decodeJSONMap(t, meResp.Body.Bytes())
+	agentObj, _ := mePayload["agent"].(map[string]any)
+	returnedOrgID, _ := agentObj["org_id"].(string)
+	agentUUID, _ := agentObj["agent_uuid"].(string)
 	if token == "" || agentUUID == "" {
-		t.Fatalf("missing token or org_id or agent_uuid")
+		t.Fatalf("missing token or agent_uuid")
 	}
-	if strings.TrimSpace(orgID) != "" && returnedOrgID != orgID {
+	if strings.TrimSpace(orgID) != "" && strings.TrimSpace(returnedOrgID) != strings.TrimSpace(orgID) {
 		t.Fatalf("expected response org_id %q, got %q", orgID, returnedOrgID)
 	}
 	return token, returnedOrgID, agentUUID
@@ -749,7 +774,7 @@ func TestInviteAcceptFlow(t *testing.T) {
 func TestInviteCodeRedeemFlow(t *testing.T) {
 	router := newTestRouter()
 	orgID := createOrg(t, router, "alice", "alice@a.test", "Org Invite Codes")
-	_, inviteCode := createInviteWithCode(t, router, "alice", "alice@a.test", orgID, "bob@b.test", "member")
+	inviteID, _ := createInviteWithCode(t, router, "alice", "alice@a.test", orgID, "bob@b.test", "member")
 	ensureHandleConfirmed(t, router, "bob", "bob@b.test")
 
 	listInvites := doJSONRequest(t, router, http.MethodGet, "/v1/orgs/"+orgID+"/invites", nil, humanHeaders("alice", "alice@a.test"))
@@ -763,7 +788,7 @@ func TestInviteCodeRedeemFlow(t *testing.T) {
 	}
 
 	redeem := doJSONRequest(t, router, http.MethodPost, "/v1/org-invites/redeem", map[string]string{
-		"invite_code": inviteCode,
+		"invite_id": inviteID,
 	}, humanHeaders("bob", "bob@b.test"))
 	if redeem.Code != http.StatusOK {
 		t.Fatalf("redeem invite code failed: %d %s", redeem.Code, redeem.Body.String())
@@ -783,11 +808,11 @@ func TestInviteCodeRedeemFlow(t *testing.T) {
 func TestInviteCodeRedeemRejectsWrongEmail(t *testing.T) {
 	router := newTestRouter()
 	orgID := createOrg(t, router, "alice", "alice@a.test", "Org Invite Security")
-	_, inviteCode := createInviteWithCode(t, router, "alice", "alice@a.test", orgID, "bob@b.test", "member")
+	inviteID, _ := createInviteWithCode(t, router, "alice", "alice@a.test", orgID, "bob@b.test", "member")
 	ensureHandleConfirmed(t, router, "charlie", "charlie@c.test")
 
 	redeem := doJSONRequest(t, router, http.MethodPost, "/v1/org-invites/redeem", map[string]string{
-		"invite_code": inviteCode,
+		"invite_id": inviteID,
 	}, humanHeaders("charlie", "charlie@c.test"))
 	if redeem.Code != http.StatusBadRequest {
 		t.Fatalf("expected 400 for wrong-email invite redeem, got %d %s", redeem.Code, redeem.Body.String())
@@ -1376,16 +1401,17 @@ func TestHumanBoundAgentNameUniqueAcrossHumans(t *testing.T) {
 	orgB := createOrg(t, router, "bob", "bob@b.test", "Org Human Agent B")
 
 	registerAgent(t, router, "alice", "alice@a.test", orgA, "alpha-agent", aliceHumanID)
-	dup := doJSONRequest(t, router, http.MethodPost, "/v1/me/agents", map[string]any{
-		"org_id":   orgB,
-		"agent_id": "ALPHA-AGENT",
-	}, humanHeaders("bob", "bob@b.test"))
-	if dup.Code != http.StatusCreated {
-		t.Fatalf("expected 201 for same handle in a different human scope, got %d %s", dup.Code, dup.Body.String())
+	tokenBob, _ := registerAgentWithUUID(t, router, "bob", "bob@b.test", orgB, "ALPHA-AGENT", currentHumanID(t, router, "bob", "bob@b.test"))
+	bobMe := doJSONRequest(t, router, http.MethodGet, "/v1/agents/me", nil, map[string]string{
+		"Authorization": "Bearer " + tokenBob,
+	})
+	if bobMe.Code != http.StatusOK {
+		t.Fatalf("expected bob agent /v1/agents/me to succeed, got %d %s", bobMe.Code, bobMe.Body.String())
 	}
-	body := decodeJSONMap(t, dup.Body.Bytes())
-	if body["handle"] != "alpha-agent" {
-		t.Fatalf("expected normalized handle alpha-agent, got %v", body["handle"])
+	bobPayload := decodeJSONMap(t, bobMe.Body.Bytes())
+	agent, _ := bobPayload["agent"].(map[string]any)
+	if agent["handle"] != "alpha-agent" {
+		t.Fatalf("expected normalized handle alpha-agent, got %v", agent["handle"])
 	}
 }
 
@@ -1604,9 +1630,9 @@ func TestAgentMeReadIncludesBoundHumanAndOrganization(t *testing.T) {
 	if gotOrgID, _ := humanOwnedOrg["org_id"].(string); gotOrgID != orgID {
 		t.Fatalf("expected bound organization org_id %q, got %q payload=%v", orgID, gotOrgID, humanOwnedPayload)
 	}
-	ownerHuman, _ := humanOwnedPayload["owner_human"].(map[string]any)
+	ownerHuman, _ := humanOwnedPayload["human"].(map[string]any)
 	if gotHumanID, _ := ownerHuman["human_id"].(string); gotHumanID != aliceHumanID {
-		t.Fatalf("expected bound owner_human.human_id %q, got %q payload=%v", aliceHumanID, gotHumanID, humanOwnedPayload)
+		t.Fatalf("expected bound human.human_id %q, got %q payload=%v", aliceHumanID, gotHumanID, humanOwnedPayload)
 	}
 
 	orgOwnedToken, orgOwnedUUID := registerAgentWithUUID(
@@ -1629,8 +1655,12 @@ func TestAgentMeReadIncludesBoundHumanAndOrganization(t *testing.T) {
 	if gotAgentUUID, _ := orgOwnedAgent["agent_uuid"].(string); gotAgentUUID != orgOwnedUUID {
 		t.Fatalf("expected authenticated org-owned agent_uuid %q, got %q payload=%v", orgOwnedUUID, gotAgentUUID, orgOwnedPayload)
 	}
-	if ownerHuman := orgOwnedPayload["owner_human"]; ownerHuman != nil {
-		t.Fatalf("expected owner_human to be null for org-owned agent, got %v payload=%v", ownerHuman, orgOwnedPayload)
+	if _, ok := orgOwnedPayload["human"]; ok {
+		t.Fatalf("expected human object omitted for org-owned agent, got payload=%v", orgOwnedPayload)
+	}
+	ownerObj, _ := orgOwnedAgent["owner"].(map[string]any)
+	if gotOrgID, _ := ownerObj["org_id"].(string); gotOrgID != orgID {
+		t.Fatalf("expected org-owned agent.owner.org_id=%q, got %q payload=%v", orgID, gotOrgID, orgOwnedPayload)
 	}
 }
 
@@ -1809,8 +1839,9 @@ func TestPublicSnapshotFiltersPrivateEntities(t *testing.T) {
 		t.Fatalf("expected 1 public agent after owner filtering, got %d payload=%v", len(agents), payload)
 	}
 	agent, _ := agents[0].(map[string]any)
-	if gotOwnerID, _ := agent["owner_human_id"].(string); gotOwnerID != bobHumanID {
-		t.Fatalf("expected public agent owner_human_id %q, got %q payload=%v", bobHumanID, gotOwnerID, payload)
+	owner, _ := agent["owner"].(map[string]any)
+	if gotOwnerID, _ := owner["human_id"].(string); gotOwnerID != bobHumanID {
+		t.Fatalf("expected public agent owner.human_id %q, got %q payload=%v", bobHumanID, gotOwnerID, payload)
 	}
 }
 
@@ -2093,8 +2124,8 @@ func TestAgentLimitAndSuperAdminBypass(t *testing.T) {
 
 	_, _, _ = registerMyAgent(t, router, "alice", "alice@a.test", "", "alice-agent-1")
 	_, _, _ = registerMyAgent(t, router, "alice", "alice@a.test", "", "alice-agent-2")
-	third := doJSONRequest(t, router, http.MethodPost, "/v1/me/agents", map[string]any{
-		"agent_id": "alice-agent-3",
+	third := doJSONRequest(t, router, http.MethodPost, "/v1/me/agents/bind-tokens", map[string]any{
+		"org_id": "",
 	}, humanHeaders("alice", "alice@a.test"))
 	if third.Code != http.StatusConflict {
 		t.Fatalf("expected non-super-admin third agent to fail with 409, got %d %s", third.Code, third.Body.String())
@@ -2105,25 +2136,7 @@ func TestAgentLimitAndSuperAdminBypass(t *testing.T) {
 	}
 
 	rootOrg := createOrg(t, router, "root", "root@molten.bot", "Root Ops")
-	createOne := doJSONRequest(t, router, http.MethodPost, "/v1/me/agents", map[string]any{
-		"org_id":   rootOrg,
-		"agent_id": "root-agent-1",
-	}, humanHeaders("root", "root@molten.bot"))
-	if createOne.Code != http.StatusCreated {
-		t.Fatalf("expected root first agent to be created, got %d %s", createOne.Code, createOne.Body.String())
-	}
-	createTwo := doJSONRequest(t, router, http.MethodPost, "/v1/me/agents", map[string]any{
-		"org_id":   rootOrg,
-		"agent_id": "root-agent-2",
-	}, humanHeaders("root", "root@molten.bot"))
-	if createTwo.Code != http.StatusCreated {
-		t.Fatalf("expected root second agent to be created, got %d %s", createTwo.Code, createTwo.Body.String())
-	}
-	createThree := doJSONRequest(t, router, http.MethodPost, "/v1/me/agents", map[string]any{
-		"org_id":   rootOrg,
-		"agent_id": "root-agent-3",
-	}, humanHeaders("root", "root@molten.bot"))
-	if createThree.Code != http.StatusCreated {
-		t.Fatalf("expected root third agent to bypass limit, got %d %s", createThree.Code, createThree.Body.String())
-	}
+	_, _, _ = registerMyAgent(t, router, "root", "root@molten.bot", rootOrg, "root-agent-1")
+	_, _, _ = registerMyAgent(t, router, "root", "root@molten.bot", rootOrg, "root-agent-2")
+	_, _, _ = registerMyAgent(t, router, "root", "root@molten.bot", rootOrg, "root-agent-3")
 }
