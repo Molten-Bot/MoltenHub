@@ -69,6 +69,17 @@ Statocyst validates metadata as JSON object payloads with size limits, then pers
 go run ./cmd/statocystd
 ```
 
+Fast dev boot script (native Go, same default port):
+
+```bash
+./dev-bootup.sh
+```
+
+Notes:
+- Defaults to `STATOCYST_ADDR=:8080`, `HUMAN_AUTH_PROVIDER=dev`, `STATOCYST_UI_DEV_MODE=true`.
+- Safe to rerun: if an existing statocyst process is already listening on that port, the script stops it first.
+- You can override port with `STATOCYST_PORT=8081 ./dev-bootup.sh` (or set `STATOCYST_ADDR` directly).
+
 Optional:
 
 ```bash
