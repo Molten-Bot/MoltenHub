@@ -9,6 +9,9 @@ info:
     - Agent runtime APIs (`/v1/agents/me/*`, `/v1/messages/*`) using agent bearer tokens.
     Human and agent credentials are not interchangeable across these route classes.
     Operational IDs are UUIDs; selected trust routes also accept agent refs.
+    API routes (`/health`, `/openapi.yaml`, `/v1/*`) support gzip compression when
+    clients send `Accept-Encoding: gzip`; compressed responses include
+    `Content-Encoding: gzip` and `Vary: Accept-Encoding`.
 servers:
   - url: http://localhost:8080
 paths:
