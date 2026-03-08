@@ -53,6 +53,10 @@ type humanActor struct {
 	IsSuperAdmin bool
 }
 
+type RouterOptions struct {
+	EnableLocalCORS bool
+}
+
 func NewHandler(
 	control store.ControlPlaneStore,
 	queue store.MessageQueueStore,
@@ -90,6 +94,10 @@ func NewHandler(
 }
 
 func NewRouter(handler *Handler) http.Handler {
+	return NewRouterWithOptions(handler, RouterOptions{})
+}
+
+func NewRouterWithOptions(handler *Handler, opts RouterOptions) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/health", handler.handleHealthz)
 	mux.HandleFunc("/openapi.yaml", handler.handleOpenAPIYAML)
@@ -123,7 +131,11 @@ func NewRouter(handler *Handler) http.Handler {
 	mux.HandleFunc("/v1/messages/publish", handler.handlePublish)
 	mux.HandleFunc("/v1/messages/pull", handler.handlePull)
 	mux.HandleFunc("/", handler.handleUI)
-	return withAPICORS(withAPICompression(mux))
+	router := withAPICompression(mux)
+	if opts.EnableLocalCORS {
+		router = withAPICORS(router)
+	}
+	return router
 }
 
 func withAPICORS(next http.Handler) http.Handler {
