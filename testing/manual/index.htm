@@ -128,6 +128,19 @@
       margin-right: 6px;
       color: #bfdbfe;
     }
+    .responseHead {
+      margin-top: 8px;
+      display: flex;
+      justify-content: space-between;
+      gap: 8px;
+      align-items: center;
+      flex-wrap: wrap;
+    }
+    .responseBtns {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
     pre {
       margin: 8px 0 0;
       border: 1px solid var(--line);
@@ -141,6 +154,56 @@
       font-family: var(--mono);
       max-height: 260px;
       overflow: auto;
+    }
+    .responseWrap.collapsed {
+      display: none;
+    }
+    .modal {
+      position: fixed;
+      inset: 0;
+      background: rgba(0, 0, 0, 0.7);
+      display: none;
+      align-items: center;
+      justify-content: center;
+      padding: 16px;
+      z-index: 999;
+    }
+    .modal.open {
+      display: flex;
+    }
+    .modalCard {
+      width: min(1200px, 96vw);
+      height: min(88vh, 900px);
+      background: #020617;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      display: grid;
+      grid-template-rows: auto 1fr;
+      overflow: hidden;
+    }
+    .modalHead {
+      display: flex;
+      justify-content: space-between;
+      gap: 8px;
+      align-items: center;
+      padding: 10px 12px;
+      border-bottom: 1px solid var(--line);
+      background: #0b1222;
+    }
+    .modalHead .title {
+      font-size: 13px;
+      color: var(--muted);
+      font-family: var(--mono);
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .modal pre {
+      margin: 0;
+      border: 0;
+      border-radius: 0;
+      max-height: none;
+      height: 100%;
     }
     .statusOk { color: var(--ok); }
     .statusBad { color: var(--bad); }
@@ -164,6 +227,15 @@
     <section class="panel">
       <div class="steps" id="steps"></div>
     </section>
+  </div>
+  <div class="modal" id="responseModal" aria-hidden="true">
+    <div class="modalCard">
+      <div class="modalHead">
+        <div class="title" id="responseModalTitle"></div>
+        <button id="responseModalClose" class="secondary">Close</button>
+      </div>
+      <pre id="responseModalBody"></pre>
+    </div>
   </div>
 
   <script>
@@ -267,7 +339,8 @@
 
     const state = {
       env: loadEnv(),
-      responses: {}
+      responses: {},
+      collapseTimers: {}
     };
 
     function loadEnv() {
@@ -336,11 +409,76 @@
       return "statusWarn";
     }
 
+    function setStepStatus(i, text, className) {
+      const el = document.getElementById("status-" + i);
+      if (!el) return;
+      el.className = "meta " + (className || "");
+      el.textContent = text;
+    }
+
+    function showResponse(i) {
+      const wrap = document.getElementById("resWrap-" + i);
+      const toggle = document.getElementById("toggle-" + i);
+      if (!wrap || !toggle) return;
+      wrap.classList.remove("collapsed");
+      toggle.textContent = "Hide Response";
+    }
+
+    function hideResponse(i) {
+      const wrap = document.getElementById("resWrap-" + i);
+      const toggle = document.getElementById("toggle-" + i);
+      if (!wrap || !toggle) return;
+      wrap.classList.add("collapsed");
+      toggle.textContent = "Show Response";
+    }
+
+    function scheduleAutoCollapse(i) {
+      if (state.collapseTimers[i]) {
+        clearTimeout(state.collapseTimers[i]);
+      }
+      state.collapseTimers[i] = setTimeout(() => {
+        hideResponse(i);
+        setStepStatus(i, "Response auto-collapsed after 3s. Click Show Response to reopen.", "statusWarn");
+      }, 3000);
+    }
+
+    function toggleResponse(i) {
+      const wrap = document.getElementById("resWrap-" + i);
+      if (!wrap) return;
+      if (wrap.classList.contains("collapsed")) {
+        showResponse(i);
+      } else {
+        hideResponse(i);
+      }
+    }
+
+    function openLargeResponse(i) {
+      const step = steps[i];
+      const src = document.getElementById("res-" + i);
+      const modal = document.getElementById("responseModal");
+      const title = document.getElementById("responseModalTitle");
+      const body = document.getElementById("responseModalBody");
+      if (!src || !modal || !title || !body) return;
+      title.textContent = step.name + " response";
+      body.textContent = src.textContent || "";
+      modal.classList.add("open");
+      modal.setAttribute("aria-hidden", "false");
+    }
+
+    function closeLargeResponse() {
+      const modal = document.getElementById("responseModal");
+      if (!modal) return;
+      modal.classList.remove("open");
+      modal.setAttribute("aria-hidden", "true");
+    }
+
     async function runStep(i) {
       const step = steps[i];
       const reqEl = document.getElementById("req-" + i);
       const resEl = document.getElementById("res-" + i);
       const btn = document.getElementById("btn-" + i);
+      const toggleBtn = document.getElementById("toggle-" + i);
+      const expandBtn = document.getElementById("expand-" + i);
 
       const url = resolveString(step.path);
       const headers = resolveAny(step.headers || {});
@@ -354,7 +492,14 @@
         body: bodyObj
       });
 
+      if (state.collapseTimers[i]) {
+        clearTimeout(state.collapseTimers[i]);
+        state.collapseTimers[i] = null;
+      }
+      setStepStatus(i, "Running...", "statusWarn");
       btn.disabled = true;
+      toggleBtn.disabled = true;
+      expandBtn.disabled = true;
       const t0 = performance.now();
 
       try {
@@ -372,22 +517,25 @@
 
         const payload = parsed ? pretty(parsed) : text;
         const head = `HTTP ${resp.status} ${resp.statusText} (${dt} ms)`;
-        resEl.innerHTML = `<span class="${statusClass(resp.status)}">${head}</span>\n${escapeHtml(payload)}`;
+        setStepStatus(i, head, statusClass(resp.status));
+        resEl.textContent = payload;
+        toggleBtn.disabled = false;
+        expandBtn.disabled = false;
+        showResponse(i);
+        scheduleAutoCollapse(i);
       } catch (err) {
         const dt = Math.round(performance.now() - t0);
         const msg = err && err.message ? err.message : String(err);
         const hint = "Request failed. If this page is loaded from disk, browser CORS rules may block localhost API calls.";
-        resEl.innerHTML = `<span class="statusBad">Network/CORS error (${dt} ms)</span>\n${escapeHtml(msg)}\n${escapeHtml(hint)}`;
+        setStepStatus(i, `Network/CORS error (${dt} ms)`, "statusBad");
+        resEl.textContent = `${msg}\n${hint}`;
+        toggleBtn.disabled = false;
+        expandBtn.disabled = false;
+        showResponse(i);
+        scheduleAutoCollapse(i);
       } finally {
         btn.disabled = false;
       }
-    }
-
-    function escapeHtml(str) {
-      return String(str)
-        .replaceAll("&", "&amp;")
-        .replaceAll("<", "&lt;")
-        .replaceAll(">", "&gt;");
     }
 
     async function runAll() {
@@ -404,7 +552,17 @@
       state.responses = {};
       for (let i = 0; i < steps.length; i++) {
         const r = document.getElementById("res-" + i);
+        if (state.collapseTimers[i]) {
+          clearTimeout(state.collapseTimers[i]);
+          state.collapseTimers[i] = null;
+        }
         if (r) r.textContent = "";
+        hideResponse(i);
+        setStepStatus(i, "No response yet.", "");
+        const toggleBtn = document.getElementById("toggle-" + i);
+        const expandBtn = document.getElementById("expand-" + i);
+        if (toggleBtn) toggleBtn.disabled = true;
+        if (expandBtn) expandBtn.disabled = true;
       }
       document.getElementById("globalMsg").textContent = "";
     }
@@ -445,18 +603,36 @@
             <button id="btn-${i}">Run</button>
           </div>
           <pre id="req-${i}" aria-label="request preview"></pre>
-          <pre id="res-${i}" aria-label="response output"></pre>
+          <div class="responseHead">
+            <span id="status-${i}" class="meta">No response yet.</span>
+            <div class="responseBtns">
+              <button id="toggle-${i}" class="secondary" disabled>Show Response</button>
+              <button id="expand-${i}" class="secondary" disabled>Open Large View</button>
+            </div>
+          </div>
+          <div id="resWrap-${i}" class="responseWrap collapsed">
+            <pre id="res-${i}" aria-label="response output"></pre>
+          </div>
         `;
         root.appendChild(card);
       });
 
       steps.forEach((_, i) => {
         document.getElementById("btn-" + i).onclick = () => runStep(i);
+        document.getElementById("toggle-" + i).onclick = () => toggleResponse(i);
+        document.getElementById("expand-" + i).onclick = () => openLargeResponse(i);
       });
     }
 
     document.getElementById("runAllBtn").onclick = runAll;
     document.getElementById("clearBtn").onclick = clearResponses;
+    document.getElementById("responseModalClose").onclick = closeLargeResponse;
+    document.getElementById("responseModal").onclick = (evt) => {
+      if (evt.target && evt.target.id === "responseModal") closeLargeResponse();
+    };
+    document.addEventListener("keydown", (evt) => {
+      if (evt.key === "Escape") closeLargeResponse();
+    });
 
     renderVars();
     renderSteps();
