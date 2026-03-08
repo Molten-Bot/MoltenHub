@@ -42,6 +42,8 @@ Statocyst validates metadata as JSON object payloads with size limits, then pers
   - Callers must send `X-UI-Config-Key: <secret>` to receive unredacted `admin.emails`.
   - Without that header (or with a wrong key), only those privileged fields are redacted.
 - Bind token TTL minutes: `BIND_TOKEN_TTL_MINUTES=15` (default `15`).
+- Metadata payload max bytes (human/org/agent metadata write routes):
+  - `STATOCYST_MAX_METADATA_BYTES=196608` (default `196608`, i.e. `192KB`).
 
 ### State backend
 

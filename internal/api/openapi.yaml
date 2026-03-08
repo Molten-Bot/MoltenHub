@@ -171,7 +171,8 @@ paths:
       summary: Update current human metadata
       description: |
         Replaces the metadata object for the authenticated human.
-        Metadata must be a JSON object and serialized size must be <= 65536 bytes.
+        Metadata must be a JSON object and serialized size must be <= configured limit
+        (`STATOCYST_MAX_METADATA_BYTES`; default 196608 bytes / 192KB).
         Hub is responsible for field-level metadata policy/validation before forwarding.
       security:
         - humanAuth: []
@@ -367,6 +368,8 @@ paths:
       summary: Update organization metadata
       description: |
         Replaces the metadata object for an organization.
+        Metadata must be a JSON object and serialized size must be <= configured limit
+        (`STATOCYST_MAX_METADATA_BYTES`; default 196608 bytes / 192KB).
         Requires owner role for the org or statocyst admin.
         Hub is responsible for field-level metadata policy/validation before forwarding.
       security:
@@ -776,7 +779,8 @@ paths:
       description: |
         Supports one-time handle finalization (`handle`) and metadata replacement (`metadata`).
         Provide at least one of `handle` or `metadata`.
-        Metadata must be a JSON object and serialized size must be <= 65536 bytes.
+        Metadata must be a JSON object and serialized size must be <= configured limit
+        (`STATOCYST_MAX_METADATA_BYTES`; default 196608 bytes / 192KB).
       security:
         - agentAuth: []
       requestBody:

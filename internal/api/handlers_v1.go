@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -99,8 +100,20 @@ const (
 	defaultInviteExpiryDays = 7
 	maxInviteExpiryDays     = 365
 	defaultUIAppName        = "Statocyst"
-	maxMetadataBytes        = 64 * 1024
+	maxMetadataBytes        = 192 * 1024
 )
+
+func configuredMetadataMaxBytes() int {
+	raw := strings.TrimSpace(os.Getenv("STATOCYST_MAX_METADATA_BYTES"))
+	if raw == "" {
+		return maxMetadataBytes
+	}
+	n, err := strconv.Atoi(raw)
+	if err != nil || n <= 0 {
+		return maxMetadataBytes
+	}
+	return n
+}
 
 func (h *Handler) handleUIConfig(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
@@ -221,8 +234,9 @@ func decodeMetadataJSON(raw json.RawMessage, required bool) (map[string]any, err
 	if err != nil {
 		return nil, errors.New("metadata must be a valid JSON object")
 	}
-	if len(body) > maxMetadataBytes {
-		return nil, fmt.Errorf("metadata exceeds %d bytes", maxMetadataBytes)
+	limit := configuredMetadataMaxBytes()
+	if len(body) > limit {
+		return nil, fmt.Errorf("metadata exceeds %d bytes", limit)
 	}
 	return metadata, nil
 }
