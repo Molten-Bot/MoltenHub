@@ -42,6 +42,10 @@
       margin: 0 0 8px;
       font-size: 22px;
     }
+    h2 {
+      margin: 0 0 8px;
+      font-size: 18px;
+    }
     p {
       margin: 4px 0;
       color: var(--muted);
@@ -95,6 +99,27 @@
     .steps {
       display: grid;
       gap: 10px;
+    }
+    .tabs {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      margin-top: 12px;
+    }
+    .tabBtn {
+      background: transparent;
+      color: var(--text);
+    }
+    .tabBtn.active {
+      background: #1d4ed8;
+      color: #fff;
+      border-color: #1d4ed8;
+    }
+    .tabPanel {
+      display: none;
+    }
+    .tabPanel.active {
+      display: block;
     }
     .step {
       border: 1px solid var(--line);
@@ -217,15 +242,51 @@
       <p>This page mirrors the first section of <code>endpoints.http</code> and lets you run each call with one click.</p>
       <p>If the browser blocks requests, it is usually a CORS issue between this page origin and <code>http://localhost:8080</code>.</p>
       <div class="row" style="margin-top:10px;">
-        <button id="runAllBtn">Run All Steps</button>
+        <button id="runAllBtn">Run Full Workflow</button>
         <button id="clearBtn" class="secondary">Clear Responses</button>
         <span id="globalMsg" class="meta"></span>
       </div>
       <div id="vars" class="vars"></div>
+      <div class="tabs" role="tablist" aria-label="Manual flow tabs">
+        <button class="tabBtn active" id="tabBtn-system" data-tab-target="tab-system">System</button>
+        <button class="tabBtn" id="tabBtn-humans" data-tab-target="tab-humans">Humans</button>
+        <button class="tabBtn" id="tabBtn-agents" data-tab-target="tab-agents">Agents</button>
+      </div>
     </section>
 
-    <section class="panel">
-      <div class="steps" id="steps"></div>
+    <section class="panel tabPanel active" id="tab-system">
+      <h2>System</h2>
+      <div class="row" style="margin-top:10px;">
+        <button id="runAllSystemBtn">Run All (System)</button>
+        <span id="systemMsg" class="meta"></span>
+      </div>
+      <div class="steps" id="steps-system"></div>
+    </section>
+
+    <section class="panel tabPanel" id="tab-humans">
+      <h2>Humans</h2>
+      <div class="row" style="margin-top:10px;">
+        <button id="runAllHumansBtn">Run All (Humans)</button>
+        <span id="humansMsg" class="meta"></span>
+      </div>
+      <div class="steps" id="steps-humans"></div>
+    </section>
+
+    <section class="panel tabPanel" id="tab-agents">
+      <h2>Agents</h2>
+      <div class="row" style="margin-top:10px;">
+        <button id="runAllAgentsBtn">Run All (Agents)</button>
+        <span id="agentsMsg" class="meta"></span>
+      </div>
+      <div class="steps" id="steps-agents"></div>
+      <p>This helper performs two trust calls: A -&gt; B and B -&gt; A.</p>
+      <p>Use this instead of <code>POST /v1/agents/{agent_ref}/bind</code>.</p>
+      <div class="vars" id="bindVars"></div>
+      <div class="row" style="margin-top:10px;">
+        <button id="runBindPairBtn" class="secondary">Run Bind Helper (A &lt;-&gt; B)</button>
+        <span id="bindPairStatus" class="meta"></span>
+      </div>
+      <pre id="bindPairResponse" aria-label="bind helper response"></pre>
     </section>
   </div>
   <div class="modal" id="responseModal" aria-hidden="true">
@@ -242,6 +303,7 @@
     "use strict";
 
     const STORAGE_KEY = "manual_api_step_env_v1";
+    const BIND_STORAGE_KEY = "manual_api_bind_pair_v1";
     const defaults = {
       baseUrl: "http://localhost:8080",
       entitiesMetadataKey: "local-entities-metadata-key",
@@ -252,14 +314,18 @@
       bobHumanEmail: "bob@b.test",
       bobHandle: "bob",
       alphaOrgHandle: "alpha-org",
-      betaOrgHandle: "beta-org"
+      betaOrgHandle: "beta-org",
+      agentAHandle: "alpha-agent-one",
+      agentBHandle: "alpha-agent-two"
     };
 
     const steps = [
-      { line: "17-18", caller: "Public", name: "health", method: "GET", path: "{{baseUrl}}/health" },
-      { line: "22-23", caller: "Public", name: "openapi", method: "GET", path: "{{baseUrl}}/openapi.yaml" },
-      { line: "27-28", caller: "Public", name: "ui_config", method: "GET", path: "{{baseUrl}}/v1/ui/config" },
+      { group: "system", phase: 1, line: "17-18", caller: "Public", name: "health", method: "GET", path: "{{baseUrl}}/health" },
+      { group: "system", phase: 1, line: "22-23", caller: "Public", name: "openapi", method: "GET", path: "{{baseUrl}}/openapi.yaml" },
+      { group: "system", phase: 1, line: "27-28", caller: "Public", name: "ui_config", method: "GET", path: "{{baseUrl}}/v1/ui/config" },
       {
+        group: "system",
+        phase: 1,
         line: "32-34",
         caller: "System",
         name: "entities_public_metadata",
@@ -268,6 +334,8 @@
         headers: { "X-Entities-Metadata-Key": "{{entitiesMetadataKey}}" }
       },
       {
+        group: "humans",
+        phase: 2,
         line: "40-43",
         caller: "Human (Alice)",
         name: "alice_me_get",
@@ -276,6 +344,8 @@
         headers: { "X-Human-Id": "{{aliceHumanId}}", "X-Human-Email": "{{aliceHumanEmail}}" }
       },
       {
+        group: "humans",
+        phase: 2,
         line: "47-55",
         caller: "Human (Alice)",
         name: "alice_me_patch",
@@ -289,6 +359,8 @@
         body: { handle: "{{aliceHandle}}" }
       },
       {
+        group: "humans",
+        phase: 2,
         line: "59-70",
         caller: "Human (Alice)",
         name: "alice_me_metadata_patch",
@@ -302,6 +374,8 @@
         body: { metadata: { public: true, testing: "Alice profile" } }
       },
       {
+        group: "humans",
+        phase: 2,
         line: "74-77",
         caller: "Human (Bob)",
         name: "bob_me_get",
@@ -310,6 +384,8 @@
         headers: { "X-Human-Id": "{{bobHumanId}}", "X-Human-Email": "{{bobHumanEmail}}" }
       },
       {
+        group: "humans",
+        phase: 2,
         line: "81-89",
         caller: "Human (Bob)",
         name: "bob_me_patch",
@@ -323,6 +399,8 @@
         body: { handle: "{{bobHandle}}" }
       },
       {
+        group: "humans",
+        phase: 2,
         line: "93-104",
         caller: "Human (Bob)",
         name: "bob_me_metadata_patch",
@@ -334,11 +412,270 @@
           "X-Human-Email": "{{bobHumanEmail}}"
         },
         body: { metadata: { public: true, description: "Bob profile" } }
+      },
+      {
+        group: "humans",
+        phase: 2,
+        line: "org-create",
+        caller: "Human (Alice)",
+        name: "create_org_alpha",
+        method: "POST",
+        path: "{{baseUrl}}/v1/orgs",
+        headers: {
+          "Content-Type": "application/json",
+          "X-Human-Id": "{{aliceHumanId}}",
+          "X-Human-Email": "{{aliceHumanEmail}}"
+        },
+        body: {
+          handle: "{{alphaOrgHandle}}",
+          display_name: "Alpha Org"
+        }
+      },
+      {
+        group: "humans",
+        phase: 2,
+        line: "org-list",
+        caller: "Human (Alice)",
+        name: "alice_me_orgs",
+        method: "GET",
+        path: "{{baseUrl}}/v1/me/orgs",
+        headers: { "X-Human-Id": "{{aliceHumanId}}", "X-Human-Email": "{{aliceHumanEmail}}" }
+      },
+      {
+        group: "humans",
+        phase: 2,
+        line: "human-invite-agent-a",
+        caller: "Human (Alice)",
+        name: "create_agent_a_bind_token",
+        method: "POST",
+        path: "{{baseUrl}}/v1/me/agents/bind-tokens",
+        headers: {
+          "Content-Type": "application/json",
+          "X-Human-Id": "{{aliceHumanId}}",
+          "X-Human-Email": "{{aliceHumanEmail}}"
+        },
+        body: {
+          org_id: "{{create_org_alpha.response.body.$.organization.org_id}}"
+        }
+      },
+      {
+        group: "humans",
+        phase: 2,
+        line: "human-invite-agent-b",
+        caller: "Human (Alice)",
+        name: "create_agent_b_bind_token",
+        method: "POST",
+        path: "{{baseUrl}}/v1/me/agents/bind-tokens",
+        headers: {
+          "Content-Type": "application/json",
+          "X-Human-Id": "{{aliceHumanId}}",
+          "X-Human-Email": "{{aliceHumanEmail}}"
+        },
+        body: {
+          org_id: "{{create_org_alpha.response.body.$.organization.org_id}}"
+        }
+      },
+      {
+        group: "agents",
+        phase: 3,
+        line: "agent-bind-a",
+        caller: "Agent bootstrap",
+        name: "agent_bind_a",
+        method: "POST",
+        path: "{{baseUrl}}/v1/agents/bind",
+        headers: { "Content-Type": "application/json" },
+        body: {
+          bind_token: "{{create_agent_a_bind_token.response.body.$.bind_token}}",
+          agent_id: "{{agentAHandle}}",
+          hub_url: "{{baseUrl}}"
+        }
+      },
+      {
+        group: "agents",
+        phase: 3,
+        line: "agent-bind-b",
+        caller: "Agent bootstrap",
+        name: "agent_bind_b",
+        method: "POST",
+        path: "{{baseUrl}}/v1/agents/bind",
+        headers: { "Content-Type": "application/json" },
+        body: {
+          bind_token: "{{create_agent_b_bind_token.response.body.$.bind_token}}",
+          agent_id: "{{agentBHandle}}",
+          hub_url: "{{baseUrl}}"
+        }
+      },
+      {
+        group: "agents",
+        phase: 3,
+        line: "agent-me",
+        caller: "Agent A",
+        name: "agent_me_get",
+        method: "GET",
+        path: "{{baseUrl}}/v1/agents/me",
+        headers: { Authorization: "Bearer {{agent_bind_a.response.body.$.token}}" }
+      },
+      {
+        group: "agents",
+        phase: 3,
+        line: "agent-profile-update",
+        caller: "Agent A",
+        name: "agent_update_profile",
+        method: "PATCH",
+        path: "{{baseUrl}}/v1/agents/me",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: "Bearer {{agent_bind_a.response.body.$.token}}"
+        },
+        body: {
+          handle: "{{agentAHandle}}",
+          metadata: {
+            public: true,
+            description: "Updated via /v1/agents/me"
+          }
+        }
+      },
+      {
+        group: "agents",
+        phase: 3,
+        line: "agent-metadata-update",
+        caller: "Agent A",
+        name: "agent_update_metadata",
+        method: "PATCH",
+        path: "{{baseUrl}}/v1/agents/me/metadata",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: "Bearer {{agent_bind_a.response.body.$.token}}"
+        },
+        body: {
+          metadata: {
+            public: true,
+            tags: ["manual", "agent"]
+          }
+        }
+      },
+      {
+        group: "humans",
+        phase: 4,
+        line: "human-bind-a-to-b",
+        caller: "Human (Alice)",
+        name: "human_bind_agents_a_to_b",
+        method: "POST",
+        path: "{{baseUrl}}/v1/agent-trusts",
+        headers: {
+          "Content-Type": "application/json",
+          "X-Human-Id": "{{aliceHumanId}}",
+          "X-Human-Email": "{{aliceHumanEmail}}"
+        },
+        body: {
+          org_id: "{{create_org_alpha.response.body.$.organization.org_id}}",
+          agent_uuid: "{{agent_bind_a.response.body.$.agent_uuid}}",
+          peer_agent_uuid: "{{agent_bind_b.response.body.$.agent_uuid}}"
+        }
+      },
+      {
+        group: "humans",
+        phase: 4,
+        line: "human-bind-b-to-a",
+        caller: "Human (Alice)",
+        name: "human_bind_agents_b_to_a",
+        method: "POST",
+        path: "{{baseUrl}}/v1/agent-trusts",
+        headers: {
+          "Content-Type": "application/json",
+          "X-Human-Id": "{{aliceHumanId}}",
+          "X-Human-Email": "{{aliceHumanEmail}}"
+        },
+        body: {
+          org_id: "{{create_org_alpha.response.body.$.organization.org_id}}",
+          agent_uuid: "{{agent_bind_b.response.body.$.agent_uuid}}",
+          peer_agent_uuid: "{{agent_bind_a.response.body.$.agent_uuid}}"
+        }
+      },
+      {
+        group: "agents",
+        phase: 5,
+        line: "agent-list-associated",
+        caller: "Agent A",
+        name: "agent_list_associated_agents",
+        method: "GET",
+        path: "{{baseUrl}}/v1/agents/me/capabilities",
+        headers: { Authorization: "Bearer {{agent_bind_a.response.body.$.token}}" }
+      },
+      {
+        group: "agents",
+        phase: 5,
+        line: "agent-send-message",
+        caller: "Agent A",
+        name: "agent_send_message_to_b",
+        method: "POST",
+        path: "{{baseUrl}}/v1/messages/publish",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: "Bearer {{agent_bind_a.response.body.$.token}}"
+        },
+        body: {
+          to_agent_uuid: "{{agent_bind_b.response.body.$.agent_uuid}}",
+          content_type: "text/plain",
+          payload: "hello from manual testing page"
+        }
+      },
+      {
+        group: "humans",
+        phase: 6,
+        line: "human-delete-bind",
+        caller: "Human (Alice)",
+        name: "human_delete_bind_agents",
+        method: "DELETE",
+        path: "{{baseUrl}}/v1/agent-trusts/{{human_bind_agents_a_to_b.response.body.$.trust.edge_id}}",
+        headers: { "X-Human-Id": "{{aliceHumanId}}", "X-Human-Email": "{{aliceHumanEmail}}" }
+      },
+      {
+        group: "humans",
+        phase: 6,
+        line: "human-revoke-agent",
+        caller: "Human (Alice)",
+        name: "human_revoke_agent_b",
+        method: "DELETE",
+        path: "{{baseUrl}}/v1/agents/{{agent_bind_b.response.body.$.agent_uuid}}",
+        headers: { "X-Human-Id": "{{aliceHumanId}}", "X-Human-Email": "{{aliceHumanEmail}}" }
+      },
+      {
+        group: "humans",
+        phase: 6,
+        line: "human-delete-agent",
+        caller: "Human (Alice)",
+        name: "human_delete_agent_a",
+        method: "DELETE",
+        path: "{{baseUrl}}/v1/agents/{{agent_bind_a.response.body.$.agent_uuid}}",
+        headers: { "X-Human-Id": "{{aliceHumanId}}", "X-Human-Email": "{{aliceHumanEmail}}" }
+      },
+      {
+        group: "humans",
+        phase: 6,
+        line: "org-delete",
+        caller: "Human (Alice)",
+        name: "human_delete_org_alpha",
+        method: "DELETE",
+        path: "{{baseUrl}}/v1/orgs/{{create_org_alpha.response.body.$.organization.org_id}}",
+        headers: { "X-Human-Id": "{{aliceHumanId}}", "X-Human-Email": "{{aliceHumanEmail}}" }
       }
     ];
 
+    const bindDefaults = {
+      bind_org_a: "",
+      bind_org_b: "",
+      bind_agent_a_uuid: "",
+      bind_agent_b_uuid: "",
+      bind_human_a_id: "",
+      bind_human_a_email: "",
+      bind_human_b_id: "",
+      bind_human_b_email: ""
+    };
+
     const state = {
       env: loadEnv(),
+      bind: loadBindEnv(),
       responses: {},
       collapseTimers: {}
     };
@@ -355,6 +692,20 @@
 
     function saveEnv() {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(state.env));
+    }
+
+    function loadBindEnv() {
+      try {
+        const raw = localStorage.getItem(BIND_STORAGE_KEY);
+        if (!raw) return { ...bindDefaults };
+        return { ...bindDefaults, ...JSON.parse(raw) };
+      } catch (_) {
+        return { ...bindDefaults };
+      }
+    }
+
+    function saveBindEnv() {
+      localStorage.setItem(BIND_STORAGE_KEY, JSON.stringify(state.bind));
     }
 
     function getByPath(obj, path) {
@@ -538,14 +889,153 @@
       }
     }
 
-    async function runAll() {
-      const msg = document.getElementById("globalMsg");
-      msg.textContent = "Running all steps...";
+    function stepIndexesForGroup(group) {
+      const out = [];
       for (let i = 0; i < steps.length; i++) {
+        if (steps[i].group === group) out.push(i);
+      }
+      return out;
+    }
+
+    function stepIndexesForPhase(phase) {
+      const out = [];
+      for (let i = 0; i < steps.length; i++) {
+        if (steps[i].phase === phase) out.push(i);
+      }
+      return out;
+    }
+
+    async function runGroup(group, msgElementID) {
+      const msg = document.getElementById(msgElementID);
+      const indexes = stepIndexesForGroup(group);
+      if (msg) {
+        msg.className = "meta statusWarn";
+        msg.textContent = `Running ${group} calls...`;
+      }
+      for (const i of indexes) {
         // eslint-disable-next-line no-await-in-loop
         await runStep(i);
       }
+      if (msg) {
+        msg.className = "meta statusOk";
+        msg.textContent = `Done (${indexes.length} calls).`;
+      }
+    }
+
+    async function runAll() {
+      const msg = document.getElementById("globalMsg");
+      msg.className = "meta statusWarn";
+      msg.textContent = "Running full workflow (phases 1-6)...";
+      const phases = [1, 2, 3, 4, 5, 6];
+      for (const phase of phases) {
+        const indexes = stepIndexesForPhase(phase);
+        msg.textContent = `Running workflow phase ${phase} (${indexes.length} calls)...`;
+        for (const i of indexes) {
+          // eslint-disable-next-line no-await-in-loop
+          await runStep(i);
+        }
+      }
+      msg.className = "meta statusOk";
       msg.textContent = "Done.";
+    }
+
+    async function runBindPair() {
+      const status = document.getElementById("bindPairStatus");
+      const output = document.getElementById("bindPairResponse");
+      const btn = document.getElementById("runBindPairBtn");
+      const orgA = (state.bind.bind_org_a || "").trim();
+      const orgB = (state.bind.bind_org_b || orgA).trim();
+      const agentA = (state.bind.bind_agent_a_uuid || "").trim();
+      const agentB = (state.bind.bind_agent_b_uuid || "").trim();
+      const humanAID = (state.bind.bind_human_a_id || "").trim();
+      const humanAEmail = (state.bind.bind_human_a_email || "").trim();
+      const humanBID = (state.bind.bind_human_b_id || humanAID).trim();
+      const humanBEmail = (state.bind.bind_human_b_email || humanAEmail).trim();
+      const baseUrl = (state.env.baseUrl || "").trim();
+
+      if (!baseUrl || !orgA || !agentA || !agentB || !humanAID || !humanAEmail) {
+        status.className = "meta statusBad";
+        status.textContent = "Missing required fields (baseUrl, org A, agents A/B, human A id/email).";
+        return;
+      }
+
+      const url = baseUrl.replace(/\/+$/, "") + "/v1/agent-trusts";
+      const reqA = {
+        method: "POST",
+        url,
+        headers: {
+          "Content-Type": "application/json",
+          "X-Human-Id": humanAID,
+          "X-Human-Email": humanAEmail
+        },
+        body: {
+          org_id: orgA,
+          agent_uuid: agentA,
+          peer_agent_uuid: agentB
+        }
+      };
+      const reqB = {
+        method: "POST",
+        url,
+        headers: {
+          "Content-Type": "application/json",
+          "X-Human-Id": humanBID,
+          "X-Human-Email": humanBEmail
+        },
+        body: {
+          org_id: orgB,
+          agent_uuid: agentB,
+          peer_agent_uuid: agentA
+        }
+      };
+
+      btn.disabled = true;
+      status.className = "meta statusWarn";
+      status.textContent = "Running A -> B then B -> A...";
+      output.textContent = "";
+
+      const runOne = async (req, responseKey) => {
+        const resp = await fetch(req.url, {
+          method: req.method,
+          headers: req.headers,
+          body: JSON.stringify(req.body)
+        });
+        const text = await resp.text();
+        let parsed = null;
+        try { parsed = JSON.parse(text); } catch (_) {}
+        state.responses[responseKey] = { status: resp.status, text, json: parsed };
+        return { status: resp.status, statusText: resp.statusText, text, json: parsed };
+      };
+
+      try {
+        const a = await runOne(reqA, "bind_pair_a_to_b");
+        const b = await runOne(reqB, "bind_pair_b_to_a");
+        const ok = a.status >= 200 && a.status < 300 && b.status >= 200 && b.status < 300;
+        status.className = "meta " + (ok ? "statusOk" : "statusBad");
+        status.textContent = ok ? "Completed bidirectional bind calls." : "One or more bind calls failed.";
+        output.textContent = [
+          "Request A->B:",
+          pretty(reqA),
+          "",
+          "Response A->B:",
+          `HTTP ${a.status} ${a.statusText}`,
+          a.json ? pretty(a.json) : a.text,
+          "",
+          "Request B->A:",
+          pretty(reqB),
+          "",
+          "Response B->A:",
+          `HTTP ${b.status} ${b.statusText}`,
+          b.json ? pretty(b.json) : b.text
+        ].join("\n");
+      } catch (err) {
+        const msg = err && err.message ? err.message : String(err);
+        status.className = "meta statusBad";
+        status.textContent = "Bind helper failed.";
+        output.textContent = `${msg}\nRequest failed. Check CORS and API availability.`;
+      } finally {
+        btn.disabled = false;
+      }
     }
 
     function clearResponses() {
@@ -565,6 +1055,11 @@
         if (expandBtn) expandBtn.disabled = true;
       }
       document.getElementById("globalMsg").textContent = "";
+      document.getElementById("systemMsg").textContent = "";
+      document.getElementById("humansMsg").textContent = "";
+      document.getElementById("agentsMsg").textContent = "";
+      document.getElementById("bindPairStatus").textContent = "";
+      document.getElementById("bindPairResponse").textContent = "";
     }
 
     function renderVars() {
@@ -587,9 +1082,35 @@
       }
     }
 
-    function renderSteps() {
-      const root = document.getElementById("steps");
+    function renderBindVars() {
+      const root = document.getElementById("bindVars");
       root.innerHTML = "";
+      for (const key of Object.keys(bindDefaults)) {
+        const box = document.createElement("div");
+        box.className = "varItem";
+        const label = document.createElement("label");
+        label.textContent = key;
+        const input = document.createElement("input");
+        input.value = state.bind[key] || "";
+        input.onchange = () => {
+          state.bind[key] = input.value;
+          saveBindEnv();
+        };
+        box.appendChild(label);
+        box.appendChild(input);
+        root.appendChild(box);
+      }
+    }
+
+    function renderSteps() {
+      const roots = {
+        system: document.getElementById("steps-system"),
+        humans: document.getElementById("steps-humans"),
+        agents: document.getElementById("steps-agents")
+      };
+      Object.values(roots).forEach((root) => {
+        if (root) root.innerHTML = "";
+      });
       steps.forEach((step, i) => {
         const card = document.createElement("article");
         card.className = "step";
@@ -614,7 +1135,8 @@
             <pre id="res-${i}" aria-label="response output"></pre>
           </div>
         `;
-        root.appendChild(card);
+        const root = roots[step.group || "humans"];
+        if (root) root.appendChild(card);
       });
 
       steps.forEach((_, i) => {
@@ -624,8 +1146,25 @@
       });
     }
 
+    function activateTab(tabID) {
+      ["system", "humans", "agents"].forEach((name) => {
+        const panel = document.getElementById("tab-" + name);
+        const btn = document.getElementById("tabBtn-" + name);
+        const on = tabID === "tab-" + name;
+        if (panel) panel.classList.toggle("active", on);
+        if (btn) btn.classList.toggle("active", on);
+      });
+    }
+
     document.getElementById("runAllBtn").onclick = runAll;
+    document.getElementById("runAllSystemBtn").onclick = () => runGroup("system", "systemMsg");
+    document.getElementById("runAllHumansBtn").onclick = () => runGroup("humans", "humansMsg");
+    document.getElementById("runAllAgentsBtn").onclick = () => runGroup("agents", "agentsMsg");
     document.getElementById("clearBtn").onclick = clearResponses;
+    document.getElementById("runBindPairBtn").onclick = runBindPair;
+    document.querySelectorAll("[data-tab-target]").forEach((btn) => {
+      btn.onclick = () => activateTab(btn.getAttribute("data-tab-target"));
+    });
     document.getElementById("responseModalClose").onclick = closeLargeResponse;
     document.getElementById("responseModal").onclick = (evt) => {
       if (evt.target && evt.target.id === "responseModal") closeLargeResponse();
@@ -635,6 +1174,7 @@
     });
 
     renderVars();
+    renderBindVars();
     renderSteps();
   </script>
 </body>

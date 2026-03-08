@@ -243,6 +243,19 @@ func (s *s3StateStore) CreateOrg(handle, displayName string, creatorHumanID stri
 	return org, membership, nil
 }
 
+func (s *s3StateStore) DeleteOrg(orgID, actorHumanID string, isSuperAdmin bool, now time.Time) error {
+	s.persistMu.Lock()
+	defer s.persistMu.Unlock()
+
+	if err := s.MemoryStore.DeleteOrg(orgID, actorHumanID, isSuperAdmin, now); err != nil {
+		return err
+	}
+	if err := s.persistAll(context.Background()); err != nil {
+		return err
+	}
+	return nil
+}
+
 func (s *s3StateStore) EnsurePersonalOrg(humanID string, now time.Time, idFactory func() (string, error)) (model.Organization, error) {
 	s.persistMu.Lock()
 	defer s.persistMu.Unlock()

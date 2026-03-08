@@ -402,6 +402,9 @@ func (h *Handler) handleMyAgents(w http.ResponseWriter, r *http.Request) {
 			"agents": h.control.ListHumanAgents(actor.Human.HumanID),
 		})
 		return
+	case http.MethodPost:
+		writeError(w, http.StatusGone, "agent_create_disabled", "use POST /v1/agents/bind-tokens and POST /v1/agents/bind")
+		return
 	default:
 		writeMethodNotAllowed(w)
 		return
@@ -686,7 +689,7 @@ func (h *Handler) handleAgentMe(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]any{
 			"agent":        agent,
 			"organization": org,
-			"owner_human":  ownerHuman,
+			"human":        ownerHuman,
 		})
 		return
 	case http.MethodPatch:
@@ -1351,7 +1354,29 @@ func (h *Handler) handleOrgSubroutes(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if len(parts) == 3 {
-		writeError(w, http.StatusNotFound, "not_found", "route not found")
+		if r.Method != http.MethodDelete {
+			writeMethodNotAllowed(w)
+			return
+		}
+		if h.requireHandleConfirmedForWrite(w, actor) {
+			return
+		}
+		if err := h.control.DeleteOrg(orgID, actor.Human.HumanID, actor.IsSuperAdmin, h.now().UTC()); err != nil {
+			switch {
+			case errors.Is(err, store.ErrOrgNotFound):
+				writeError(w, http.StatusNotFound, "unknown_org", "org_id is not registered")
+			case errors.Is(err, store.ErrUnauthorizedRole):
+				writeError(w, http.StatusForbidden, "forbidden", "owner role required")
+			default:
+				writeError(w, http.StatusInternalServerError, "store_error", "failed to delete organization")
+			}
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{
+			"status": "ok",
+			"org_id": orgID,
+			"result": "deleted",
+		})
 		return
 	}
 
@@ -2135,6 +2160,10 @@ func (h *Handler) handleAgentsSubroutes(w http.ResponseWriter, r *http.Request) 
 		writeError(w, http.StatusBadRequest, "invalid_agent_uuid", "agent_uuid must be a valid UUID")
 		return
 	}
+	if action == "bind" {
+		writeError(w, http.StatusGone, "agent_bind_disabled", "use POST /v1/agent-trusts or POST /v1/me/agent-trusts")
+		return
+	}
 
 	actor, err := h.authenticateHuman(r)
 	if err != nil {
@@ -2142,21 +2171,6 @@ func (h *Handler) handleAgentsSubroutes(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	if h.requireHandleConfirmedForWrite(w, actor) {
-		return
-	}
-
-	if action == "bind" {
-		var req trustAgentRequest
-		if err := decodeJSON(r, &req); err != nil {
-			writeError(w, http.StatusBadRequest, "invalid_request", "invalid JSON request")
-			return
-		}
-		if validateUUID(normalizeUUID(agentRef)) {
-			req.AgentUUID = agentRef
-		} else {
-			req.AgentID = agentRef
-		}
-		h.handleAgentTrustCreate(w, actor, req, "owner required for initiating agent")
 		return
 	}
 

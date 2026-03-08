@@ -317,6 +317,16 @@ paths:
       responses:
         '200':
           description: Agent list
+    post:
+      summary: Agent create route disabled
+      description: |
+        Direct human-created agents are disabled.
+        Use bind flow: `POST /v1/agents/bind-tokens` then agent-side `POST /v1/agents/bind`.
+      security:
+        - humanAuth: []
+      responses:
+        '410':
+          description: Gone (`agent_create_disabled`)
   /v1/me/agents/bind-tokens:
     post:
       summary: Create short-lived one-time agent bind token for current human
@@ -395,6 +405,24 @@ paths:
           description: Organization created
         '409':
           description: Duplicate handle
+  /v1/orgs/{org_id}:
+    delete:
+      summary: Delete organization
+      description: |
+        Permanently deletes organization state and related memberships, invites, agents,
+        org access keys, and trust edges.
+        Requires owner role for the org or statocyst admin.
+      security:
+        - humanAuth: []
+      parameters:
+        - in: path
+          name: org_id
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Organization deleted
   /v1/orgs/{org_id}/metadata:
     patch:
       summary: Update organization metadata
@@ -787,10 +815,10 @@ paths:
           description: Bind already used or supplied agent_id exists
   /v1/agents/me:
     get:
-      summary: Read authenticated agent profile with bound owner/org context
+      summary: Read authenticated agent profile with human/org context
       description: |
-        Returns the authenticated agent plus read-only information for its bound organization
-        and owner human (if the agent is human-owned).
+        Returns the authenticated agent plus read-only context objects:
+        `organization` and `human` (null when the agent is org-owned).
       security:
         - agentAuth: []
       responses:
@@ -926,40 +954,6 @@ paths:
       responses:
         '403':
           description: Forbidden
-  /v1/agents/{agent_ref}/bind:
-    post:
-      summary: Agent trust bind compatibility route
-      description: |
-        Human-auth trust-management endpoint (not onboarding).
-        Creates/updates trust edge between initiating `agent_ref` and peer agent in request body.
-        Prefer `POST /v1/agent-trusts` for new integrations.
-      deprecated: true
-      security:
-        - humanAuth: []
-      parameters:
-        - in: path
-          name: agent_ref
-          required: true
-          schema:
-            type: string
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              properties:
-                org_id:
-                  type: string
-                peer_agent_uuid:
-                  type: string
-                peer_agent_id:
-                  type: string
-      responses:
-        '201':
-          description: Trust edge created
-        '200':
-          description: Trust edge updated
   /v1/org-trusts:
     post:
       summary: Create or join org trust request

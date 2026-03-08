@@ -260,6 +260,120 @@ func (s *MemoryStore) CreateOrg(handle, displayName string, creatorHumanID strin
 	return org, mem, nil
 }
 
+func (s *MemoryStore) DeleteOrg(orgID, actorHumanID string, isSuperAdmin bool, now time.Time) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	_ = now
+
+	org, ok := s.orgs[orgID]
+	if !ok {
+		return ErrOrgNotFound
+	}
+	if !isSuperAdmin && s.membershipRoleLocked(orgID, actorHumanID) != model.RoleOwner {
+		return ErrUnauthorizedRole
+	}
+
+	deletedAgents := make(map[string]struct{})
+	for agentUUID, agent := range s.agents {
+		if agent.OrgID != orgID {
+			continue
+		}
+		if agent.OwnerHumanID != nil {
+			delete(s.humanOwnedAgentNameIdx, humanOwnedAgentNameKey(agent.OrgID, *agent.OwnerHumanID, agent.Handle))
+		} else {
+			delete(s.orgOwnedAgentNameIdx, orgOwnedAgentNameKey(agent.OrgID, agent.Handle))
+		}
+		delete(s.agentTokenIdx, agent.TokenHash)
+		delete(s.agentByURI, agent.AgentID)
+		delete(s.agents, agentUUID)
+		deletedAgents[agentUUID] = struct{}{}
+	}
+
+	for edgeID, edge := range s.agentTrusts {
+		if _, leftDeleted := deletedAgents[edge.LeftID]; !leftDeleted {
+			if _, rightDeleted := deletedAgents[edge.RightID]; !rightDeleted {
+				continue
+			}
+		}
+		delete(s.agentTrusts, edgeID)
+		delete(s.agentTrustByPair, pairKey(edge.LeftID, edge.RightID))
+	}
+	for edgeID, edge := range s.orgTrusts {
+		if edge.LeftID != orgID && edge.RightID != orgID {
+			continue
+		}
+		delete(s.orgTrusts, edgeID)
+		delete(s.orgTrustByPair, pairKey(edge.LeftID, edge.RightID))
+	}
+
+	for queueAgentUUID, queue := range s.queues {
+		if _, removed := deletedAgents[queueAgentUUID]; removed {
+			delete(s.queues, queueAgentUUID)
+			continue
+		}
+		if len(queue) == 0 {
+			continue
+		}
+		filtered := queue[:0]
+		for _, msg := range queue {
+			_, fromDeleted := deletedAgents[msg.FromAgentUUID]
+			_, toDeleted := deletedAgents[msg.ToAgentUUID]
+			if fromDeleted || toDeleted {
+				continue
+			}
+			filtered = append(filtered, msg)
+		}
+		if len(filtered) == 0 {
+			delete(s.queues, queueAgentUUID)
+			continue
+		}
+		s.queues[queueAgentUUID] = filtered
+	}
+
+	for bindID, bind := range s.binds {
+		if bind.OrgID != orgID {
+			continue
+		}
+		delete(s.binds, bindID)
+		delete(s.bindByHash, bind.TokenHash)
+	}
+	for inviteID, invite := range s.invites {
+		if invite.OrgID != orgID {
+			continue
+		}
+		delete(s.invites, inviteID)
+		if invite.InviteSecret != "" {
+			delete(s.inviteBySecretHash, invite.InviteSecret)
+		}
+	}
+	for membershipID, membership := range s.memberships {
+		if membership.OrgID != orgID {
+			continue
+		}
+		delete(s.memberships, membershipID)
+		delete(s.membershipByOrgUser, orgHumanKey(orgID, membership.HumanID))
+	}
+	for keyID, key := range s.orgAccessKeys {
+		if key.OrgID != orgID {
+			continue
+		}
+		delete(s.orgAccessKeys, keyID)
+		delete(s.orgAccessKeyByHash, key.TokenHash)
+	}
+	for humanID, personalOrgID := range s.personalOrgByHuman {
+		if personalOrgID == orgID {
+			delete(s.personalOrgByHuman, humanID)
+		}
+	}
+
+	delete(s.auditByOrg, orgID)
+	delete(s.statsByOrg, orgID)
+	delete(s.statsDaily, orgID)
+	delete(s.orgByHandle, normalizeOrgHandleKey(org.Handle))
+	delete(s.orgs, orgID)
+	return nil
+}
+
 func (s *MemoryStore) EnsurePersonalOrg(humanID string, now time.Time, idFactory func() (string, error)) (model.Organization, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
