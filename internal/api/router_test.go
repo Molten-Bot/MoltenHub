@@ -1334,28 +1334,60 @@ func TestRevokedAgentCannotPublishOrPullAndQueuedMessagesArePurged(t *testing.T)
 	}
 }
 
-func TestDeleteAgentRecordRequiresAgentOwnerOrOrgOwner(t *testing.T) {
+func TestDeleteAgentRecordAuthorizationMatrix(t *testing.T) {
 	router := newTestRouter()
 	orgID := createOrg(t, router, "alice", "alice@a.test", "Org Agent Delete")
 	inviteBob := createInvite(t, router, "alice", "alice@a.test", orgID, "bob@b.test", "member")
 	acceptInvite(t, router, "bob", "bob@b.test", inviteBob)
 	inviteCharlie := createInvite(t, router, "alice", "alice@a.test", orgID, "charlie@c.test", "admin")
 	acceptInvite(t, router, "charlie", "charlie@c.test", inviteCharlie)
+	inviteDana := createInvite(t, router, "alice", "alice@a.test", orgID, "dana@d.test", "member")
+	acceptInvite(t, router, "dana", "dana@d.test", inviteDana)
 
 	bobHumanID := currentHumanID(t, router, "bob", "bob@b.test")
-	_, agentUUID := registerAgentWithUUID(t, router, "bob", "bob@b.test", orgID, "bob-agent", bobHumanID)
+	_, bobOwnedAgentUUID := registerAgentWithUUID(t, router, "bob", "bob@b.test", orgID, "bob-agent-self", bobHumanID)
+	_, bobOrgManagedAgentUUID := registerAgentWithUUID(t, router, "bob", "bob@b.test", orgID, "bob-agent-org-owner", bobHumanID)
+	_, orgOwnedAgentUUID := registerAgentWithUUID(t, router, "alice", "alice@a.test", orgID, "org-agent", "")
 
-	adminDelete := doJSONRequest(t, router, http.MethodDelete, "/v1/agents/"+agentUUID+"/record", nil, humanHeaders("charlie", "charlie@c.test"))
-	if adminDelete.Code != http.StatusForbidden {
-		t.Fatalf("expected org admin delete to be forbidden, got %d %s", adminDelete.Code, adminDelete.Body.String())
+	adminDeleteOwned := doJSONRequest(t, router, http.MethodDelete, "/v1/agents/"+bobOwnedAgentUUID+"/record", nil, humanHeaders("charlie", "charlie@c.test"))
+	if adminDeleteOwned.Code != http.StatusForbidden {
+		t.Fatalf("expected org admin delete of human-owned agent to be forbidden, got %d %s", adminDeleteOwned.Code, adminDeleteOwned.Body.String())
 	}
 
-	ownerDelete := doJSONRequest(t, router, http.MethodDelete, "/v1/agents/"+agentUUID+"/record", nil, humanHeaders("alice", "alice@a.test"))
-	if ownerDelete.Code != http.StatusOK {
-		t.Fatalf("expected org owner delete to succeed, got %d %s", ownerDelete.Code, ownerDelete.Body.String())
+	memberDeleteOwned := doJSONRequest(t, router, http.MethodDelete, "/v1/agents/"+bobOwnedAgentUUID+"/record", nil, humanHeaders("dana", "dana@d.test"))
+	if memberDeleteOwned.Code != http.StatusForbidden {
+		t.Fatalf("expected org member delete of human-owned agent to be forbidden, got %d %s", memberDeleteOwned.Code, memberDeleteOwned.Body.String())
 	}
-	if decodeJSONMap(t, ownerDelete.Body.Bytes())["result"] != "deleted" {
-		t.Fatalf("expected delete response to report deleted")
+
+	agentOwnerDelete := doJSONRequest(t, router, http.MethodDelete, "/v1/agents/"+bobOwnedAgentUUID+"/record", nil, humanHeaders("bob", "bob@b.test"))
+	if agentOwnerDelete.Code != http.StatusOK {
+		t.Fatalf("expected agent owner delete to succeed, got %d %s", agentOwnerDelete.Code, agentOwnerDelete.Body.String())
+	}
+	if decodeJSONMap(t, agentOwnerDelete.Body.Bytes())["result"] != "deleted" {
+		t.Fatalf("expected agent owner delete response to report deleted")
+	}
+
+	orgOwnerDeleteHumanOwned := doJSONRequest(t, router, http.MethodDelete, "/v1/agents/"+bobOrgManagedAgentUUID+"/record", nil, humanHeaders("alice", "alice@a.test"))
+	if orgOwnerDeleteHumanOwned.Code != http.StatusOK {
+		t.Fatalf("expected org owner delete of human-owned org agent to succeed, got %d %s", orgOwnerDeleteHumanOwned.Code, orgOwnerDeleteHumanOwned.Body.String())
+	}
+
+	adminDeleteOrgOwned := doJSONRequest(t, router, http.MethodDelete, "/v1/agents/"+orgOwnedAgentUUID+"/record", nil, humanHeaders("charlie", "charlie@c.test"))
+	if adminDeleteOrgOwned.Code != http.StatusForbidden {
+		t.Fatalf("expected org admin delete of org-owned agent to be forbidden, got %d %s", adminDeleteOrgOwned.Code, adminDeleteOrgOwned.Body.String())
+	}
+
+	memberDeleteOrgOwned := doJSONRequest(t, router, http.MethodDelete, "/v1/agents/"+orgOwnedAgentUUID+"/record", nil, humanHeaders("bob", "bob@b.test"))
+	if memberDeleteOrgOwned.Code != http.StatusForbidden {
+		t.Fatalf("expected non-owner delete of org-owned agent to be forbidden, got %d %s", memberDeleteOrgOwned.Code, memberDeleteOrgOwned.Body.String())
+	}
+
+	orgOwnerDeleteOrgOwned := doJSONRequest(t, router, http.MethodDelete, "/v1/agents/"+orgOwnedAgentUUID+"/record", nil, humanHeaders("alice", "alice@a.test"))
+	if orgOwnerDeleteOrgOwned.Code != http.StatusOK {
+		t.Fatalf("expected org owner delete of org-owned agent to succeed, got %d %s", orgOwnerDeleteOrgOwned.Code, orgOwnerDeleteOrgOwned.Body.String())
+	}
+	if decodeJSONMap(t, orgOwnerDeleteOrgOwned.Body.Bytes())["result"] != "deleted" {
+		t.Fatalf("expected org-owned delete response to report deleted")
 	}
 
 	listResp := doJSONRequest(t, router, http.MethodGet, "/v1/me/agents", nil, humanHeaders("bob", "bob@b.test"))
@@ -1366,9 +1398,64 @@ func TestDeleteAgentRecordRequiresAgentOwnerOrOrgOwner(t *testing.T) {
 	rawAgents, _ := listPayload["agents"].([]any)
 	for _, raw := range rawAgents {
 		agent, _ := raw.(map[string]any)
-		if agent["agent_uuid"] == agentUUID {
-			t.Fatalf("expected deleted agent %q to be absent from bob list, got %v", agentUUID, agent)
+		if agent["agent_uuid"] == bobOwnedAgentUUID || agent["agent_uuid"] == bobOrgManagedAgentUUID || agent["agent_uuid"] == orgOwnedAgentUUID {
+			t.Fatalf("expected deleted agent to be absent from bob list, got %v", agent)
 		}
+	}
+
+	orgListResp := doJSONRequest(t, router, http.MethodGet, "/v1/orgs/"+orgID+"/agents", nil, humanHeaders("alice", "alice@a.test"))
+	if orgListResp.Code != http.StatusOK {
+		t.Fatalf("expected /v1/orgs/{org_id}/agents 200 after deletes, got %d %s", orgListResp.Code, orgListResp.Body.String())
+	}
+	orgListPayload := decodeJSONMap(t, orgListResp.Body.Bytes())
+	orgAgents, _ := orgListPayload["agents"].([]any)
+	for _, raw := range orgAgents {
+		agent, _ := raw.(map[string]any)
+		if agent["agent_uuid"] == bobOwnedAgentUUID || agent["agent_uuid"] == bobOrgManagedAgentUUID || agent["agent_uuid"] == orgOwnedAgentUUID {
+			t.Fatalf("expected deleted agent to be absent from org list, got %v", agent)
+		}
+	}
+}
+
+func TestDeleteAgentRecordInvalidatesDeletedAgentAccessAndPurgesQueuedMessages(t *testing.T) {
+	router := newTestRouter()
+	_, _, tokenA, tokenB, _, _, agentUUIDA, agentUUIDB := setupTrustedAgents(t, router)
+
+	queuedBeforeDelete := publish(t, router, tokenA, agentUUIDB, "queued-before-delete")
+	if queuedBeforeDelete.Code != http.StatusAccepted {
+		t.Fatalf("expected publish before delete to be accepted, got %d %s", queuedBeforeDelete.Code, queuedBeforeDelete.Body.String())
+	}
+
+	deleteResp := doJSONRequest(t, router, http.MethodDelete, "/v1/agents/"+agentUUIDA+"/record", nil, humanHeaders("alice", "alice@a.test"))
+	if deleteResp.Code != http.StatusOK {
+		t.Fatalf("expected delete record to succeed, got %d %s", deleteResp.Code, deleteResp.Body.String())
+	}
+
+	deletedAgentAuth := doJSONRequest(t, router, http.MethodGet, "/v1/agents/me", nil, map[string]string{
+		"Authorization": "Bearer " + tokenA,
+	})
+	if deletedAgentAuth.Code != http.StatusUnauthorized {
+		t.Fatalf("expected deleted agent token auth to fail with 401, got %d %s", deletedAgentAuth.Code, deletedAgentAuth.Body.String())
+	}
+
+	publishAfterDelete := publish(t, router, tokenA, agentUUIDB, "publish-after-delete")
+	if publishAfterDelete.Code != http.StatusUnauthorized {
+		t.Fatalf("expected deleted token publish to return 401, got %d %s", publishAfterDelete.Code, publishAfterDelete.Body.String())
+	}
+
+	pullAfterDelete := pull(t, router, tokenA, 0)
+	if pullAfterDelete.Code != http.StatusUnauthorized {
+		t.Fatalf("expected deleted token pull to return 401, got %d %s", pullAfterDelete.Code, pullAfterDelete.Body.String())
+	}
+
+	publishToDeleted := publish(t, router, tokenB, agentUUIDA, "to-deleted")
+	if publishToDeleted.Code != http.StatusNotFound {
+		t.Fatalf("expected publish to deleted receiver to return 404, got %d %s", publishToDeleted.Code, publishToDeleted.Body.String())
+	}
+
+	receiverPull := pull(t, router, tokenB, 0)
+	if receiverPull.Code != http.StatusNoContent {
+		t.Fatalf("expected deleted sender messages to be purged from receiver queue, got %d %s", receiverPull.Code, receiverPull.Body.String())
 	}
 }
 
