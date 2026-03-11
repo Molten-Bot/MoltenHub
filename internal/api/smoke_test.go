@@ -371,6 +371,52 @@ func TestLaunchSmoke(t *testing.T) {
 			t.Fatalf("expected second delete to return 404, got %d %s", deleteAgain.Code, deleteAgain.Body.String())
 		}
 	})
+
+	t.Run("Super-admin pairs two statocyst instances and agents exchange over canonical URIs", func(t *testing.T) {
+		alpha := newFederatedTestServer(t, "https://alpha.example")
+		beta := newFederatedTestServer(t, "https://beta.example")
+
+		orgA := createOrg(t, alpha.router, "alice", "alice@a.test", "Org Alpha")
+		aliceHumanID := currentHumanID(t, alpha.router, "alice", "alice@a.test")
+		tokenA, agentUUIDA := registerFederatedAgentWithUUID(t, alpha.router, "alice", "alice@a.test", orgA, "agent-a", aliceHumanID)
+		agentA := currentAgent(t, alpha.router, tokenA)
+		agentURIA := asString(t, agentA, "uri")
+
+		orgB := createOrg(t, beta.router, "bob", "bob@b.test", "Org Beta")
+		bobHumanID := currentHumanID(t, beta.router, "bob", "bob@b.test")
+		tokenB, agentUUIDB := registerFederatedAgentWithUUID(t, beta.router, "bob", "bob@b.test", orgB, "agent-b", bobHumanID)
+		agentB := currentAgent(t, beta.router, tokenB)
+		agentURIB := asString(t, agentB, "uri")
+
+		const peerID = "alpha-beta"
+		const secret = "peer-shared-secret"
+		createPeer(t, alpha.router, peerID, beta.canonicalBase, beta.server.URL, secret)
+		createPeer(t, beta.router, peerID, alpha.canonicalBase, alpha.server.URL, secret)
+		createRemoteOrgTrustAdmin(t, alpha.router, orgA, peerID, "org-beta")
+		createRemoteOrgTrustAdmin(t, beta.router, orgB, peerID, "org-alpha")
+		createRemoteAgentTrustAdmin(t, alpha.router, agentUUIDA, peerID, agentURIB)
+		createRemoteAgentTrustAdmin(t, beta.router, agentUUIDB, peerID, agentURIA)
+
+		pubResp := publishByURI(t, alpha.router, tokenA, agentURIB, "smoke-federation")
+		if pubResp.Code != http.StatusAccepted {
+			t.Fatalf("expected federated publish 202, got %d %s", pubResp.Code, pubResp.Body.String())
+		}
+
+		pullResp := pull(t, beta.router, tokenB, 10)
+		if pullResp.Code != http.StatusOK {
+			t.Fatalf("expected federated pull 200, got %d %s", pullResp.Code, pullResp.Body.String())
+		}
+		message := decodeJSONMap(t, pullResp.Body.Bytes())["message"].(map[string]any)
+		if got := asString(t, message, "from_agent_uri"); got != agentURIA {
+			t.Fatalf("expected from_agent_uri %q, got %q", agentURIA, got)
+		}
+		if got := asString(t, message, "to_agent_uri"); got != agentURIB {
+			t.Fatalf("expected to_agent_uri %q, got %q", agentURIB, got)
+		}
+		if got := asString(t, message, "payload"); got != "smoke-federation" {
+			t.Fatalf("expected payload smoke-federation, got %q", got)
+		}
+	})
 }
 
 func setHumanHandle(t *testing.T, router http.Handler, humanID, email, handle string) *httptest.ResponseRecorder {

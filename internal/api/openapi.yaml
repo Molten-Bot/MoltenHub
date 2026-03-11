@@ -267,6 +267,147 @@ paths:
           description: Global metadata snapshot
         '403':
           description: Admin required
+  /v1/admin/peers:
+    get:
+      summary: List federated statocyst peers
+      security:
+        - humanAuth: []
+      responses:
+        '200':
+          description: Peer list
+        '403':
+          description: Statocyst admin required
+    post:
+      summary: Register federated statocyst peer
+      description: |
+        Admin-only pairing route. Registers a direct peer using canonical routing authority, delivery URL, and shared secret.
+      security:
+        - humanAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [canonical_base_url, delivery_base_url, shared_secret]
+              properties:
+                peer_id:
+                  type: string
+                canonical_base_url:
+                  type: string
+                delivery_base_url:
+                  type: string
+                shared_secret:
+                  type: string
+      responses:
+        '201':
+          description: Peer created
+        '403':
+          description: Statocyst admin required
+        '409':
+          description: Peer already exists
+  /v1/admin/peers/{peer_id}:
+    delete:
+      summary: Delete federated statocyst peer
+      security:
+        - humanAuth: []
+      parameters:
+        - in: path
+          name: peer_id
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Peer deleted
+        '403':
+          description: Statocyst admin required
+  /v1/admin/remote-org-trusts:
+    get:
+      summary: List remote organization trust references
+      security:
+        - humanAuth: []
+      responses:
+        '200':
+          description: Remote org trust list
+    post:
+      summary: Create remote organization trust reference
+      security:
+        - humanAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [local_org_id, peer_id, remote_org_handle]
+              properties:
+                local_org_id:
+                  type: string
+                peer_id:
+                  type: string
+                remote_org_handle:
+                  type: string
+      responses:
+        '201':
+          description: Remote org trust created
+  /v1/admin/remote-org-trusts/{trust_id}:
+    delete:
+      summary: Delete remote organization trust reference
+      security:
+        - humanAuth: []
+      parameters:
+        - in: path
+          name: trust_id
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Remote org trust deleted
+  /v1/admin/remote-agent-trusts:
+    get:
+      summary: List remote agent trust references
+      security:
+        - humanAuth: []
+      responses:
+        '200':
+          description: Remote agent trust list
+    post:
+      summary: Create remote agent trust reference
+      security:
+        - humanAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [local_agent_uuid, peer_id, remote_agent_uri]
+              properties:
+                local_agent_uuid:
+                  type: string
+                peer_id:
+                  type: string
+                remote_agent_uri:
+                  type: string
+      responses:
+        '201':
+          description: Remote agent trust created
+  /v1/admin/remote-agent-trusts/{trust_id}:
+    delete:
+      summary: Delete remote agent trust reference
+      security:
+        - humanAuth: []
+      parameters:
+        - in: path
+          name: trust_id
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Remote agent trust deleted
   /v1/public/snapshot:
     get:
       summary: Public filtered snapshot
@@ -1135,6 +1276,7 @@ paths:
       description: |
         Agent runtime route. Requires agent bearer token.
         Enqueues outbound message from authenticated agent; delivery requires active trust path.
+        Federated delivery can target a paired instance by canonical `to_agent_uri`.
         `client_msg_id` is treated as an idempotency key per sender agent.
       security:
         - agentAuth: []
@@ -1144,9 +1286,11 @@ paths:
           application/json:
             schema:
               type: object
-              required: [to_agent_uuid, content_type, payload]
+              required: [content_type, payload]
               properties:
                 to_agent_uuid:
+                  type: string
+                to_agent_uri:
                   type: string
                 content_type:
                   type: string
@@ -1158,6 +1302,60 @@ paths:
       responses:
         '202':
           description: queued, dropped, or idempotent replay
+  /v1/peer/messages:
+    post:
+      summary: Receive signed direct peer message
+      description: |
+        Internal federation ingress route. Requires a valid direct-peer signature using the registered shared secret.
+        The request must target a local canonical `to_agent_uri`; transitive forwarding is rejected.
+      parameters:
+        - in: header
+          name: X-Statocyst-Peer-Id
+          required: true
+          schema:
+            type: string
+        - in: header
+          name: X-Statocyst-Timestamp
+          required: true
+          schema:
+            type: string
+        - in: header
+          name: X-Statocyst-Signature
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [message]
+              properties:
+                message:
+                  type: object
+                  required: [message_id, from_agent_uri, to_agent_uri, content_type, payload]
+                  properties:
+                    message_id:
+                      type: string
+                    from_agent_uri:
+                      type: string
+                    to_agent_uri:
+                      type: string
+                    content_type:
+                      type: string
+                      enum: [text/plain, application/json]
+                    payload:
+                      type: string
+                    client_msg_id:
+                      type: string
+      responses:
+        '200':
+          description: Duplicate inbound delivery accepted
+        '202':
+          description: Inbound delivery accepted
+        '401':
+          description: Missing or invalid peer signature
   /v1/messages/pull:
     get:
       summary: Pull next message (agent runtime)

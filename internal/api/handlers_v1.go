@@ -110,13 +110,14 @@ type createOrgAccessKeyRequest struct {
 }
 
 type agentControlPlaneView struct {
-	APIBase      string
-	AgentUUID    string
-	AgentID      string
-	OrgID        string
-	OwnerHumanID string
-	CanTalkTo    []string
-	Capabilities []string
+	APIBase       string
+	AgentUUID     string
+	AgentID       string
+	OrgID         string
+	OwnerHumanID  string
+	CanTalkTo     []string
+	CanTalkToURIs []string
+	Capabilities  []string
 }
 
 var (
@@ -953,18 +954,35 @@ func (h *Handler) buildAgentControlPlane(r *http.Request, agent model.Agent) (ag
 	if err != nil {
 		return agentControlPlaneView{}, err
 	}
+	talkableURIs := make([]string, 0, len(peers))
+	for _, peerUUID := range peers {
+		peerAgent, err := h.control.GetAgentByUUID(peerUUID)
+		if err != nil {
+			return agentControlPlaneView{}, err
+		}
+		talkableURIs = append(talkableURIs, h.agentURI(peerAgent))
+	}
+	remoteTrusts, err := h.control.ListRemoteAgentTrustsForLocalAgent(agent.AgentUUID)
+	if err != nil {
+		return agentControlPlaneView{}, err
+	}
+	for _, trust := range remoteTrusts {
+		talkableURIs = append(talkableURIs, trust.RemoteAgentURI)
+	}
+	sort.Strings(talkableURIs)
 	ownerHumanID := ""
 	if agent.OwnerHumanID != nil {
 		ownerHumanID = *agent.OwnerHumanID
 	}
 	return agentControlPlaneView{
-		APIBase:      h.apiBaseURL(r),
-		AgentUUID:    agent.AgentUUID,
-		AgentID:      agent.AgentID,
-		OrgID:        agent.OrgID,
-		OwnerHumanID: ownerHumanID,
-		CanTalkTo:    peers,
-		Capabilities: []string{"publish_messages", "pull_messages", "read_capabilities", "read_skill", "update_profile"},
+		APIBase:       h.apiBaseURL(r),
+		AgentUUID:     agent.AgentUUID,
+		AgentID:       agent.AgentID,
+		OrgID:         agent.OrgID,
+		OwnerHumanID:  ownerHumanID,
+		CanTalkTo:     peers,
+		CanTalkToURIs: talkableURIs,
+		Capabilities:  []string{"publish_messages", "pull_messages", "read_capabilities", "read_skill", "update_profile"},
 	}, nil
 }
 
@@ -980,14 +998,15 @@ func (h *Handler) agentControlPlanePayload(cp agentControlPlaneView) map[string]
 		}
 	}
 	return map[string]any{
-		"api_base":        cp.APIBase,
-		"agent_uuid":      cp.AgentUUID,
-		"agent_id":        cp.AgentID,
-		"org_id":          cp.OrgID,
-		"owner":           owner,
-		"can_talk_to":     cp.CanTalkTo,
-		"capabilities":    cp.Capabilities,
-		"can_communicate": len(cp.CanTalkTo) > 0,
+		"api_base":         cp.APIBase,
+		"agent_uuid":       cp.AgentUUID,
+		"agent_id":         cp.AgentID,
+		"org_id":           cp.OrgID,
+		"owner":            owner,
+		"can_talk_to":      cp.CanTalkTo,
+		"can_talk_to_uris": cp.CanTalkToURIs,
+		"capabilities":     cp.Capabilities,
+		"can_communicate":  len(cp.CanTalkToURIs) > 0,
 		"endpoints": map[string]string{
 			"publish":      cp.APIBase + "/messages/publish",
 			"pull":         cp.APIBase + "/messages/pull",

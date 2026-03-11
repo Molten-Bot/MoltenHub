@@ -16,39 +16,43 @@ import (
 )
 
 var (
-	ErrInvalidToken         = errors.New("invalid token")
-	ErrOrgNotFound          = errors.New("organization not found")
-	ErrOrgNameTaken         = errors.New("organization name already exists")
-	ErrOrgHandleTaken       = errors.New("organization handle already exists")
-	ErrHumanNotFound        = errors.New("human not found")
-	ErrHumanHandleTaken     = errors.New("human handle already exists")
-	ErrInvalidHandle        = errors.New("invalid handle")
-	ErrMembershipNotFound   = errors.New("membership not found")
-	ErrInviteNotFound       = errors.New("invite not found")
-	ErrInviteInvalid        = errors.New("invite invalid")
-	ErrInviteExists         = errors.New("invite already exists")
-	ErrOrgAccessKeyNotFound = errors.New("org access key not found")
-	ErrOrgAccessKeyInvalid  = errors.New("org access key invalid")
-	ErrOrgAccessScopeDenied = errors.New("org access scope denied")
-	ErrCannotRevokeOwner    = errors.New("cannot revoke owner membership")
-	ErrAgentExists          = errors.New("agent already exists")
-	ErrAgentNotFound        = errors.New("agent not found")
-	ErrAgentAmbiguous       = errors.New("agent reference is ambiguous")
-	ErrAgentHandleLocked    = errors.New("agent handle is already finalized")
-	ErrAgentRevoked         = errors.New("agent revoked")
-	ErrTrustNotFound        = errors.New("trust edge not found")
-	ErrUnauthorizedRole     = errors.New("unauthorized role")
-	ErrInvalidRole          = errors.New("invalid role")
-	ErrInvalidEdgeType      = errors.New("invalid edge type")
-	ErrSelfTrust            = errors.New("self trust not allowed")
-	ErrNoTrustPath          = errors.New("no trust path")
-	ErrBindNotFound         = errors.New("bind token not found")
-	ErrBindExpired          = errors.New("bind token expired")
-	ErrBindUsed             = errors.New("bind token already used")
-	ErrAgentLimitExceeded   = errors.New("agent limit exceeded")
-	ErrMessageNotFound      = errors.New("message not found")
-	ErrMessageDeliveryNotFound = errors.New("message delivery not found")
-	ErrMessageDeliveryMismatch = errors.New("message delivery does not belong to agent")
+	ErrInvalidToken             = errors.New("invalid token")
+	ErrOrgNotFound              = errors.New("organization not found")
+	ErrOrgNameTaken             = errors.New("organization name already exists")
+	ErrOrgHandleTaken           = errors.New("organization handle already exists")
+	ErrHumanNotFound            = errors.New("human not found")
+	ErrHumanHandleTaken         = errors.New("human handle already exists")
+	ErrInvalidHandle            = errors.New("invalid handle")
+	ErrMembershipNotFound       = errors.New("membership not found")
+	ErrInviteNotFound           = errors.New("invite not found")
+	ErrInviteInvalid            = errors.New("invite invalid")
+	ErrInviteExists             = errors.New("invite already exists")
+	ErrOrgAccessKeyNotFound     = errors.New("org access key not found")
+	ErrOrgAccessKeyInvalid      = errors.New("org access key invalid")
+	ErrOrgAccessScopeDenied     = errors.New("org access scope denied")
+	ErrCannotRevokeOwner        = errors.New("cannot revoke owner membership")
+	ErrAgentExists              = errors.New("agent already exists")
+	ErrAgentNotFound            = errors.New("agent not found")
+	ErrAgentAmbiguous           = errors.New("agent reference is ambiguous")
+	ErrAgentHandleLocked        = errors.New("agent handle is already finalized")
+	ErrAgentRevoked             = errors.New("agent revoked")
+	ErrTrustNotFound            = errors.New("trust edge not found")
+	ErrUnauthorizedRole         = errors.New("unauthorized role")
+	ErrInvalidRole              = errors.New("invalid role")
+	ErrInvalidEdgeType          = errors.New("invalid edge type")
+	ErrSelfTrust                = errors.New("self trust not allowed")
+	ErrNoTrustPath              = errors.New("no trust path")
+	ErrBindNotFound             = errors.New("bind token not found")
+	ErrBindExpired              = errors.New("bind token expired")
+	ErrBindUsed                 = errors.New("bind token already used")
+	ErrAgentLimitExceeded       = errors.New("agent limit exceeded")
+	ErrMessageNotFound          = errors.New("message not found")
+	ErrMessageDeliveryNotFound  = errors.New("message delivery not found")
+	ErrMessageDeliveryMismatch  = errors.New("message delivery does not belong to agent")
+	ErrPeerInstanceNotFound     = errors.New("peer instance not found")
+	ErrPeerInstanceExists       = errors.New("peer instance already exists")
+	ErrRemoteOrgTrustNotFound   = errors.New("remote org trust not found")
+	ErrRemoteAgentTrustNotFound = errors.New("remote agent trust not found")
 )
 
 type MemoryStore struct {
@@ -91,6 +95,15 @@ type MemoryStore struct {
 	agentTrusts      map[string]model.TrustEdge
 	agentTrustByPair map[string]string
 
+	peerInstances         map[string]model.PeerInstance
+	peerByCanonicalBase   map[string]string
+	remoteOrgTrusts       map[string]model.RemoteOrgTrust
+	remoteOrgTrustByKey   map[string]string
+	remoteAgentTrusts     map[string]model.RemoteAgentTrust
+	remoteAgentTrustByKey map[string]string
+	peerOutbounds         map[string]model.PeerOutboundMessage
+	peerOutboundByPeer    map[string][]string
+
 	auditByOrg map[string][]model.AuditEvent
 	statsByOrg map[string]model.OrgStats
 	statsDaily map[string]map[string]model.OrgDailyStats
@@ -128,6 +141,14 @@ func NewMemoryStore() *MemoryStore {
 		orgTrustByPair:         make(map[string]string),
 		agentTrusts:            make(map[string]model.TrustEdge),
 		agentTrustByPair:       make(map[string]string),
+		peerInstances:          make(map[string]model.PeerInstance),
+		peerByCanonicalBase:    make(map[string]string),
+		remoteOrgTrusts:        make(map[string]model.RemoteOrgTrust),
+		remoteOrgTrustByKey:    make(map[string]string),
+		remoteAgentTrusts:      make(map[string]model.RemoteAgentTrust),
+		remoteAgentTrustByKey:  make(map[string]string),
+		peerOutbounds:          make(map[string]model.PeerOutboundMessage),
+		peerOutboundByPeer:     make(map[string][]string),
 		auditByOrg:             make(map[string][]model.AuditEvent),
 		statsByOrg:             make(map[string]model.OrgStats),
 		statsDaily:             make(map[string]map[string]model.OrgDailyStats),
@@ -1536,6 +1557,17 @@ func (s *MemoryStore) ResolveAgentUUID(agentRef string) (string, error) {
 	return s.resolveAgentRefLocked(agentRef)
 }
 
+func (s *MemoryStore) ResolveAgentUUIDByURI(agentURI string) (string, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	ref := agentRefFromURI(agentURI)
+	if ref == "" {
+		return "", ErrAgentNotFound
+	}
+	return s.resolveAgentRefLocked(ref)
+}
+
 func (s *MemoryStore) CountActiveHumanOwnedAgents(humanID string) int {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -1591,6 +1623,323 @@ func (s *MemoryStore) ListTalkablePeers(agentUUID string) ([]string, error) {
 	}
 	sort.Strings(out)
 	return out, nil
+}
+
+func (s *MemoryStore) ListRemoteAgentTrustsForLocalAgent(agentUUID string) ([]model.RemoteAgentTrust, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	if agent, ok := s.agents[agentUUID]; !ok || agent.Status == model.StatusRevoked {
+		return nil, ErrAgentNotFound
+	}
+	out := make([]model.RemoteAgentTrust, 0)
+	for _, trust := range s.remoteAgentTrusts {
+		if trust.LocalAgentUUID != agentUUID || trust.Status != model.StatusActive {
+			continue
+		}
+		out = append(out, trust)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].RemoteAgentURI == out[j].RemoteAgentURI {
+			return out[i].TrustID < out[j].TrustID
+		}
+		return out[i].RemoteAgentURI < out[j].RemoteAgentURI
+	})
+	return out, nil
+}
+
+func (s *MemoryStore) CreatePeerInstance(canonicalBaseURL, deliveryBaseURL, sharedSecret, actorHumanID, peerID string, now time.Time) (model.PeerInstance, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if strings.TrimSpace(canonicalBaseURL) == "" || strings.TrimSpace(deliveryBaseURL) == "" || strings.TrimSpace(sharedSecret) == "" {
+		return model.PeerInstance{}, ErrInvalidToken
+	}
+	if _, exists := s.peerInstances[strings.TrimSpace(peerID)]; exists {
+		return model.PeerInstance{}, ErrPeerInstanceExists
+	}
+	baseKey := normalizeBaseURL(canonicalBaseURL)
+	if existingID, ok := s.peerByCanonicalBase[baseKey]; ok {
+		existing := s.peerInstances[existingID]
+		if existing.Status == model.StatusActive {
+			return model.PeerInstance{}, ErrPeerInstanceExists
+		}
+	}
+	peer := model.PeerInstance{
+		PeerID:           peerID,
+		CanonicalBaseURL: baseKey,
+		DeliveryBaseURL:  normalizeBaseURL(deliveryBaseURL),
+		SharedSecret:     strings.TrimSpace(sharedSecret),
+		Status:           model.StatusActive,
+		CreatedBy:        actorHumanID,
+		CreatedAt:        now,
+		UpdatedAt:        now,
+	}
+	s.peerInstances[peer.PeerID] = peer
+	s.peerByCanonicalBase[baseKey] = peer.PeerID
+	return peer, nil
+}
+
+func (s *MemoryStore) ListPeerInstances() []model.PeerInstance {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	out := make([]model.PeerInstance, 0, len(s.peerInstances))
+	for _, peer := range s.peerInstances {
+		out = append(out, peer)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].CanonicalBaseURL == out[j].CanonicalBaseURL {
+			return out[i].PeerID < out[j].PeerID
+		}
+		return out[i].CanonicalBaseURL < out[j].CanonicalBaseURL
+	})
+	return out
+}
+
+func (s *MemoryStore) GetPeerInstance(peerID string) (model.PeerInstance, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	peer, ok := s.peerInstances[strings.TrimSpace(peerID)]
+	if !ok {
+		return model.PeerInstance{}, ErrPeerInstanceNotFound
+	}
+	return peer, nil
+}
+
+func (s *MemoryStore) ResolvePeerByCanonicalBase(canonicalBaseURL string) (model.PeerInstance, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	peerID, ok := s.peerByCanonicalBase[normalizeBaseURL(canonicalBaseURL)]
+	if !ok {
+		return model.PeerInstance{}, ErrPeerInstanceNotFound
+	}
+	peer, ok := s.peerInstances[peerID]
+	if !ok {
+		return model.PeerInstance{}, ErrPeerInstanceNotFound
+	}
+	return peer, nil
+}
+
+func (s *MemoryStore) DeletePeerInstance(peerID, actorHumanID string, now time.Time) (model.PeerInstance, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	peer, ok := s.peerInstances[strings.TrimSpace(peerID)]
+	if !ok {
+		return model.PeerInstance{}, ErrPeerInstanceNotFound
+	}
+	delete(s.peerInstances, peer.PeerID)
+	delete(s.peerByCanonicalBase, peer.CanonicalBaseURL)
+	delete(s.peerOutboundByPeer, peer.PeerID)
+	for outboundID, outbound := range s.peerOutbounds {
+		if outbound.PeerID == peer.PeerID {
+			delete(s.peerOutbounds, outboundID)
+		}
+	}
+	for trustID, trust := range s.remoteOrgTrusts {
+		if trust.PeerID == peer.PeerID {
+			delete(s.remoteOrgTrusts, trustID)
+			delete(s.remoteOrgTrustByKey, remoteOrgTrustKey(trust.LocalOrgID, trust.PeerID, trust.RemoteOrgHandle))
+		}
+	}
+	for trustID, trust := range s.remoteAgentTrusts {
+		if trust.PeerID == peer.PeerID {
+			delete(s.remoteAgentTrusts, trustID)
+			delete(s.remoteAgentTrustByKey, remoteAgentTrustKey(trust.LocalAgentUUID, trust.PeerID, trust.RemoteAgentURI))
+		}
+	}
+	peer.Status = model.StatusRevoked
+	peer.UpdatedAt = now
+	_ = actorHumanID
+	return peer, nil
+}
+
+func (s *MemoryStore) RecordPeerDeliverySuccess(peerID string, now time.Time) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	peer, ok := s.peerInstances[strings.TrimSpace(peerID)]
+	if !ok {
+		return
+	}
+	peer.LastSuccessfulAt = timePtr(now)
+	peer.LastFailureAt = nil
+	peer.LastFailureReason = ""
+	peer.UpdatedAt = now
+	s.peerInstances[peer.PeerID] = peer
+}
+
+func (s *MemoryStore) RecordPeerDeliveryFailure(peerID, reason string, now time.Time) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	peer, ok := s.peerInstances[strings.TrimSpace(peerID)]
+	if !ok {
+		return
+	}
+	peer.LastFailureAt = timePtr(now)
+	peer.LastFailureReason = strings.TrimSpace(reason)
+	peer.UpdatedAt = now
+	s.peerInstances[peer.PeerID] = peer
+}
+
+func (s *MemoryStore) CreateRemoteOrgTrust(localOrgID, peerID, remoteOrgHandle, actorHumanID, trustID string, now time.Time) (model.RemoteOrgTrust, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if _, ok := s.orgs[localOrgID]; !ok {
+		return model.RemoteOrgTrust{}, ErrOrgNotFound
+	}
+	if _, ok := s.peerInstances[peerID]; !ok {
+		return model.RemoteOrgTrust{}, ErrPeerInstanceNotFound
+	}
+	key := remoteOrgTrustKey(localOrgID, peerID, remoteOrgHandle)
+	if existingID, ok := s.remoteOrgTrustByKey[key]; ok {
+		existing := s.remoteOrgTrusts[existingID]
+		existing.Status = model.StatusActive
+		existing.UpdatedAt = now
+		s.remoteOrgTrusts[existingID] = existing
+		return existing, nil
+	}
+	trust := model.RemoteOrgTrust{
+		TrustID:         trustID,
+		LocalOrgID:      localOrgID,
+		PeerID:          peerID,
+		RemoteOrgHandle: handles.Normalize(remoteOrgHandle),
+		Status:          model.StatusActive,
+		CreatedBy:       actorHumanID,
+		CreatedAt:       now,
+		UpdatedAt:       now,
+	}
+	s.remoteOrgTrusts[trust.TrustID] = trust
+	s.remoteOrgTrustByKey[key] = trust.TrustID
+	return trust, nil
+}
+
+func (s *MemoryStore) ListRemoteOrgTrusts() []model.RemoteOrgTrust {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	out := make([]model.RemoteOrgTrust, 0, len(s.remoteOrgTrusts))
+	for _, trust := range s.remoteOrgTrusts {
+		out = append(out, trust)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].LocalOrgID == out[j].LocalOrgID {
+			return out[i].RemoteOrgHandle < out[j].RemoteOrgHandle
+		}
+		return out[i].LocalOrgID < out[j].LocalOrgID
+	})
+	return out
+}
+
+func (s *MemoryStore) DeleteRemoteOrgTrust(trustID, actorHumanID string, now time.Time) (model.RemoteOrgTrust, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	trust, ok := s.remoteOrgTrusts[strings.TrimSpace(trustID)]
+	if !ok {
+		return model.RemoteOrgTrust{}, ErrRemoteOrgTrustNotFound
+	}
+	delete(s.remoteOrgTrusts, trust.TrustID)
+	delete(s.remoteOrgTrustByKey, remoteOrgTrustKey(trust.LocalOrgID, trust.PeerID, trust.RemoteOrgHandle))
+	trust.Status = model.StatusRevoked
+	trust.UpdatedAt = now
+	_ = actorHumanID
+	return trust, nil
+}
+
+func (s *MemoryStore) HasActiveRemoteOrgTrust(localOrgID, peerID, remoteOrgHandle string) bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	trustID, ok := s.remoteOrgTrustByKey[remoteOrgTrustKey(localOrgID, peerID, remoteOrgHandle)]
+	if !ok {
+		return false
+	}
+	trust, ok := s.remoteOrgTrusts[trustID]
+	return ok && trust.Status == model.StatusActive
+}
+
+func (s *MemoryStore) CreateRemoteAgentTrust(localAgentUUID, peerID, remoteAgentURI, actorHumanID, trustID string, now time.Time) (model.RemoteAgentTrust, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if agent, ok := s.agents[localAgentUUID]; !ok || agent.Status == model.StatusRevoked {
+		return model.RemoteAgentTrust{}, ErrAgentNotFound
+	}
+	if _, ok := s.peerInstances[peerID]; !ok {
+		return model.RemoteAgentTrust{}, ErrPeerInstanceNotFound
+	}
+	key := remoteAgentTrustKey(localAgentUUID, peerID, remoteAgentURI)
+	if existingID, ok := s.remoteAgentTrustByKey[key]; ok {
+		existing := s.remoteAgentTrusts[existingID]
+		existing.Status = model.StatusActive
+		existing.UpdatedAt = now
+		s.remoteAgentTrusts[existingID] = existing
+		return existing, nil
+	}
+	trust := model.RemoteAgentTrust{
+		TrustID:        trustID,
+		LocalAgentUUID: localAgentUUID,
+		PeerID:         peerID,
+		RemoteAgentURI: strings.TrimSpace(remoteAgentURI),
+		Status:         model.StatusActive,
+		CreatedBy:      actorHumanID,
+		CreatedAt:      now,
+		UpdatedAt:      now,
+	}
+	s.remoteAgentTrusts[trust.TrustID] = trust
+	s.remoteAgentTrustByKey[key] = trust.TrustID
+	return trust, nil
+}
+
+func (s *MemoryStore) ListRemoteAgentTrusts() []model.RemoteAgentTrust {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	out := make([]model.RemoteAgentTrust, 0, len(s.remoteAgentTrusts))
+	for _, trust := range s.remoteAgentTrusts {
+		out = append(out, trust)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].LocalAgentUUID == out[j].LocalAgentUUID {
+			return out[i].RemoteAgentURI < out[j].RemoteAgentURI
+		}
+		return out[i].LocalAgentUUID < out[j].LocalAgentUUID
+	})
+	return out
+}
+
+func (s *MemoryStore) DeleteRemoteAgentTrust(trustID, actorHumanID string, now time.Time) (model.RemoteAgentTrust, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	trust, ok := s.remoteAgentTrusts[strings.TrimSpace(trustID)]
+	if !ok {
+		return model.RemoteAgentTrust{}, ErrRemoteAgentTrustNotFound
+	}
+	delete(s.remoteAgentTrusts, trust.TrustID)
+	delete(s.remoteAgentTrustByKey, remoteAgentTrustKey(trust.LocalAgentUUID, trust.PeerID, trust.RemoteAgentURI))
+	trust.Status = model.StatusRevoked
+	trust.UpdatedAt = now
+	_ = actorHumanID
+	return trust, nil
+}
+
+func (s *MemoryStore) HasActiveRemoteAgentTrust(localAgentUUID, peerID, remoteAgentURI string) bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	trustID, ok := s.remoteAgentTrustByKey[remoteAgentTrustKey(localAgentUUID, peerID, remoteAgentURI)]
+	if !ok {
+		return false
+	}
+	trust, ok := s.remoteAgentTrusts[trustID]
+	return ok && trust.Status == model.StatusActive
 }
 
 func (s *MemoryStore) CreateOrJoinOrgTrust(orgID, peerOrgID, actorHumanID, edgeID string, now time.Time, isSuperAdmin bool) (model.TrustEdge, bool, error) {
@@ -1869,6 +2218,12 @@ func (s *MemoryStore) CreateOrGetMessageRecord(message model.Message, acceptedAt
 	if strings.TrimSpace(message.MessageID) == "" {
 		return model.MessageRecord{}, false, ErrMessageNotFound
 	}
+	if existing, ok := s.messageRecords[message.MessageID]; ok {
+		existing.IdempotentReplays++
+		existing.UpdatedAt = acceptedAt
+		s.messageRecords[message.MessageID] = existing
+		return existing, true, nil
+	}
 	if message.ClientMsgID != nil {
 		if existingID, ok := s.messageByClientMsg[messageClientKey(message.FromAgentUUID, *message.ClientMsgID)]; ok {
 			record, ok := s.messageRecords[existingID]
@@ -1895,6 +2250,22 @@ func (s *MemoryStore) CreateOrGetMessageRecord(message model.Message, acceptedAt
 		s.messageByClientMsg[messageClientKey(message.FromAgentUUID, *message.ClientMsgID)] = message.MessageID
 	}
 	return record, false, nil
+}
+
+func (s *MemoryStore) MarkMessageForwarded(messageID string, forwardedAt time.Time) (model.MessageRecord, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	record, ok := s.messageRecords[strings.TrimSpace(messageID)]
+	if !ok {
+		return model.MessageRecord{}, ErrMessageNotFound
+	}
+	record.Status = model.MessageForwarded
+	record.UpdatedAt = forwardedAt
+	record.LastFailureAt = nil
+	record.LastFailureReason = ""
+	s.messageRecords[record.Message.MessageID] = record
+	return record, nil
 }
 
 func (s *MemoryStore) AbortMessageRecord(messageID string) error {
@@ -2070,6 +2441,108 @@ func (s *MemoryStore) GetQueueMetrics() model.QueueMetrics {
 		}
 	}
 	return metrics
+}
+
+func (s *MemoryStore) EnqueuePeerOutbound(peerID, outboundID string, message model.Message, now time.Time) (model.PeerOutboundMessage, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if _, ok := s.peerInstances[peerID]; !ok {
+		return model.PeerOutboundMessage{}, ErrPeerInstanceNotFound
+	}
+	outbound := model.PeerOutboundMessage{
+		OutboundID:    outboundID,
+		PeerID:        peerID,
+		MessageID:     message.MessageID,
+		Message:       message,
+		Status:        model.StatusPending,
+		CreatedAt:     now,
+		UpdatedAt:     now,
+		NextAttemptAt: now,
+	}
+	s.peerOutbounds[outbound.OutboundID] = outbound
+	s.peerOutboundByPeer[peerID] = append(s.peerOutboundByPeer[peerID], outbound.OutboundID)
+	return outbound, nil
+}
+
+func (s *MemoryStore) ListDuePeerOutbounds(now time.Time, limit int) []model.PeerOutboundMessage {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	if limit <= 0 {
+		limit = 32
+	}
+	out := make([]model.PeerOutboundMessage, 0, limit)
+	for _, outbound := range s.peerOutbounds {
+		if outbound.Status != model.StatusPending {
+			continue
+		}
+		if outbound.NextAttemptAt.After(now) {
+			continue
+		}
+		out = append(out, outbound)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].PeerID == out[j].PeerID {
+			if out[i].NextAttemptAt.Equal(out[j].NextAttemptAt) {
+				return out[i].OutboundID < out[j].OutboundID
+			}
+			return out[i].NextAttemptAt.Before(out[j].NextAttemptAt)
+		}
+		return out[i].PeerID < out[j].PeerID
+	})
+	if len(out) > limit {
+		out = out[:limit]
+	}
+	return out
+}
+
+func (s *MemoryStore) MarkPeerOutboundRetry(outboundID, reason string, nextAttemptAt, now time.Time) (model.PeerOutboundMessage, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	outbound, ok := s.peerOutbounds[strings.TrimSpace(outboundID)]
+	if !ok {
+		return model.PeerOutboundMessage{}, ErrMessageNotFound
+	}
+	outbound.AttemptCount++
+	outbound.LastAttemptAt = timePtr(now)
+	outbound.LastError = strings.TrimSpace(reason)
+	outbound.NextAttemptAt = nextAttemptAt
+	outbound.UpdatedAt = now
+	s.peerOutbounds[outbound.OutboundID] = outbound
+	return outbound, nil
+}
+
+func (s *MemoryStore) MarkPeerOutboundDelivered(outboundID string, now time.Time) (model.PeerOutboundMessage, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	outbound, ok := s.peerOutbounds[strings.TrimSpace(outboundID)]
+	if !ok {
+		return model.PeerOutboundMessage{}, ErrMessageNotFound
+	}
+	outbound.AttemptCount++
+	outbound.LastAttemptAt = timePtr(now)
+	outbound.LastDeliveredAt = timePtr(now)
+	outbound.Status = model.StatusActive
+	outbound.UpdatedAt = now
+	s.peerOutbounds[outbound.OutboundID] = outbound
+
+	queue := s.peerOutboundByPeer[outbound.PeerID]
+	filtered := queue[:0]
+	for _, id := range queue {
+		if id != outbound.OutboundID {
+			filtered = append(filtered, id)
+		}
+	}
+	if len(filtered) == 0 {
+		delete(s.peerOutboundByPeer, outbound.PeerID)
+	} else {
+		s.peerOutboundByPeer[outbound.PeerID] = filtered
+	}
+	delete(s.peerOutbounds, outbound.OutboundID)
+	return outbound, nil
 }
 
 func (s *MemoryStore) RecordMessageQueued(orgID string) {
@@ -2717,4 +3190,28 @@ func canonicalPair(a, b string) (string, string) {
 func pairKey(a, b string) string {
 	left, right := canonicalPair(a, b)
 	return left + "\x00" + right
+}
+
+func normalizeBaseURL(raw string) string {
+	raw = strings.TrimSpace(raw)
+	raw = strings.TrimRight(raw, "/")
+	return strings.ToLower(raw)
+}
+
+func remoteOrgTrustKey(localOrgID, peerID, remoteOrgHandle string) string {
+	return strings.TrimSpace(localOrgID) + "\x00" + strings.TrimSpace(peerID) + "\x00" + handles.Normalize(remoteOrgHandle)
+}
+
+func remoteAgentTrustKey(localAgentUUID, peerID, remoteAgentURI string) string {
+	return strings.TrimSpace(localAgentUUID) + "\x00" + strings.TrimSpace(peerID) + "\x00" + strings.TrimSpace(remoteAgentURI)
+}
+
+func agentRefFromURI(agentURI string) string {
+	const marker = "/hive/a/"
+	agentURI = strings.TrimSpace(agentURI)
+	index := strings.Index(agentURI, marker)
+	if index < 0 {
+		return ""
+	}
+	return strings.Trim(strings.TrimSpace(agentURI[index+len(marker):]), "/")
 }

@@ -47,6 +47,7 @@ type Handler struct {
 	storageHealthMu   sync.RWMutex
 	storageHealth     store.StorageHealthStatus
 	queueRuntimeError string
+	peerHTTPClient    *http.Client
 }
 
 type humanActor struct {
@@ -93,6 +94,7 @@ func NewHandler(
 		bindTokenTTL:      bindTokenTTL,
 		headlessMode:      headlessMode,
 		storageHealth:     store.DefaultStorageHealthStatus(),
+		peerHTTPClient:    &http.Client{Timeout: 5 * time.Second},
 	}
 }
 
@@ -112,6 +114,12 @@ func NewRouterWithOptions(handler *Handler, opts RouterOptions) http.Handler {
 	mux.HandleFunc("/v1/me/agents/bind-tokens", handler.handleMyAgentBindTokens)
 	mux.HandleFunc("/v1/me/agent-trusts", handler.handleMyAgentTrusts)
 	mux.HandleFunc("/v1/admin/snapshot", handler.handleAdminSnapshot)
+	mux.HandleFunc("/v1/admin/peers", handler.handleAdminPeers)
+	mux.HandleFunc("/v1/admin/peers/", handler.handleAdminPeerByID)
+	mux.HandleFunc("/v1/admin/remote-org-trusts", handler.handleAdminRemoteOrgTrusts)
+	mux.HandleFunc("/v1/admin/remote-org-trusts/", handler.handleAdminRemoteOrgTrustByID)
+	mux.HandleFunc("/v1/admin/remote-agent-trusts", handler.handleAdminRemoteAgentTrusts)
+	mux.HandleFunc("/v1/admin/remote-agent-trusts/", handler.handleAdminRemoteAgentTrustByID)
 	mux.HandleFunc("/v1/entities/metadata", handler.handleEntitiesMetadata)
 	mux.HandleFunc("/v1/public/snapshot", handler.handlePublicSnapshot)
 	mux.HandleFunc("/v1/orgs", handler.handleOrgs)
@@ -134,12 +142,23 @@ func NewRouterWithOptions(handler *Handler, opts RouterOptions) http.Handler {
 	mux.HandleFunc("/v1/messages/publish", handler.handlePublish)
 	mux.HandleFunc("/v1/messages/pull", handler.handlePull)
 	mux.HandleFunc("/v1/messages/", handler.handleMessageSubroutes)
+	mux.HandleFunc("/v1/peer/messages", handler.handlePeerInboundMessage)
 	mux.HandleFunc("/", handler.handleUI)
 	router := withAPICompression(mux)
+	router = withPeerOutboxProcessing(handler, router)
 	if opts.EnableLocalCORS {
 		router = withAPICORS(router)
 	}
 	return router
+}
+
+func withPeerOutboxProcessing(handler *Handler, next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if isAPIPath(r.URL.Path) && r.URL.Path != "/v1/peer/messages" {
+			handler.processPeerOutboxes(r.Context(), 16)
+		}
+		next.ServeHTTP(w, r)
+	})
 }
 
 func withAPICORS(next http.Handler) http.Handler {

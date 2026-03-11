@@ -21,6 +21,7 @@ const (
 	MessageDeliveryLeased = "leased"
 	MessageDeliveryAcked  = "acked"
 	MessageDeliveryFailed = "failed"
+	MessageForwarded      = "forwarded"
 )
 
 type Organization struct {
@@ -82,6 +83,42 @@ type Agent struct {
 	RevokedAt         *time.Time     `json:"revoked_at,omitempty"`
 }
 
+type PeerInstance struct {
+	PeerID            string     `json:"peer_id"`
+	CanonicalBaseURL  string     `json:"canonical_base_url"`
+	DeliveryBaseURL   string     `json:"delivery_base_url"`
+	SharedSecret      string     `json:"-"`
+	Status            string     `json:"status"`
+	CreatedBy         string     `json:"created_by"`
+	CreatedAt         time.Time  `json:"created_at"`
+	UpdatedAt         time.Time  `json:"updated_at"`
+	LastSuccessfulAt  *time.Time `json:"last_successful_at,omitempty"`
+	LastFailureAt     *time.Time `json:"last_failure_at,omitempty"`
+	LastFailureReason string     `json:"last_failure_reason,omitempty"`
+}
+
+type RemoteOrgTrust struct {
+	TrustID         string    `json:"trust_id"`
+	LocalOrgID      string    `json:"local_org_id"`
+	PeerID          string    `json:"peer_id"`
+	RemoteOrgHandle string    `json:"remote_org_handle"`
+	Status          string    `json:"status"`
+	CreatedBy       string    `json:"created_by"`
+	CreatedAt       time.Time `json:"created_at"`
+	UpdatedAt       time.Time `json:"updated_at"`
+}
+
+type RemoteAgentTrust struct {
+	TrustID        string    `json:"trust_id"`
+	LocalAgentUUID string    `json:"local_agent_uuid"`
+	PeerID         string    `json:"peer_id"`
+	RemoteAgentURI string    `json:"remote_agent_uri"`
+	Status         string    `json:"status"`
+	CreatedBy      string    `json:"created_by"`
+	CreatedAt      time.Time `json:"created_at"`
+	UpdatedAt      time.Time `json:"updated_at"`
+}
+
 type BindToken struct {
 	BindID       string     `json:"bind_id"`
 	OrgID        string     `json:"org_id"`
@@ -107,17 +144,20 @@ type TrustEdge struct {
 }
 
 type Message struct {
-	MessageID     string    `json:"message_id"`
-	FromAgentUUID string    `json:"from_agent_uuid"`
-	ToAgentUUID   string    `json:"to_agent_uuid"`
-	FromAgentID   string    `json:"from_agent_id,omitempty"`
-	ToAgentID     string    `json:"to_agent_id,omitempty"`
-	SenderOrgID   string    `json:"sender_org_id"`
-	ReceiverOrgID string    `json:"receiver_org_id"`
-	ContentType   string    `json:"content_type"`
-	Payload       string    `json:"payload"`
-	ClientMsgID   *string   `json:"client_msg_id,omitempty"`
-	CreatedAt     time.Time `json:"created_at"`
+	MessageID      string    `json:"message_id"`
+	FromAgentUUID  string    `json:"from_agent_uuid"`
+	ToAgentUUID    string    `json:"to_agent_uuid"`
+	FromAgentID    string    `json:"from_agent_id,omitempty"`
+	ToAgentID      string    `json:"to_agent_id,omitempty"`
+	FromAgentURI   string    `json:"from_agent_uri,omitempty"`
+	ToAgentURI     string    `json:"to_agent_uri,omitempty"`
+	SenderOrgID    string    `json:"sender_org_id"`
+	ReceiverOrgID  string    `json:"receiver_org_id"`
+	ReceiverPeerID string    `json:"receiver_peer_id,omitempty"`
+	ContentType    string    `json:"content_type"`
+	Payload        string    `json:"payload"`
+	ClientMsgID    *string   `json:"client_msg_id,omitempty"`
+	CreatedAt      time.Time `json:"created_at"`
 }
 
 type MessageRecord struct {
@@ -152,6 +192,21 @@ type QueueMetrics struct {
 	OldestLeaseExpiryAt *time.Time `json:"oldest_lease_expires_at,omitempty"`
 }
 
+type PeerOutboundMessage struct {
+	OutboundID      string     `json:"outbound_id"`
+	PeerID          string     `json:"peer_id"`
+	MessageID       string     `json:"message_id"`
+	Message         Message    `json:"message"`
+	Status          string     `json:"status"`
+	CreatedAt       time.Time  `json:"created_at"`
+	UpdatedAt       time.Time  `json:"updated_at"`
+	AttemptCount    int        `json:"attempt_count"`
+	NextAttemptAt   time.Time  `json:"next_attempt_at"`
+	LastAttemptAt   *time.Time `json:"last_attempt_at,omitempty"`
+	LastError       string     `json:"last_error,omitempty"`
+	LastDeliveredAt *time.Time `json:"last_delivered_at,omitempty"`
+}
+
 type OrgHumanView struct {
 	HumanID      string         `json:"human_id"`
 	Handle       string         `json:"handle"`
@@ -163,14 +218,14 @@ type OrgHumanView struct {
 }
 
 type OrgStats struct {
-	OrgID              string          `json:"org_id"`
-	QueuedMessages     int64           `json:"queued_messages"`
-	DroppedMessages    int64           `json:"dropped_messages"`
-	AckedMessages      int64           `json:"acked_messages"`
-	ExpiredMessages    int64           `json:"expired_messages"`
-	RedeliveredMessages int64          `json:"redelivered_messages"`
-	DuplicateMessages  int64           `json:"duplicate_messages"`
-	Last7Days          []OrgDailyStats `json:"last_7_days"`
+	OrgID               string          `json:"org_id"`
+	QueuedMessages      int64           `json:"queued_messages"`
+	DroppedMessages     int64           `json:"dropped_messages"`
+	AckedMessages       int64           `json:"acked_messages"`
+	ExpiredMessages     int64           `json:"expired_messages"`
+	RedeliveredMessages int64           `json:"redelivered_messages"`
+	DuplicateMessages   int64           `json:"duplicate_messages"`
+	Last7Days           []OrgDailyStats `json:"last_7_days"`
 }
 
 type OrgDailyStats struct {
