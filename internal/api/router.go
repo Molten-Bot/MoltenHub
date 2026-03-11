@@ -44,6 +44,7 @@ type Handler struct {
 	superAdminReview  bool
 	bindTokenTTL      time.Duration
 	headlessMode      bool
+	headlessModeURL   string
 	storageHealthMu   sync.RWMutex
 	storageHealth     store.StorageHealthStatus
 	queueRuntimeError string
@@ -93,6 +94,7 @@ func NewHandler(
 		superAdminReview:  superAdminReview,
 		bindTokenTTL:      bindTokenTTL,
 		headlessMode:      headlessMode,
+		headlessModeURL:   "",
 		storageHealth:     store.DefaultStorageHealthStatus(),
 		peerHTTPClient:    &http.Client{Timeout: 5 * time.Second},
 	}
@@ -150,6 +152,10 @@ func NewRouterWithOptions(handler *Handler, opts RouterOptions) http.Handler {
 		router = withAPICORS(router)
 	}
 	return router
+}
+
+func (h *Handler) SetHeadlessModeRedirectURL(raw string) {
+	h.headlessModeURL = strings.TrimSpace(raw)
 }
 
 func withPeerOutboxProcessing(handler *Handler, next http.Handler) http.Handler {

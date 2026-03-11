@@ -80,6 +80,7 @@ func main() {
 		bindTTL,
 		headlessMode,
 	)
+	handler.SetHeadlessModeRedirectURL(os.Getenv("STATOCYST_HEADLESS_MODE_URL"))
 	handler.SetStorageHealth(storageHealth)
 	router := api.NewRouterWithOptions(handler, api.RouterOptions{
 		EnableLocalCORS: enableLocalCORS,

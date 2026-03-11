@@ -2635,6 +2635,37 @@ func TestHeadlessModeDisablesUIRoutes(t *testing.T) {
 	}
 }
 
+func TestHeadlessModeRedirectsUIRoutesWhenConfigured(t *testing.T) {
+	st := store.NewMemoryStore()
+	waiters := longpoll.NewWaiters()
+	h := NewHandler(st, st, waiters, auth.NewDevHumanAuthProvider(), "https://hub.molten.bot", "", "", "", "", "molten.bot", true, 15*time.Minute, true)
+	h.SetHeadlessModeRedirectURL("https://example.com/headless")
+	router := NewRouter(h)
+
+	me := doJSONRequest(t, router, http.MethodGet, "/v1/me", nil, humanHeaders("alice", "alice@a.test"))
+	if me.Code != http.StatusOK {
+		t.Fatalf("expected /v1/me to work in headless mode, got %d %s", me.Code, me.Body.String())
+	}
+
+	for _, path := range []string{"/", "/profile", "/live"} {
+		req := httptest.NewRequest(http.MethodGet, path, nil)
+		resp := httptest.NewRecorder()
+		router.ServeHTTP(resp, req)
+
+		if resp.Code != http.StatusFound {
+			t.Fatalf("%s expected 302 in headless mode redirect, got %d body=%s", path, resp.Code, resp.Body.String())
+		}
+		if location := resp.Header().Get("Location"); location != "https://example.com/headless" {
+			t.Fatalf("%s expected redirect location https://example.com/headless, got %q", path, location)
+		}
+	}
+
+	api404 := doJSONRequest(t, router, http.MethodGet, "/v1/unknown", nil, nil)
+	if api404.Code != http.StatusNotFound {
+		t.Fatalf("expected /v1/unknown to remain 404, got %d %s", api404.Code, api404.Body.String())
+	}
+}
+
 func TestOnboardingBlocksWritesUntilHandleConfirmed(t *testing.T) {
 	router := newTestRouter()
 
