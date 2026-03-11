@@ -149,6 +149,18 @@ docker build -t statocyst:local .
 bash scripts/release/run_container_smoke.sh statocyst:local
 ```
 
+Run two local containers, pair them, register agents on both sides, and verify bridged messaging:
+
+```bash
+docker build -t statocyst:local .
+bash scripts/release/run_federation_container_smoke.sh statocyst:local
+```
+
+This reuses the existing image and starts two Statocyst containers through Docker Compose using
+`scripts/release/docker-compose.federation-smoke.yml`.
+The companion runner `cmd/statocyst-federation-smoke/main.go` bootstraps peer pairing, remote org/agent trusts,
+and A<->B agent messaging over the bridge.
+
 ## Endpoints
 
 ### Caller Contract (must stay stable)

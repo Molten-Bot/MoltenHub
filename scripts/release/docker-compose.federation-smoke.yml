@@ -1,0 +1,18 @@
+services:
+  statocyst-alpha:
+    image: ${STATOCYST_IMAGE:-statocyst:federation-smoke}
+    environment:
+      HUMAN_AUTH_PROVIDER: dev
+      STATOCYST_CANONICAL_BASE_URL: http://statocyst-alpha:8080
+      SUPER_ADMIN_EMAILS: ops@molten.bot
+    ports:
+      - "127.0.0.1:${STATOCYST_ALPHA_PORT:-18080}:8080"
+
+  statocyst-beta:
+    image: ${STATOCYST_IMAGE:-statocyst:federation-smoke}
+    environment:
+      HUMAN_AUTH_PROVIDER: dev
+      STATOCYST_CANONICAL_BASE_URL: http://statocyst-beta:8080
+      SUPER_ADMIN_EMAILS: ops@molten.bot
+    ports:
+      - "127.0.0.1:${STATOCYST_BETA_PORT:-18081}:8080"

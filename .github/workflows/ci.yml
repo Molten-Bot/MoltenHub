@@ -75,3 +75,32 @@ jobs:
 
       - name: Run container smoke test
         run: bash scripts/release/run_container_smoke.sh statocyst:smoke-ci
+
+  federation-container-smoke:
+    runs-on: ubuntu-latest
+    needs:
+      - test
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.22.x'
+          cache: false
+
+      - name: Setup Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build image for federation smoke test
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: false
+          load: true
+          platforms: linux/amd64
+          tags: statocyst:federation-smoke-ci
+
+      - name: Run federation container smoke test
+        run: bash scripts/release/run_federation_container_smoke.sh statocyst:federation-smoke-ci
