@@ -61,17 +61,20 @@ type s3PersonalOrgValue struct {
 }
 
 type s3PersistQueueMessage struct {
-	MessageID     string    `json:"message_id"`
-	FromAgentUUID string    `json:"from_agent_uuid"`
-	ToAgentUUID   string    `json:"to_agent_uuid"`
-	FromAgentID   string    `json:"from_agent_id,omitempty"`
-	ToAgentID     string    `json:"to_agent_id,omitempty"`
-	SenderOrgID   string    `json:"sender_org_id"`
-	ReceiverOrgID string    `json:"receiver_org_id"`
-	ContentType   string    `json:"content_type"`
-	Payload       string    `json:"payload"`
-	ClientMsgID   *string   `json:"client_msg_id,omitempty"`
-	CreatedAt     time.Time `json:"created_at"`
+	MessageID      string    `json:"message_id"`
+	FromAgentUUID  string    `json:"from_agent_uuid"`
+	ToAgentUUID    string    `json:"to_agent_uuid"`
+	FromAgentID    string    `json:"from_agent_id,omitempty"`
+	ToAgentID      string    `json:"to_agent_id,omitempty"`
+	FromAgentURI   string    `json:"from_agent_uri,omitempty"`
+	ToAgentURI     string    `json:"to_agent_uri,omitempty"`
+	SenderOrgID    string    `json:"sender_org_id"`
+	ReceiverOrgID  string    `json:"receiver_org_id"`
+	ReceiverPeerID string    `json:"receiver_peer_id,omitempty"`
+	ContentType    string    `json:"content_type"`
+	Payload        string    `json:"payload"`
+	ClientMsgID    *string   `json:"client_msg_id,omitempty"`
+	CreatedAt      time.Time `json:"created_at"`
 }
 
 type s3PersistMessageRecord struct {
@@ -746,6 +749,10 @@ func (s *s3StateStore) buildDesiredObjects() map[string]map[string][]byte {
 	pQueues := s.prefixed("state/queues")
 	pMessages := s.prefixed("state/messages")
 	pMessageLeases := s.prefixed("state/message_leases")
+	pPeers := s.prefixed("state/peers")
+	pRemoteOrgTrusts := s.prefixed("state/remote_org_trusts")
+	pRemoteAgentTrusts := s.prefixed("state/remote_agent_trusts")
+	pPeerOutbounds := s.prefixed("state/peer_outbounds")
 
 	for id, human := range s.MemoryStore.humans {
 		add(pHumans, s.objectKey(pHumans, escapeKeySegment(id)+".json"), human)
@@ -809,6 +816,18 @@ func (s *s3StateStore) buildDesiredObjects() map[string]map[string][]byte {
 	for deliveryID, delivery := range s.MemoryStore.messageDeliveries {
 		add(pMessageLeases, s.objectKey(pMessageLeases, escapeKeySegment(deliveryID)+".json"), persistMessageDelivery(delivery))
 	}
+	for peerID, peer := range s.MemoryStore.peerInstances {
+		add(pPeers, s.objectKey(pPeers, escapeKeySegment(peerID)+".json"), peer)
+	}
+	for trustID, trust := range s.MemoryStore.remoteOrgTrusts {
+		add(pRemoteOrgTrusts, s.objectKey(pRemoteOrgTrusts, escapeKeySegment(trustID)+".json"), trust)
+	}
+	for trustID, trust := range s.MemoryStore.remoteAgentTrusts {
+		add(pRemoteAgentTrusts, s.objectKey(pRemoteAgentTrusts, escapeKeySegment(trustID)+".json"), trust)
+	}
+	for outboundID, outbound := range s.MemoryStore.peerOutbounds {
+		add(pPeerOutbounds, s.objectKey(pPeerOutbounds, escapeKeySegment(outboundID)+".json"), outbound)
+	}
 
 	pIdxHumanAuth := s.prefixed("idx/humans/by_auth")
 	pIdxHumanHandle := s.prefixed("idx/humans/by_handle")
@@ -821,6 +840,9 @@ func (s *s3StateStore) buildDesiredObjects() map[string]map[string][]byte {
 	pIdxOrgTrustPair := s.prefixed("idx/org_trusts/by_pair")
 	pIdxAgentTrustPair := s.prefixed("idx/agent_trusts/by_pair")
 	pIdxMessageClient := s.prefixed("idx/messages/by_client")
+	pIdxPeerCanonical := s.prefixed("idx/peers/by_canonical_base")
+	pIdxRemoteOrgTrust := s.prefixed("idx/remote_org_trusts/by_key")
+	pIdxRemoteAgentTrust := s.prefixed("idx/remote_agent_trusts/by_key")
 
 	for key, humanID := range s.MemoryStore.humanByAuthKey {
 		parts := strings.SplitN(key, "\x00", 2)
@@ -869,6 +891,15 @@ func (s *s3StateStore) buildDesiredObjects() map[string]map[string][]byte {
 		}
 		add(pIdxMessageClient, s.objectKey(pIdxMessageClient, escapeKeySegment(parts[0]), escapeKeySegment(parts[1])+".json"), s3IndexValue{Value: messageID})
 	}
+	for canonicalBase, peerID := range s.MemoryStore.peerByCanonicalBase {
+		add(pIdxPeerCanonical, s.objectKey(pIdxPeerCanonical, hashKey(canonicalBase)+".json"), s3IndexValue{Value: peerID})
+	}
+	for key, trustID := range s.MemoryStore.remoteOrgTrustByKey {
+		add(pIdxRemoteOrgTrust, s.objectKey(pIdxRemoteOrgTrust, hashKey(key)+".json"), s3IndexValue{Value: trustID})
+	}
+	for key, trustID := range s.MemoryStore.remoteAgentTrustByKey {
+		add(pIdxRemoteAgentTrust, s.objectKey(pIdxRemoteAgentTrust, hashKey(key)+".json"), s3IndexValue{Value: trustID})
+	}
 
 	return desired
 }
@@ -891,6 +922,10 @@ func (s *s3StateStore) persistedPrefixes() []s3KeyDescriptor {
 		{Prefix: s.prefixed("state/queues")},
 		{Prefix: s.prefixed("state/messages")},
 		{Prefix: s.prefixed("state/message_leases")},
+		{Prefix: s.prefixed("state/peers")},
+		{Prefix: s.prefixed("state/remote_org_trusts")},
+		{Prefix: s.prefixed("state/remote_agent_trusts")},
+		{Prefix: s.prefixed("state/peer_outbounds")},
 		{Prefix: s.prefixed("idx/humans/by_auth")},
 		{Prefix: s.prefixed("idx/humans/by_handle")},
 		{Prefix: s.prefixed("idx/orgs/by_handle")},
@@ -902,6 +937,9 @@ func (s *s3StateStore) persistedPrefixes() []s3KeyDescriptor {
 		{Prefix: s.prefixed("idx/org_trusts/by_pair")},
 		{Prefix: s.prefixed("idx/agent_trusts/by_pair")},
 		{Prefix: s.prefixed("idx/messages/by_client")},
+		{Prefix: s.prefixed("idx/peers/by_canonical_base")},
+		{Prefix: s.prefixed("idx/remote_org_trusts/by_key")},
+		{Prefix: s.prefixed("idx/remote_agent_trusts/by_key")},
 	}
 }
 
@@ -924,6 +962,10 @@ func (s *s3StateStore) loadFromS3(ctx context.Context) error {
 	pQueues := s.prefixed("state/queues")
 	pMessages := s.prefixed("state/messages")
 	pMessageLeases := s.prefixed("state/message_leases")
+	pPeers := s.prefixed("state/peers")
+	pRemoteOrgTrusts := s.prefixed("state/remote_org_trusts")
+	pRemoteAgentTrusts := s.prefixed("state/remote_agent_trusts")
+	pPeerOutbounds := s.prefixed("state/peer_outbounds")
 
 	if err := s.loadTypedObjects(ctx, pHumans, func(key string, body []byte) error {
 		var value model.Human
@@ -1163,6 +1205,54 @@ func (s *s3StateStore) loadFromS3(ctx context.Context) error {
 	}); err != nil {
 		return err
 	}
+	if err := s.loadTypedObjects(ctx, pPeers, func(key string, body []byte) error {
+		var value model.PeerInstance
+		if err := json.Unmarshal(body, &value); err != nil {
+			return err
+		}
+		if strings.TrimSpace(value.PeerID) != "" {
+			loaded.peerInstances[value.PeerID] = value
+		}
+		return nil
+	}); err != nil {
+		return err
+	}
+	if err := s.loadTypedObjects(ctx, pRemoteOrgTrusts, func(key string, body []byte) error {
+		var value model.RemoteOrgTrust
+		if err := json.Unmarshal(body, &value); err != nil {
+			return err
+		}
+		if strings.TrimSpace(value.TrustID) != "" {
+			loaded.remoteOrgTrusts[value.TrustID] = value
+		}
+		return nil
+	}); err != nil {
+		return err
+	}
+	if err := s.loadTypedObjects(ctx, pRemoteAgentTrusts, func(key string, body []byte) error {
+		var value model.RemoteAgentTrust
+		if err := json.Unmarshal(body, &value); err != nil {
+			return err
+		}
+		if strings.TrimSpace(value.TrustID) != "" {
+			loaded.remoteAgentTrusts[value.TrustID] = value
+		}
+		return nil
+	}); err != nil {
+		return err
+	}
+	if err := s.loadTypedObjects(ctx, pPeerOutbounds, func(key string, body []byte) error {
+		var value model.PeerOutboundMessage
+		if err := json.Unmarshal(body, &value); err != nil {
+			return err
+		}
+		if strings.TrimSpace(value.OutboundID) != "" {
+			loaded.peerOutbounds[value.OutboundID] = value
+		}
+		return nil
+	}); err != nil {
+		return err
+	}
 	for agentUUID, queue := range loaded.queues {
 		sort.Slice(queue, func(i, j int) bool {
 			if queue[i].CreatedAt.Equal(queue[j].CreatedAt) {
@@ -1222,6 +1312,10 @@ func rebuildStateIndexesLocked(mem *MemoryStore) {
 	mem.orgTrustByPair = make(map[string]string)
 	mem.agentTrustByPair = make(map[string]string)
 	mem.messageByClientMsg = make(map[string]string)
+	mem.peerByCanonicalBase = make(map[string]string)
+	mem.remoteOrgTrustByKey = make(map[string]string)
+	mem.remoteAgentTrustByKey = make(map[string]string)
+	mem.peerOutboundByPeer = make(map[string][]string)
 	if mem.queues == nil {
 		mem.queues = make(map[string][]model.Message)
 	}
@@ -1230,6 +1324,18 @@ func rebuildStateIndexesLocked(mem *MemoryStore) {
 	}
 	if mem.messageDeliveries == nil {
 		mem.messageDeliveries = make(map[string]model.MessageDelivery)
+	}
+	if mem.peerInstances == nil {
+		mem.peerInstances = make(map[string]model.PeerInstance)
+	}
+	if mem.remoteOrgTrusts == nil {
+		mem.remoteOrgTrusts = make(map[string]model.RemoteOrgTrust)
+	}
+	if mem.remoteAgentTrusts == nil {
+		mem.remoteAgentTrusts = make(map[string]model.RemoteAgentTrust)
+	}
+	if mem.peerOutbounds == nil {
+		mem.peerOutbounds = make(map[string]model.PeerOutboundMessage)
 	}
 
 	for orgID, org := range mem.orgs {
@@ -1288,6 +1394,18 @@ func rebuildStateIndexesLocked(mem *MemoryStore) {
 		}
 		mem.messageByClientMsg[messageClientKey(record.Message.FromAgentUUID, *record.Message.ClientMsgID)] = messageID
 	}
+	for peerID, peer := range mem.peerInstances {
+		mem.peerByCanonicalBase[normalizeBaseURL(peer.CanonicalBaseURL)] = peerID
+	}
+	for trustID, trust := range mem.remoteOrgTrusts {
+		mem.remoteOrgTrustByKey[remoteOrgTrustKey(trust.LocalOrgID, trust.PeerID, trust.RemoteOrgHandle)] = trustID
+	}
+	for trustID, trust := range mem.remoteAgentTrusts {
+		mem.remoteAgentTrustByKey[remoteAgentTrustKey(trust.LocalAgentUUID, trust.PeerID, trust.RemoteAgentURI)] = trustID
+	}
+	for outboundID, outbound := range mem.peerOutbounds {
+		mem.peerOutboundByPeer[outbound.PeerID] = append(mem.peerOutboundByPeer[outbound.PeerID], outboundID)
+	}
 }
 
 func (s *s3StateStore) loadTypedObjects(ctx context.Context, prefix string, fn func(key string, body []byte) error) error {
@@ -1308,6 +1426,148 @@ func (s *s3StateStore) loadTypedObjects(ctx context.Context, prefix string, fn f
 		}
 	}
 	return nil
+}
+
+func (s *s3StateStore) CreatePeerInstance(canonicalBaseURL, deliveryBaseURL, sharedSecret, actorHumanID, peerID string, now time.Time) (model.PeerInstance, error) {
+	s.persistMu.Lock()
+	defer s.persistMu.Unlock()
+
+	peer, err := s.MemoryStore.CreatePeerInstance(canonicalBaseURL, deliveryBaseURL, sharedSecret, actorHumanID, peerID, now)
+	if err != nil {
+		return model.PeerInstance{}, err
+	}
+	if err := s.persistAll(context.Background()); err != nil {
+		return model.PeerInstance{}, err
+	}
+	return peer, nil
+}
+
+func (s *s3StateStore) DeletePeerInstance(peerID, actorHumanID string, now time.Time) (model.PeerInstance, error) {
+	s.persistMu.Lock()
+	defer s.persistMu.Unlock()
+
+	peer, err := s.MemoryStore.DeletePeerInstance(peerID, actorHumanID, now)
+	if err != nil {
+		return model.PeerInstance{}, err
+	}
+	if err := s.persistAll(context.Background()); err != nil {
+		return model.PeerInstance{}, err
+	}
+	return peer, nil
+}
+
+func (s *s3StateStore) RecordPeerDeliverySuccess(peerID string, now time.Time) {
+	s.persistMu.Lock()
+	defer s.persistMu.Unlock()
+
+	s.MemoryStore.RecordPeerDeliverySuccess(peerID, now)
+	_ = s.persistAll(context.Background())
+}
+
+func (s *s3StateStore) RecordPeerDeliveryFailure(peerID, reason string, now time.Time) {
+	s.persistMu.Lock()
+	defer s.persistMu.Unlock()
+
+	s.MemoryStore.RecordPeerDeliveryFailure(peerID, reason, now)
+	_ = s.persistAll(context.Background())
+}
+
+func (s *s3StateStore) CreateRemoteOrgTrust(localOrgID, peerID, remoteOrgHandle, actorHumanID, trustID string, now time.Time) (model.RemoteOrgTrust, error) {
+	s.persistMu.Lock()
+	defer s.persistMu.Unlock()
+
+	trust, err := s.MemoryStore.CreateRemoteOrgTrust(localOrgID, peerID, remoteOrgHandle, actorHumanID, trustID, now)
+	if err != nil {
+		return model.RemoteOrgTrust{}, err
+	}
+	if err := s.persistAll(context.Background()); err != nil {
+		return model.RemoteOrgTrust{}, err
+	}
+	return trust, nil
+}
+
+func (s *s3StateStore) DeleteRemoteOrgTrust(trustID, actorHumanID string, now time.Time) (model.RemoteOrgTrust, error) {
+	s.persistMu.Lock()
+	defer s.persistMu.Unlock()
+
+	trust, err := s.MemoryStore.DeleteRemoteOrgTrust(trustID, actorHumanID, now)
+	if err != nil {
+		return model.RemoteOrgTrust{}, err
+	}
+	if err := s.persistAll(context.Background()); err != nil {
+		return model.RemoteOrgTrust{}, err
+	}
+	return trust, nil
+}
+
+func (s *s3StateStore) CreateRemoteAgentTrust(localAgentUUID, peerID, remoteAgentURI, actorHumanID, trustID string, now time.Time) (model.RemoteAgentTrust, error) {
+	s.persistMu.Lock()
+	defer s.persistMu.Unlock()
+
+	trust, err := s.MemoryStore.CreateRemoteAgentTrust(localAgentUUID, peerID, remoteAgentURI, actorHumanID, trustID, now)
+	if err != nil {
+		return model.RemoteAgentTrust{}, err
+	}
+	if err := s.persistAll(context.Background()); err != nil {
+		return model.RemoteAgentTrust{}, err
+	}
+	return trust, nil
+}
+
+func (s *s3StateStore) DeleteRemoteAgentTrust(trustID, actorHumanID string, now time.Time) (model.RemoteAgentTrust, error) {
+	s.persistMu.Lock()
+	defer s.persistMu.Unlock()
+
+	trust, err := s.MemoryStore.DeleteRemoteAgentTrust(trustID, actorHumanID, now)
+	if err != nil {
+		return model.RemoteAgentTrust{}, err
+	}
+	if err := s.persistAll(context.Background()); err != nil {
+		return model.RemoteAgentTrust{}, err
+	}
+	return trust, nil
+}
+
+func (s *s3StateStore) EnqueuePeerOutbound(peerID, outboundID string, message model.Message, now time.Time) (model.PeerOutboundMessage, error) {
+	s.persistMu.Lock()
+	defer s.persistMu.Unlock()
+
+	outbound, err := s.MemoryStore.EnqueuePeerOutbound(peerID, outboundID, message, now)
+	if err != nil {
+		return model.PeerOutboundMessage{}, err
+	}
+	if err := s.persistAll(context.Background()); err != nil {
+		return model.PeerOutboundMessage{}, err
+	}
+	return outbound, nil
+}
+
+func (s *s3StateStore) MarkPeerOutboundRetry(outboundID, reason string, nextAttemptAt, now time.Time) (model.PeerOutboundMessage, error) {
+	s.persistMu.Lock()
+	defer s.persistMu.Unlock()
+
+	outbound, err := s.MemoryStore.MarkPeerOutboundRetry(outboundID, reason, nextAttemptAt, now)
+	if err != nil {
+		return model.PeerOutboundMessage{}, err
+	}
+	if err := s.persistAll(context.Background()); err != nil {
+		return model.PeerOutboundMessage{}, err
+	}
+	return outbound, nil
+}
+
+func (s *s3StateStore) MarkPeerOutboundDelivered(outboundID string, now time.Time) (model.PeerOutboundMessage, error) {
+	s.persistMu.Lock()
+	defer s.persistMu.Unlock()
+
+	outbound, err := s.MemoryStore.MarkPeerOutboundDelivered(outboundID, now)
+	if err != nil {
+		return model.PeerOutboundMessage{}, err
+	}
+	if err := s.persistAll(context.Background()); err != nil {
+		return model.PeerOutboundMessage{}, err
+	}
+	return outbound, nil
 }
 
 func (s *s3StateStore) DeleteAgent(agentUUID, actorHumanID string, now time.Time, isSuperAdmin bool) error {
@@ -1335,6 +1595,20 @@ func (s *s3StateStore) CreateOrGetMessageRecord(message model.Message, acceptedA
 		return model.MessageRecord{}, false, err
 	}
 	return record, replay, nil
+}
+
+func (s *s3StateStore) MarkMessageForwarded(messageID string, forwardedAt time.Time) (model.MessageRecord, error) {
+	s.persistMu.Lock()
+	defer s.persistMu.Unlock()
+
+	record, err := s.MemoryStore.MarkMessageForwarded(messageID, forwardedAt)
+	if err != nil {
+		return model.MessageRecord{}, err
+	}
+	if err := s.persistAll(context.Background()); err != nil {
+		return model.MessageRecord{}, err
+	}
+	return record, nil
 }
 
 func (s *s3StateStore) AbortMessageRecord(messageID string) error {
@@ -1670,17 +1944,20 @@ func (v s3PersistInvite) toModel() model.Invite {
 
 func persistQueueMessage(v model.Message) s3PersistQueueMessage {
 	return s3PersistQueueMessage{
-		MessageID:     v.MessageID,
-		FromAgentUUID: v.FromAgentUUID,
-		ToAgentUUID:   v.ToAgentUUID,
-		FromAgentID:   v.FromAgentID,
-		ToAgentID:     v.ToAgentID,
-		SenderOrgID:   v.SenderOrgID,
-		ReceiverOrgID: v.ReceiverOrgID,
-		ContentType:   v.ContentType,
-		Payload:       v.Payload,
-		ClientMsgID:   v.ClientMsgID,
-		CreatedAt:     v.CreatedAt,
+		MessageID:      v.MessageID,
+		FromAgentUUID:  v.FromAgentUUID,
+		ToAgentUUID:    v.ToAgentUUID,
+		FromAgentID:    v.FromAgentID,
+		ToAgentID:      v.ToAgentID,
+		FromAgentURI:   v.FromAgentURI,
+		ToAgentURI:     v.ToAgentURI,
+		SenderOrgID:    v.SenderOrgID,
+		ReceiverOrgID:  v.ReceiverOrgID,
+		ReceiverPeerID: v.ReceiverPeerID,
+		ContentType:    v.ContentType,
+		Payload:        v.Payload,
+		ClientMsgID:    v.ClientMsgID,
+		CreatedAt:      v.CreatedAt,
 	}
 }
 
@@ -1744,17 +2021,20 @@ func (v s3PersistMessageDelivery) toModel() model.MessageDelivery {
 
 func (v s3PersistQueueMessage) toModel() model.Message {
 	return model.Message{
-		MessageID:     v.MessageID,
-		FromAgentUUID: v.FromAgentUUID,
-		ToAgentUUID:   v.ToAgentUUID,
-		FromAgentID:   v.FromAgentID,
-		ToAgentID:     v.ToAgentID,
-		SenderOrgID:   v.SenderOrgID,
-		ReceiverOrgID: v.ReceiverOrgID,
-		ContentType:   v.ContentType,
-		Payload:       v.Payload,
-		ClientMsgID:   v.ClientMsgID,
-		CreatedAt:     v.CreatedAt,
+		MessageID:      v.MessageID,
+		FromAgentUUID:  v.FromAgentUUID,
+		ToAgentUUID:    v.ToAgentUUID,
+		FromAgentID:    v.FromAgentID,
+		ToAgentID:      v.ToAgentID,
+		FromAgentURI:   v.FromAgentURI,
+		ToAgentURI:     v.ToAgentURI,
+		SenderOrgID:    v.SenderOrgID,
+		ReceiverOrgID:  v.ReceiverOrgID,
+		ReceiverPeerID: v.ReceiverPeerID,
+		ContentType:    v.ContentType,
+		Payload:        v.Payload,
+		ClientMsgID:    v.ClientMsgID,
+		CreatedAt:      v.CreatedAt,
 	}
 }
 

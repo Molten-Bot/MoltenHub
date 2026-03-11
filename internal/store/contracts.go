@@ -51,9 +51,26 @@ type ControlPlaneStore interface {
 	GetAgentByUUID(agentUUID string) (model.Agent, error)
 	GetAgentURI(agentUUID string) (string, error)
 	ResolveAgentUUID(agentRef string) (string, error)
+	ResolveAgentUUIDByURI(agentURI string) (string, error)
 	CountActiveHumanOwnedAgents(humanID string) int
 	PeekBindToken(bindTokenHash string) (model.BindToken, error)
 	ListTalkablePeers(agentUUID string) ([]string, error)
+	ListRemoteAgentTrustsForLocalAgent(agentUUID string) ([]model.RemoteAgentTrust, error)
+	CreatePeerInstance(canonicalBaseURL, deliveryBaseURL, sharedSecret, actorHumanID, peerID string, now time.Time) (model.PeerInstance, error)
+	ListPeerInstances() []model.PeerInstance
+	GetPeerInstance(peerID string) (model.PeerInstance, error)
+	ResolvePeerByCanonicalBase(canonicalBaseURL string) (model.PeerInstance, error)
+	DeletePeerInstance(peerID, actorHumanID string, now time.Time) (model.PeerInstance, error)
+	RecordPeerDeliverySuccess(peerID string, now time.Time)
+	RecordPeerDeliveryFailure(peerID, reason string, now time.Time)
+	CreateRemoteOrgTrust(localOrgID, peerID, remoteOrgHandle, actorHumanID, trustID string, now time.Time) (model.RemoteOrgTrust, error)
+	ListRemoteOrgTrusts() []model.RemoteOrgTrust
+	DeleteRemoteOrgTrust(trustID, actorHumanID string, now time.Time) (model.RemoteOrgTrust, error)
+	HasActiveRemoteOrgTrust(localOrgID, peerID, remoteOrgHandle string) bool
+	CreateRemoteAgentTrust(localAgentUUID, peerID, remoteAgentURI, actorHumanID, trustID string, now time.Time) (model.RemoteAgentTrust, error)
+	ListRemoteAgentTrusts() []model.RemoteAgentTrust
+	DeleteRemoteAgentTrust(trustID, actorHumanID string, now time.Time) (model.RemoteAgentTrust, error)
+	HasActiveRemoteAgentTrust(localAgentUUID, peerID, remoteAgentURI string) bool
 	CreateOrJoinOrgTrust(orgID, peerOrgID, actorHumanID, edgeID string, now time.Time, isSuperAdmin bool) (model.TrustEdge, bool, error)
 	CreateOrJoinAgentTrust(orgID, agentUUID, peerAgentUUID, actorHumanID, edgeID string, now time.Time, isSuperAdmin bool) (model.TrustEdge, bool, error)
 	ApproveOrgTrust(edgeID, actorHumanID string, now time.Time, isSuperAdmin bool) (model.TrustEdge, error)
@@ -80,6 +97,11 @@ type ControlPlaneStore interface {
 	GetQueueMetrics() model.QueueMetrics
 	RecordMessageQueued(orgID string)
 	RecordMessageDropped(orgID string)
+	EnqueuePeerOutbound(peerID, outboundID string, message model.Message, now time.Time) (model.PeerOutboundMessage, error)
+	ListDuePeerOutbounds(now time.Time, limit int) []model.PeerOutboundMessage
+	MarkPeerOutboundRetry(outboundID, reason string, nextAttemptAt, now time.Time) (model.PeerOutboundMessage, error)
+	MarkPeerOutboundDelivered(outboundID string, now time.Time) (model.PeerOutboundMessage, error)
+	MarkMessageForwarded(messageID string, forwardedAt time.Time) (model.MessageRecord, error)
 }
 
 // MessageQueueStore captures enqueue/dequeue behavior for agent messages.

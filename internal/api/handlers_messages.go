@@ -23,6 +23,7 @@ const defaultMessageLease = 60 * time.Second
 
 type publishRequest struct {
 	ToAgentUUID string  `json:"to_agent_uuid"`
+	ToAgentURI  string  `json:"to_agent_uri,omitempty"`
 	ContentType string  `json:"content_type"`
 	Payload     string  `json:"payload"`
 	ClientMsgID *string `json:"client_msg_id,omitempty"`
@@ -86,12 +87,9 @@ func (h *Handler) handlePublish(w http.ResponseWriter, r *http.Request) {
 	}
 
 	req.ToAgentUUID = normalizeUUID(req.ToAgentUUID)
+	req.ToAgentURI = strings.TrimSpace(req.ToAgentURI)
 	req.ContentType = strings.TrimSpace(req.ContentType)
 
-	if !validateUUID(req.ToAgentUUID) {
-		writeError(w, http.StatusBadRequest, "invalid_to_agent_uuid", "to_agent_uuid must be a valid UUID")
-		return
-	}
 	if _, ok := allowedContentTypes[req.ContentType]; !ok {
 		writeError(w, http.StatusBadRequest, "invalid_content_type", "content_type must be one of: text/plain, application/json")
 		return
@@ -103,6 +101,99 @@ func (h *Handler) handlePublish(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if req.ToAgentUUID == "" && req.ToAgentURI == "" {
+		writeError(w, http.StatusBadRequest, "invalid_request", "to_agent_uuid or to_agent_uri is required")
+		return
+	}
+
+	localBase := normalizeCanonicalBaseURL(h.canonicalBaseURL)
+	if req.ToAgentURI != "" {
+		targetBase, targetRef, err := splitCanonicalAgentURI(req.ToAgentURI)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "invalid_to_agent_uri", "to_agent_uri must be a valid canonical agent URI")
+			return
+		}
+		if targetBase != localBase {
+			peer, err := h.control.ResolvePeerByCanonicalBase(targetBase)
+			if err != nil {
+				writeError(w, http.StatusNotFound, "unknown_receiver", "to_agent_uri is not registered on a trusted peer")
+				return
+			}
+			remoteOrgHandle := remoteOrgHandleFromAgentRef(targetRef)
+			if remoteOrgHandle == "" || !h.control.HasActiveRemoteOrgTrust(senderAgent.OrgID, peer.PeerID, remoteOrgHandle) || !h.control.HasActiveRemoteAgentTrust(senderAgentUUID, peer.PeerID, req.ToAgentURI) {
+				h.control.RecordMessageDropped(senderAgent.OrgID)
+				writeJSON(w, http.StatusAccepted, map[string]string{
+					"status": "dropped",
+					"reason": "no_trust_path",
+				})
+				return
+			}
+			messageID, err := newUUIDv7()
+			if err != nil {
+				writeError(w, http.StatusInternalServerError, "id_generation_failed", "failed to create message_id")
+				return
+			}
+			message := model.Message{
+				MessageID:      messageID,
+				FromAgentUUID:  senderAgentUUID,
+				FromAgentID:    senderAgent.AgentID,
+				FromAgentURI:   h.agentURI(senderAgent),
+				ToAgentURI:     req.ToAgentURI,
+				SenderOrgID:    senderAgent.OrgID,
+				ReceiverOrgID:  remoteOrgHandle,
+				ReceiverPeerID: peer.PeerID,
+				ContentType:    req.ContentType,
+				Payload:        req.Payload,
+				ClientMsgID:    req.ClientMsgID,
+				CreatedAt:      h.now().UTC(),
+			}
+			record, replay, err := h.control.CreateOrGetMessageRecord(message, message.CreatedAt)
+			if err != nil {
+				writeError(w, http.StatusInternalServerError, "store_error", "failed to register message")
+				return
+			}
+			if replay {
+				writeJSON(w, http.StatusAccepted, publishResponse(record, true))
+				return
+			}
+			outboundID, err := h.idFactory()
+			if err != nil {
+				_ = h.control.AbortMessageRecord(message.MessageID)
+				writeError(w, http.StatusInternalServerError, "id_generation_failed", "failed to create outbound_id")
+				return
+			}
+			if _, err := h.control.EnqueuePeerOutbound(peer.PeerID, outboundID, message, message.CreatedAt); err != nil {
+				_ = h.control.AbortMessageRecord(message.MessageID)
+				writeError(w, http.StatusInternalServerError, "store_error", "failed to enqueue peer delivery")
+				return
+			}
+			h.processPeerOutboxes(r.Context(), 1)
+			updatedRecord, err := h.control.GetMessageRecord(message.MessageID)
+			if err == nil {
+				record = updatedRecord
+			}
+			h.control.RecordMessageQueued(senderAgent.OrgID)
+			writeJSON(w, http.StatusAccepted, publishResponse(record, false))
+			return
+		}
+		if req.ToAgentUUID == "" {
+			resolvedUUID, err := h.control.ResolveAgentUUID(targetRef)
+			if err != nil {
+				if errors.Is(err, store.ErrAgentNotFound) {
+					writeError(w, http.StatusNotFound, "unknown_receiver", "to_agent_uri is not registered")
+					return
+				}
+				writeError(w, http.StatusInternalServerError, "store_error", "failed to resolve receiver")
+				return
+			}
+			req.ToAgentUUID = resolvedUUID
+		}
+	}
+	if !validateUUID(req.ToAgentUUID) {
+		writeError(w, http.StatusBadRequest, "invalid_to_agent_uuid", "to_agent_uuid must be a valid UUID")
+		return
+	}
+
 	targetAgent, err := h.control.GetAgentByUUID(req.ToAgentUUID)
 	if err != nil {
 		if errors.Is(err, store.ErrAgentNotFound) {
@@ -110,6 +201,10 @@ func (h *Handler) handlePublish(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		writeError(w, http.StatusInternalServerError, "store_error", "failed to resolve receiver")
+		return
+	}
+	if req.ToAgentURI != "" && req.ToAgentURI != h.agentURI(targetAgent) {
+		writeError(w, http.StatusBadRequest, "agent_ref_mismatch", "to_agent_uuid and to_agent_uri refer to different agents")
 		return
 	}
 
@@ -142,6 +237,8 @@ func (h *Handler) handlePublish(w http.ResponseWriter, r *http.Request) {
 		ToAgentUUID:   targetAgent.AgentUUID,
 		FromAgentID:   senderAgent.AgentID,
 		ToAgentID:     targetAgent.AgentID,
+		FromAgentURI:  h.agentURI(senderAgent),
+		ToAgentURI:    h.agentURI(targetAgent),
 		SenderOrgID:   senderOrgID,
 		ReceiverOrgID: receiverOrgID,
 		ContentType:   req.ContentType,
