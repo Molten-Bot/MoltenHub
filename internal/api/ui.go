@@ -49,6 +49,9 @@ func (h *Handler) handleUI(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if h.headlessMode {
+		if h.redirectHeadlessMode(w, r) {
+			return
+		}
 		writeError(w, http.StatusNotFound, "not_found", "route not found")
 		return
 	}
@@ -91,6 +94,15 @@ func (h *Handler) handleUI(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "not_found", "route not found")
 		return
 	}
+}
+
+func (h *Handler) redirectHeadlessMode(w http.ResponseWriter, r *http.Request) bool {
+	target := strings.TrimSpace(h.headlessModeURL)
+	if !h.headlessMode || target == "" {
+		return false
+	}
+	http.Redirect(w, r, target, http.StatusFound)
+	return true
 }
 
 func writeUIAsset(w http.ResponseWriter, r *http.Request, contentType string, embedded []byte, devFileName string) {

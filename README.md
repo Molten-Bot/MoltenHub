@@ -125,6 +125,7 @@ Useful local keys:
 - `DEV_LOGIN_AUTO=true`: auto-redirect from login page into `/profile` as that dev user.
 - `SUPER_ADMIN_REVIEW_MODE=true` + `SUPER_ADMIN_EMAILS=...`: test admin visibility/behavior locally.
 - `STATOCYST_ENABLE_LOCAL_CORS=true`: enables API CORS for local browser/manual testing (including `file://` origin). Default is `false`.
+- `STATOCYST_HEADLESS_MODE=true` + `STATOCYST_HEADLESS_MODE_URL=https://example.com`: disables the built-in UI and redirects non-API page requests to the configured URL instead of returning `404`.
 
 Test UI changes locally without Docker Hub:
 
