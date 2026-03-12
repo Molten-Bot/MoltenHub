@@ -7,6 +7,7 @@ import (
 	"sort"
 	"strings"
 
+	"statocyst/internal/api"
 	"statocyst/internal/store"
 )
 
@@ -128,6 +129,7 @@ func collectLaunchDiagnostics(lookup func(string) (string, bool)) ([]launchDiagn
 		warnIfUnset(lookup, "STATOCYST_ADDR", defaultAddr, "server will listen on the default bind address"),
 		warnIfUnset(lookup, "STATOCYST_UI_DEV_MODE", "false", "embedded UI assets will be served; local file hot-reload stays disabled"),
 		warnIfUnset(lookup, "STATOCYST_ENABLE_LOCAL_CORS", "false", "browser calls from local file:// or alternate localhost origins remain blocked"),
+		warnIfUnset(lookup, "STATOCYST_CORS_ALLOWED_ORIGINS", "<unset>", "browser calls from other origins remain blocked unless explicitly allowlisted"),
 		warnIfUnset(lookup, "STATOCYST_HEADLESS_MODE", "false", "the built-in UI stays enabled"),
 		warnIfUnset(lookup, "STATOCYST_CANONICAL_BASE_URL", "<unset>", "entity uri fields will be omitted from responses and snapshots"),
 		warnIfUnset(lookup, "STATOCYST_ADMIN_SNAPSHOT_KEY", "<unset>", "snapshot endpoint access falls back to admin identity checks only"),
@@ -142,6 +144,17 @@ func collectLaunchDiagnostics(lookup func(string) (string, bool)) ([]launchDiagn
 	)
 
 	headlessMode := strings.EqualFold(envValue(lookup, "STATOCYST_HEADLESS_MODE"), "true")
+	if raw := envValue(lookup, "STATOCYST_CORS_ALLOWED_ORIGINS"); raw != "" {
+		if _, err := api.ParseCORSAllowedOrigins(raw); err != nil {
+			failures = append(failures, "STATOCYST_CORS_ALLOWED_ORIGINS")
+			diagnostics = append(diagnostics, launchDiagnostic{
+				level:   "ERROR",
+				name:    "STATOCYST_CORS_ALLOWED_ORIGINS",
+				value:   raw,
+				message: err.Error(),
+			})
+		}
+	}
 	if headlessMode {
 		diagnostics = appendOptionalWarnings(diagnostics, warnIfUnset(
 			lookup,

@@ -54,6 +54,10 @@ Statocyst validates metadata as JSON object payloads with size limits, then pers
   - Callers must send `X-UI-Config-Key: <secret>` to receive unredacted `admin.emails`.
   - Without that header (or with a wrong key), only those privileged fields are redacted.
 - Bind token TTL minutes: `BIND_TOKEN_TTL_MINUTES=15` (default `15`).
+- Browser API CORS:
+  - `STATOCYST_ENABLE_LOCAL_CORS=true`: allow local browser/manual testing origins (`localhost`, `127.0.0.1`, `::1`, and `file://` via `Origin: null`).
+  - `STATOCYST_CORS_ALLOWED_ORIGINS=https://app.molten.bot,https://app.molten-qa.site`: allow explicit browser origins to call API routes cross-origin.
+  - Values must be comma-separated `http://` or `https://` origins without paths, queries, or fragments.
 - Metadata payload max bytes (human/org/agent metadata write routes):
   - `STATOCYST_MAX_METADATA_BYTES=196608` (default `196608`, i.e. `192KB`).
 - Canonical URI authority:
@@ -125,6 +129,7 @@ Useful local keys:
 - `DEV_LOGIN_AUTO=true`: auto-redirect from login page into `/profile` as that dev user.
 - `SUPER_ADMIN_REVIEW_MODE=true` + `SUPER_ADMIN_EMAILS=...`: test admin visibility/behavior locally.
 - `STATOCYST_ENABLE_LOCAL_CORS=true`: enables API CORS for local browser/manual testing (including `file://` origin). Default is `false`.
+- `STATOCYST_CORS_ALLOWED_ORIGINS=https://app.molten.bot,https://app.molten-qa.site`: enables API CORS for explicit browser origins. Values must be comma-separated `http://` or `https://` origins without paths.
 - `STATOCYST_HEADLESS_MODE=true` + `STATOCYST_HEADLESS_MODE_URL=https://example.com`: disables the built-in UI and redirects non-API page requests to the configured URL instead of returning `404`.
 
 Test UI changes locally without Docker Hub:

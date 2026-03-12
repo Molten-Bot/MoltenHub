@@ -5,6 +5,7 @@ import (
 	"compress/gzip"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/url"
 	"regexp"
@@ -57,7 +58,8 @@ type humanActor struct {
 }
 
 type RouterOptions struct {
-	EnableLocalCORS bool
+	EnableLocalCORS    bool
+	AllowedCORSOrigins map[string]struct{}
 }
 
 func NewHandler(
@@ -148,8 +150,8 @@ func NewRouterWithOptions(handler *Handler, opts RouterOptions) http.Handler {
 	mux.HandleFunc("/", handler.handleUI)
 	router := withAPICompression(mux)
 	router = withPeerOutboxProcessing(handler, router)
-	if opts.EnableLocalCORS {
-		router = withAPICORS(router)
+	if opts.EnableLocalCORS || len(opts.AllowedCORSOrigins) > 0 {
+		router = withAPICORS(router, opts.EnableLocalCORS, opts.AllowedCORSOrigins)
 	}
 	return router
 }
@@ -167,7 +169,7 @@ func withPeerOutboxProcessing(handler *Handler, next http.Handler) http.Handler 
 	})
 }
 
-func withAPICORS(next http.Handler) http.Handler {
+func withAPICORS(next http.Handler, enableLocalCORS bool, allowedOrigins map[string]struct{}) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if !isAPIPath(r.URL.Path) {
 			next.ServeHTTP(w, r)
@@ -175,7 +177,7 @@ func withAPICORS(next http.Handler) http.Handler {
 		}
 
 		origin := strings.TrimSpace(r.Header.Get("Origin"))
-		if allowsLocalCORSOrigin(origin) {
+		if allowsCORSOrigin(origin, enableLocalCORS, allowedOrigins) {
 			w.Header().Set("Access-Control-Allow-Origin", origin)
 			addVaryOrigin(w.Header())
 			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PATCH, DELETE, OPTIONS")
@@ -199,6 +201,38 @@ func withAPICORS(next http.Handler) http.Handler {
 	})
 }
 
+func ParseCORSAllowedOrigins(raw string) (map[string]struct{}, error) {
+	origins := make(map[string]struct{})
+	for _, part := range strings.FieldsFunc(raw, func(r rune) bool {
+		return r == ',' || r == '\n'
+	}) {
+		normalized, err := normalizeAllowedOrigin(part)
+		if err != nil {
+			return nil, err
+		}
+		if normalized == "" {
+			continue
+		}
+		origins[normalized] = struct{}{}
+	}
+	return origins, nil
+}
+
+func allowsCORSOrigin(origin string, enableLocalCORS bool, allowedOrigins map[string]struct{}) bool {
+	if origin == "" {
+		return false
+	}
+	if enableLocalCORS && allowsLocalCORSOrigin(origin) {
+		return true
+	}
+	normalized, err := normalizeAllowedOrigin(origin)
+	if err != nil {
+		return false
+	}
+	_, ok := allowedOrigins[normalized]
+	return ok
+}
+
 func allowsLocalCORSOrigin(origin string) bool {
 	if origin == "" {
 		return false
@@ -215,6 +249,33 @@ func allowsLocalCORSOrigin(origin string) bool {
 	}
 	host := strings.ToLower(strings.TrimSpace(u.Hostname()))
 	return host == "localhost" || host == "127.0.0.1" || host == "::1"
+}
+
+func normalizeAllowedOrigin(raw string) (string, error) {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		return "", nil
+	}
+	u, err := url.Parse(trimmed)
+	if err != nil {
+		return "", fmt.Errorf("invalid CORS origin %q: %w", raw, err)
+	}
+	if u.Scheme != "http" && u.Scheme != "https" {
+		return "", fmt.Errorf("invalid CORS origin %q: scheme must be http or https", raw)
+	}
+	if strings.TrimSpace(u.Host) == "" {
+		return "", fmt.Errorf("invalid CORS origin %q: host is required", raw)
+	}
+	if u.User != nil {
+		return "", fmt.Errorf("invalid CORS origin %q: userinfo is not allowed", raw)
+	}
+	if u.RawQuery != "" || u.Fragment != "" {
+		return "", fmt.Errorf("invalid CORS origin %q: query and fragment are not allowed", raw)
+	}
+	if u.Path != "" && u.Path != "/" {
+		return "", fmt.Errorf("invalid CORS origin %q: path is not allowed", raw)
+	}
+	return strings.ToLower(u.Scheme) + "://" + strings.ToLower(u.Host), nil
 }
 
 func withAPICompression(next http.Handler) http.Handler {

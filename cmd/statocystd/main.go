@@ -68,6 +68,10 @@ func main() {
 		}
 	}
 	enableLocalCORS := envBool("STATOCYST_ENABLE_LOCAL_CORS", false)
+	allowedCORSOrigins, err := api.ParseCORSAllowedOrigins(os.Getenv("STATOCYST_CORS_ALLOWED_ORIGINS"))
+	if err != nil {
+		log.Fatalf("CORS allowed origins configuration error: %v", err)
+	}
 	handler := api.NewHandler(
 		controlStore,
 		queueStore,
@@ -86,7 +90,8 @@ func main() {
 	handler.SetHeadlessModeRedirectURL(os.Getenv("STATOCYST_HEADLESS_MODE_URL"))
 	handler.SetStorageHealth(storageHealth)
 	router := api.NewRouterWithOptions(handler, api.RouterOptions{
-		EnableLocalCORS: enableLocalCORS,
+		EnableLocalCORS:    enableLocalCORS,
+		AllowedCORSOrigins: allowedCORSOrigins,
 	})
 
 	server := &http.Server{
@@ -96,6 +101,7 @@ func main() {
 
 	log.Printf("statocyst listening on %s", addr)
 	log.Printf("local CORS enabled: %t", enableLocalCORS)
+	log.Printf("configured CORS origins: %d", len(allowedCORSOrigins))
 	if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 		log.Fatalf("server failed: %v", err)
 	}

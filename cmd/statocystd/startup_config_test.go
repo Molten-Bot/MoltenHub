@@ -73,6 +73,20 @@ func TestCollectLaunchDiagnostics_FailsWhenS3SigningPairIsIncomplete(t *testing.
 	assertDiagnosticContains(t, diagnostics, "ERROR", "STATOCYST_STATE_S3_SECRET_ACCESS_KEY", "requires both access key id and secret access key")
 }
 
+func TestCollectLaunchDiagnostics_FailsWhenCORSAllowedOriginsIsInvalid(t *testing.T) {
+	diagnostics, err := collectLaunchDiagnostics(mapLookup(map[string]string{
+		"STATOCYST_CORS_ALLOWED_ORIGINS": "app.molten.bot",
+	}))
+	if err == nil {
+		t.Fatal("expected error for invalid CORS allowed origins")
+	}
+	if !strings.Contains(err.Error(), "STATOCYST_CORS_ALLOWED_ORIGINS") {
+		t.Fatalf("expected STATOCYST_CORS_ALLOWED_ORIGINS in error, got %v", err)
+	}
+
+	assertDiagnosticContains(t, diagnostics, "ERROR", "STATOCYST_CORS_ALLOWED_ORIGINS", "scheme must be http or https")
+}
+
 func mapLookup(values map[string]string) func(string) (string, bool) {
 	return func(name string) (string, bool) {
 		if values == nil {

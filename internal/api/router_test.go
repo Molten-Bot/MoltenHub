@@ -102,6 +102,67 @@ func TestHealthReportsDegradedStorageStatus(t *testing.T) {
 	}
 }
 
+func TestParseCORSAllowedOrigins(t *testing.T) {
+	origins, err := ParseCORSAllowedOrigins(" https://app.molten.bot,https://app.molten-qa.site/\nhttp://localhost:3000 ")
+	if err != nil {
+		t.Fatalf("ParseCORSAllowedOrigins returned error: %v", err)
+	}
+
+	for _, origin := range []string{
+		"https://app.molten.bot",
+		"https://app.molten-qa.site",
+		"http://localhost:3000",
+	} {
+		if _, ok := origins[origin]; !ok {
+			t.Fatalf("expected origin %q in parsed set, got %v", origin, origins)
+		}
+	}
+}
+
+func TestAPICORSAllowsExplicitOrigin(t *testing.T) {
+	mem := store.NewMemoryStore()
+	waiters := longpoll.NewWaiters()
+	h := NewHandler(mem, mem, waiters, auth.NewDevHumanAuthProvider(), "https://hub.molten.bot", "", "", "", "", "molten.bot", true, 15*time.Minute, false)
+	router := NewRouterWithOptions(h, RouterOptions{
+		AllowedCORSOrigins: map[string]struct{}{
+			"https://app.molten.bot": {},
+		},
+	})
+
+	req := httptest.NewRequest(http.MethodOptions, "/health", nil)
+	req.Header.Set("Origin", "https://app.molten.bot")
+	req.Header.Set("Access-Control-Request-Headers", "Authorization, Content-Type")
+	resp := httptest.NewRecorder()
+	router.ServeHTTP(resp, req)
+
+	if resp.Code != http.StatusNoContent {
+		t.Fatalf("expected OPTIONS /health 204, got %d %s", resp.Code, resp.Body.String())
+	}
+	if got := resp.Header().Get("Access-Control-Allow-Origin"); got != "https://app.molten.bot" {
+		t.Fatalf("expected explicit CORS origin to be allowed, got %q", got)
+	}
+}
+
+func TestAPICORSRejectsUnknownOrigin(t *testing.T) {
+	mem := store.NewMemoryStore()
+	waiters := longpoll.NewWaiters()
+	h := NewHandler(mem, mem, waiters, auth.NewDevHumanAuthProvider(), "https://hub.molten.bot", "", "", "", "", "molten.bot", true, 15*time.Minute, false)
+	router := NewRouterWithOptions(h, RouterOptions{
+		AllowedCORSOrigins: map[string]struct{}{
+			"https://app.molten.bot": {},
+		},
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/health", nil)
+	req.Header.Set("Origin", "https://evil.example")
+	resp := httptest.NewRecorder()
+	router.ServeHTTP(resp, req)
+
+	if got := resp.Header().Get("Access-Control-Allow-Origin"); got != "" {
+		t.Fatalf("expected unknown origin to be blocked, got %q", got)
+	}
+}
+
 type failOnceQueue struct {
 	base            store.MessageQueueStore
 	mu              sync.Mutex
