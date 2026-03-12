@@ -87,6 +87,15 @@ func TestCollectLaunchDiagnostics_FailsWhenCORSAllowedOriginsIsInvalid(t *testin
 	assertDiagnosticContains(t, diagnostics, "ERROR", "STATOCYST_CORS_ALLOWED_ORIGINS", "scheme must be http or https")
 }
 
+func TestDiagnosticLogValueRedactsSensitiveValues(t *testing.T) {
+	if got := diagnosticLogValue("SUPABASE_ANON_KEY", "secret-value"); got != "<redacted>" {
+		t.Fatalf("expected sensitive config to be redacted, got %q", got)
+	}
+	if got := diagnosticLogValue("HUMAN_AUTH_PROVIDER", "supabase"); got != "supabase" {
+		t.Fatalf("expected non-sensitive config to remain visible, got %q", got)
+	}
+}
+
 func mapLookup(values map[string]string) func(string) (string, bool) {
 	return func(name string) (string, bool) {
 		if values == nil {

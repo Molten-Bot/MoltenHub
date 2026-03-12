@@ -315,28 +315,31 @@ func (h *Handler) processPeerOutboxes(ctx context.Context, limit int) {
 		}
 		body, err := json.Marshal(peerInboundEnvelope{Message: outbound.Message})
 		if err != nil {
-			_, _ = h.control.MarkPeerOutboundRetry(outbound.OutboundID, err.Error(), nextPeerAttempt(now, outbound.AttemptCount), now)
+			_, _ = h.control.MarkPeerOutboundRetry(outbound.OutboundID, store.SanitizeError(err), nextPeerAttempt(now, outbound.AttemptCount), now)
 			continue
 		}
 		targetURL := strings.TrimRight(peer.DeliveryBaseURL, "/") + "/v1/peer/messages"
 		req, err := http.NewRequestWithContext(ctx, http.MethodPost, targetURL, strings.NewReader(string(body)))
 		if err != nil {
-			_, _ = h.control.MarkPeerOutboundRetry(outbound.OutboundID, err.Error(), nextPeerAttempt(now, outbound.AttemptCount), now)
+			_, _ = h.control.MarkPeerOutboundRetry(outbound.OutboundID, store.SanitizeError(err), nextPeerAttempt(now, outbound.AttemptCount), now)
 			continue
 		}
 		req.Header.Set("Content-Type", "application/json")
 		signPeerRequest(req, peer.SharedSecret, peer.PeerID, body, now)
 		resp, err := h.peerHTTPClient.Do(req)
 		if err != nil {
-			h.control.RecordPeerDeliveryFailure(peer.PeerID, err.Error(), now)
-			_, _ = h.control.MarkPeerOutboundRetry(outbound.OutboundID, err.Error(), nextPeerAttempt(now, outbound.AttemptCount), now)
+			reason := store.SanitizeError(err)
+			h.control.RecordPeerDeliveryFailure(peer.PeerID, reason, now)
+			_, _ = h.control.MarkPeerOutboundRetry(outbound.OutboundID, reason, nextPeerAttempt(now, outbound.AttemptCount), now)
 			continue
 		}
 		data, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
 		_ = resp.Body.Close()
 		if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusAccepted {
-			reason := strings.TrimSpace(string(data))
+			reason := store.SanitizeErrorText(strings.TrimSpace(string(data)))
 			if reason == "" {
+				reason = fmt.Sprintf("peer returned %d", resp.StatusCode)
+			} else if reason == "request failed" {
 				reason = fmt.Sprintf("peer returned %d", resp.StatusCode)
 			}
 			h.control.RecordPeerDeliveryFailure(peer.PeerID, reason, now)

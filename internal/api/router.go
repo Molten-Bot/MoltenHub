@@ -434,8 +434,8 @@ func (h *Handler) handleHealthz(w http.ResponseWriter, r *http.Request) {
 		"backend": health.State.Backend,
 		"healthy": health.State.Healthy,
 	}
-	if strings.TrimSpace(health.State.Error) != "" {
-		statePayload["error"] = health.State.Error
+	if stateErr := store.SanitizeErrorText(health.State.Error); stateErr != "" {
+		statePayload["error"] = stateErr
 	}
 
 	queuePayload := map[string]any{
@@ -451,8 +451,8 @@ func (h *Handler) handleHealthz(w http.ResponseWriter, r *http.Request) {
 	if queueMetrics.OldestLeaseExpiryAt != nil {
 		queuePayload["oldest_lease_expires_at"] = queueMetrics.OldestLeaseExpiryAt
 	}
-	if strings.TrimSpace(health.Queue.Error) != "" {
-		queuePayload["error"] = health.Queue.Error
+	if queueErr := store.SanitizeErrorText(health.Queue.Error); queueErr != "" {
+		queuePayload["error"] = queueErr
 	}
 
 	writeJSON(w, http.StatusOK, map[string]any{
@@ -492,11 +492,8 @@ func (h *Handler) currentStorageHealth() store.StorageHealthStatus {
 	return health
 }
 
-func (h *Handler) setQueueRuntimeError(err error) {
-	if err == nil {
-		return
-	}
-	msg := strings.TrimSpace(err.Error())
+func (h *Handler) setQueueRuntimeError(msg string) {
+	msg = strings.TrimSpace(msg)
 	if msg == "" {
 		return
 	}

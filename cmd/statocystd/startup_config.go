@@ -37,9 +37,26 @@ func validateLaunchConfiguration() error {
 		if diagnostic.level == "" {
 			continue
 		}
-		log.Printf("%s: %s value=%q: %s", diagnostic.level, diagnostic.name, diagnostic.value, diagnostic.message)
+		log.Printf("%s: %s value=%q: %s", diagnostic.level, diagnostic.name, diagnosticLogValue(diagnostic.name, diagnostic.value), diagnostic.message)
 	}
 	return err
+}
+
+func diagnosticLogValue(name, value string) string {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" {
+		return trimmed
+	}
+
+	sensitiveHints := []string{"SECRET", "TOKEN", "KEY", "PASSWORD", "PRIVATE", "BEARER"}
+	upperName := strings.ToUpper(strings.TrimSpace(name))
+	for _, hint := range sensitiveHints {
+		if strings.Contains(upperName, hint) {
+			return "<redacted>"
+		}
+	}
+
+	return trimmed
 }
 
 func collectLaunchDiagnostics(lookup func(string) (string, bool)) ([]launchDiagnostic, error) {
