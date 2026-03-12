@@ -117,6 +117,41 @@ func TestHealthReportsDegradedStorageStatus(t *testing.T) {
 	}
 }
 
+func TestHealthSanitizesBackendErrorDetails(t *testing.T) {
+	mem := store.NewMemoryStore()
+	waiters := longpoll.NewWaiters()
+	h := NewHandler(mem, mem, waiters, auth.NewDevHumanAuthProvider(), "https://hub.molten.bot", "", "", "", "", "molten.bot", true, 15*time.Minute, false)
+	h.SetStorageHealth(store.StorageHealthStatus{
+		StartupMode: store.StorageStartupModeDegraded,
+		State: store.StorageBackendHealth{
+			Backend: "s3",
+			Healthy: false,
+			Error:   "list objects status 403: <Error><Code>SignatureDoesNotMatch</Code></Error>",
+		},
+		Queue: store.StorageBackendHealth{
+			Backend: "s3",
+			Healthy: false,
+			Error:   "get object status 500: https://example.invalid/internal",
+		},
+	})
+	router := NewRouter(h)
+
+	health := doJSONRequest(t, router, http.MethodGet, "/health", nil, nil)
+	if health.Code != http.StatusOK {
+		t.Fatalf("expected /health 200, got %d %s", health.Code, health.Body.String())
+	}
+	payload := decodeJSONMap(t, health.Body.Bytes())
+	storageObj, _ := payload["storage"].(map[string]any)
+	stateObj, _ := storageObj["state"].(map[string]any)
+	queueObj, _ := storageObj["queue"].(map[string]any)
+	if got, _ := stateObj["error"].(string); got != "authorization failed" {
+		t.Fatalf("expected sanitized state error, got %q payload=%v", got, payload)
+	}
+	if got, _ := queueObj["error"].(string); got != "request failed" {
+		t.Fatalf("expected sanitized queue error, got %q payload=%v", got, payload)
+	}
+}
+
 func TestParseCORSAllowedOrigins(t *testing.T) {
 	origins, err := ParseCORSAllowedOrigins(" https://app.molten.bot,https://app.molten-qa.site/\nhttp://localhost:3000 ")
 	if err != nil {
@@ -253,8 +288,11 @@ func TestHealthReportsRuntimeQueueFailureAndRecovery(t *testing.T) {
 		t.Fatalf("expected queue health false after runtime enqueue failure, got %v payload=%v", queueObj["healthy"], payload)
 	}
 	queueErr, _ := queueObj["error"].(string)
+	if !strings.Contains(queueErr, "queue enqueue failed") {
+		t.Fatalf("expected runtime queue error summary after enqueue failure, got %q payload=%v", queueErr, payload)
+	}
 	if !strings.Contains(queueErr, "enqueue unavailable") {
-		t.Fatalf("expected runtime queue error to include enqueue failure, got %q payload=%v", queueErr, payload)
+		t.Fatalf("expected runtime queue error to preserve safe enqueue detail, got %q payload=%v", queueErr, payload)
 	}
 
 	successfulPublish := publish(t, router, tokenA, agentUUIDB, "second")
@@ -327,8 +365,11 @@ func TestHealthReportsRuntimeDequeueFailureAndRecovery(t *testing.T) {
 		t.Fatalf("expected queue health false after runtime dequeue failure, got %v payload=%v", queueObj["healthy"], payload)
 	}
 	queueErr, _ := queueObj["error"].(string)
+	if !strings.Contains(queueErr, "queue dequeue failed") {
+		t.Fatalf("expected runtime queue error summary after dequeue failure, got %q payload=%v", queueErr, payload)
+	}
 	if !strings.Contains(queueErr, "dequeue unavailable") {
-		t.Fatalf("expected runtime queue error to include dequeue failure, got %q payload=%v", queueErr, payload)
+		t.Fatalf("expected runtime queue error to preserve safe dequeue detail, got %q payload=%v", queueErr, payload)
 	}
 
 	recoveredPull := pull(t, router, tokenB, 10)

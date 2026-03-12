@@ -68,6 +68,15 @@ func messageStatusResponse(record model.MessageRecord) map[string]any {
 	}
 }
 
+func queueRuntimeFailureSummary(operation string, err error) string {
+	base := strings.TrimSpace("queue " + operation + " failed")
+	detail := strings.TrimSpace(store.SanitizeError(err))
+	if detail == "" {
+		return base
+	}
+	return base + ": " + detail
+}
+
 func (h *Handler) handlePublish(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		writeMethodNotAllowed(w)
@@ -259,13 +268,14 @@ func (h *Handler) handlePublish(w http.ResponseWriter, r *http.Request) {
 
 	if err := h.queue.Enqueue(r.Context(), message); err != nil {
 		_ = h.control.AbortMessageRecord(message.MessageID)
-		h.setQueueRuntimeError(err)
+		summary := queueRuntimeFailureSummary("enqueue", err)
+		h.setQueueRuntimeError(summary)
 		log.Printf(
-			"publish enqueue failed: from_agent_uuid=%s to_agent_uuid=%s message_id=%s err=%v",
+			"publish enqueue failed: from_agent_uuid=%s to_agent_uuid=%s message_id=%s err_summary=%q",
 			senderAgentUUID,
 			targetAgent.AgentUUID,
 			messageID,
-			err,
+			summary,
 		)
 		if errors.Is(err, store.ErrAgentNotFound) {
 			writeError(w, http.StatusNotFound, "unknown_receiver", "to_agent_uuid is not registered")
@@ -304,8 +314,9 @@ func (h *Handler) handlePull(w http.ResponseWriter, r *http.Request) {
 	deadline := h.now().Add(timeout)
 	for {
 		if message, ok, err := h.queue.Dequeue(r.Context(), receiverAgentUUID); err != nil {
-			h.setQueueRuntimeError(err)
-			log.Printf("pull dequeue failed: receiver_agent_uuid=%s err=%v", receiverAgentUUID, err)
+			summary := queueRuntimeFailureSummary("dequeue", err)
+			h.setQueueRuntimeError(summary)
+			log.Printf("pull dequeue failed: receiver_agent_uuid=%s err_summary=%q", receiverAgentUUID, summary)
 			writeError(w, http.StatusInternalServerError, "store_error", "failed to dequeue message")
 			return
 		} else if ok {
@@ -325,8 +336,9 @@ func (h *Handler) handlePull(w http.ResponseWriter, r *http.Request) {
 
 		notifyCh, cancel := h.waiters.Register(receiverAgentUUID)
 		if message, ok, err := h.queue.Dequeue(r.Context(), receiverAgentUUID); err != nil {
-			h.setQueueRuntimeError(err)
-			log.Printf("pull dequeue failed after waiter register: receiver_agent_uuid=%s err=%v", receiverAgentUUID, err)
+			summary := queueRuntimeFailureSummary("dequeue", err)
+			h.setQueueRuntimeError(summary)
+			log.Printf("pull dequeue failed after waiter register: receiver_agent_uuid=%s err_summary=%q", receiverAgentUUID, summary)
 			cancel()
 			writeError(w, http.StatusInternalServerError, "store_error", "failed to dequeue message")
 			return
@@ -454,7 +466,7 @@ func (h *Handler) handleNackDelivery(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := h.queue.Enqueue(r.Context(), message); err != nil {
-		h.setQueueRuntimeError(err)
+		h.setQueueRuntimeError(queueRuntimeFailureSummary("requeue", err))
 		writeError(w, http.StatusInternalServerError, "store_error", "failed to requeue message")
 		return
 	}
@@ -492,14 +504,16 @@ func (h *Handler) handleMessageStatus(w http.ResponseWriter, r *http.Request, me
 func (h *Handler) requeueExpiredLeases(ctx context.Context) {
 	messages, err := h.control.ExpireMessageLeases(h.now().UTC())
 	if err != nil {
-		h.setQueueRuntimeError(err)
-		log.Printf("expire message leases failed: err=%v", err)
+		summary := queueRuntimeFailureSummary("lease expiry", err)
+		h.setQueueRuntimeError(summary)
+		log.Printf("expire message leases failed: err_summary=%q", summary)
 		return
 	}
 	for _, message := range messages {
 		if err := h.queue.Enqueue(ctx, message); err != nil {
-			h.setQueueRuntimeError(err)
-			log.Printf("requeue expired lease failed: message_id=%s err=%v", message.MessageID, err)
+			summary := queueRuntimeFailureSummary("requeue", err)
+			h.setQueueRuntimeError(summary)
+			log.Printf("requeue expired lease failed: message_id=%s err_summary=%q", message.MessageID, summary)
 			return
 		}
 		h.waiters.Notify(message.ToAgentUUID)
@@ -521,7 +535,7 @@ func (h *Handler) writeClaimedMessage(w http.ResponseWriter, r *http.Request, re
 	delivery, record, err := h.control.LeaseMessage(message.MessageID, receiverAgentUUID, deliveryID, leasedAt, leaseExpiresAt)
 	if err != nil {
 		_ = h.queue.Enqueue(r.Context(), message)
-		h.setQueueRuntimeError(err)
+		h.setQueueRuntimeError(queueRuntimeFailureSummary("lease", err))
 		writeError(w, http.StatusInternalServerError, "store_error", "failed to lease message")
 		return false
 	}
