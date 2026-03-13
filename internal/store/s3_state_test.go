@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"encoding/xml"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -721,5 +722,55 @@ func TestS3StateStore_IncrementalPersistAvoidsFullResync(t *testing.T) {
 	}
 	if counts.put > 3 {
 		t.Fatalf("expected only changed objects to be written, got %d put requests", counts.put)
+	}
+}
+
+func TestS3StateStore_PersistAllAppliesDeadlineWhenContextHasNone(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		path := strings.TrimPrefix(r.URL.Path, "/")
+		if path == "state-bucket" && r.Method == http.MethodGet && r.URL.Query().Get("list-type") == "2" {
+			type listResult struct {
+				XMLName     xml.Name `xml:"ListBucketResult"`
+				IsTruncated bool     `xml:"IsTruncated"`
+			}
+			w.WriteHeader(http.StatusOK)
+			_ = xml.NewEncoder(w).Encode(listResult{IsTruncated: false})
+			return
+		}
+		if strings.HasPrefix(path, "state-bucket/") && r.Method == http.MethodPut {
+			_, _ = io.Copy(io.Discard, r.Body)
+			_ = r.Body.Close()
+			time.Sleep(500 * time.Millisecond)
+			return
+		}
+		http.NotFound(w, r)
+	}))
+	defer server.Close()
+
+	store := &s3StateStore{
+		MemoryStore:    NewMemoryStore(),
+		httpClient:     server.Client(),
+		endpoint:       server.URL,
+		bucket:         "state-bucket",
+		region:         "us-east-1",
+		prefix:         "statocyst-state",
+		pathStyle:      true,
+		persistTimeout: 50 * time.Millisecond,
+	}
+
+	now := time.Date(2026, 3, 6, 9, 0, 0, 0, time.UTC)
+	id := &idGen{}
+	start := time.Now()
+	_, err := store.UpsertHuman("dev", "slow-sub", "slow@a.test", true, now, id.Next)
+	elapsed := time.Since(start)
+
+	if err == nil {
+		t.Fatalf("expected UpsertHuman to fail when S3 put blocks")
+	}
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("expected context deadline exceeded, got: %v", err)
+	}
+	if elapsed > 750*time.Millisecond {
+		t.Fatalf("expected fast failure, took %s", elapsed)
 	}
 }

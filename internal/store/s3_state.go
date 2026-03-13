@@ -25,6 +25,8 @@ import (
 const (
 	defaultS3StateRegion = "us-east-1"
 	defaultS3StatePrefix = "statocyst-state"
+	// Cap end-to-end state flush time per mutation to avoid long request stalls.
+	defaultS3StatePersistTimeout = 8 * time.Second
 )
 
 type s3StateStore struct {
@@ -37,6 +39,8 @@ type s3StateStore struct {
 	prefix     string
 	pathStyle  bool
 	signer     *s3Signer
+	// persistTimeout bounds one persistAll call when the caller context has no deadline.
+	persistTimeout time.Duration
 
 	persistMu sync.Mutex
 	// persistedObjects tracks the last successfully persisted object bodies by key.
@@ -200,14 +204,15 @@ func NewS3StateStoreFromEnv() (*s3StateStore, error) {
 	}
 
 	store := &s3StateStore{
-		MemoryStore: NewMemoryStore(),
-		httpClient:  &http.Client{Timeout: 10 * time.Second},
-		endpoint:    strings.TrimSuffix(endpoint, "/"),
-		bucket:      bucket,
-		region:      region,
-		prefix:      prefix,
-		pathStyle:   pathStyle,
-		signer:      newS3Signer(accessKeyID, secretAccessKey, region),
+		MemoryStore:    NewMemoryStore(),
+		httpClient:     &http.Client{Timeout: 10 * time.Second},
+		endpoint:       strings.TrimSuffix(endpoint, "/"),
+		bucket:         bucket,
+		region:         region,
+		prefix:         prefix,
+		pathStyle:      pathStyle,
+		signer:         newS3Signer(accessKeyID, secretAccessKey, region),
+		persistTimeout: defaultS3StatePersistTimeout,
 	}
 	if err := store.loadFromS3(context.Background()); err != nil {
 		return nil, err
@@ -679,6 +684,21 @@ func (s *s3StateStore) RecordMessageDropped(orgID string) {
 }
 
 func (s *s3StateStore) persistAll(ctx context.Context) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if _, hasDeadline := ctx.Deadline(); !hasDeadline {
+		timeout := s.persistTimeout
+		if timeout <= 0 {
+			timeout = defaultS3StatePersistTimeout
+		}
+		if timeout > 0 {
+			var cancel context.CancelFunc
+			ctx, cancel = context.WithTimeout(ctx, timeout)
+			defer cancel()
+		}
+	}
+
 	desired := flattenS3Objects(s.buildDesiredObjects())
 	previous := s.persistedObjects
 	if previous == nil {
