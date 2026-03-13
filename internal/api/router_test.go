@@ -2161,6 +2161,21 @@ func TestAgentCapabilitiesAndSkillEndpoints(t *testing.T) {
 	router := newTestRouter()
 	_, _, tokenA, _, _, _, _, _ := setupTrustedAgents(t, router)
 
+	manifestResp := doJSONRequest(t, router, http.MethodGet, "/v1/agents/me/manifest", nil, map[string]string{
+		"Authorization": "Bearer " + tokenA,
+	})
+	if manifestResp.Code != http.StatusOK {
+		t.Fatalf("agent manifest failed: %d %s", manifestResp.Code, manifestResp.Body.String())
+	}
+	manifestPayload := decodeJSONMap(t, manifestResp.Body.Bytes())
+	manifestObj, ok := manifestPayload["manifest"].(map[string]any)
+	if !ok {
+		t.Fatalf("missing manifest object: %v", manifestPayload)
+	}
+	if manifestObj["schema_version"] != "2" {
+		t.Fatalf("expected manifest schema_version=2, got %v", manifestObj["schema_version"])
+	}
+
 	capsResp := doJSONRequest(t, router, http.MethodGet, "/v1/agents/me/capabilities", nil, map[string]string{
 		"Authorization": "Bearer " + tokenA,
 	})
@@ -2178,6 +2193,15 @@ func TestAgentCapabilitiesAndSkillEndpoints(t *testing.T) {
 	}
 	if len(peers) == 0 {
 		t.Fatalf("expected at least one talkable peer")
+	}
+	if _, ok := capsPayload["manifest_url"].(string); !ok {
+		t.Fatalf("expected manifest_url in capabilities payload, got %v", capsPayload)
+	}
+	if _, ok := capsPayload["capabilities"].([]any); !ok {
+		t.Fatalf("expected capabilities array in capabilities payload, got %v", capsPayload)
+	}
+	if _, ok := capsPayload["routes"].([]any); !ok {
+		t.Fatalf("expected routes array in capabilities payload, got %v", capsPayload)
 	}
 
 	skillJSONResp := doJSONRequest(t, router, http.MethodGet, "/v1/agents/me/skill", nil, map[string]string{
@@ -2221,6 +2245,37 @@ func TestAgentCapabilitiesAndSkillEndpoints(t *testing.T) {
 	}
 	if !strings.Contains(mdResp.Body.String(), "http://example.com/v1/messages/pull?timeout_ms=5000") {
 		t.Fatalf("expected pull guidance in markdown skill, got %q", mdResp.Body.String())
+	}
+
+	manifestMDReq := httptest.NewRequest(http.MethodGet, "/v1/agents/me/manifest?format=markdown", nil)
+	manifestMDReq.Header.Set("Authorization", "Bearer "+tokenA)
+	manifestMDReq.Header.Set("Accept", "text/markdown")
+	manifestMDResp := httptest.NewRecorder()
+	router.ServeHTTP(manifestMDResp, manifestMDReq)
+	if manifestMDResp.Code != http.StatusOK {
+		t.Fatalf("agent manifest markdown failed: %d %s", manifestMDResp.Code, manifestMDResp.Body.String())
+	}
+	if !strings.HasPrefix(manifestMDResp.Header().Get("Content-Type"), "text/markdown") {
+		t.Fatalf("expected markdown content type for manifest, got %q", manifestMDResp.Header().Get("Content-Type"))
+	}
+	if !strings.Contains(manifestMDResp.Body.String(), "Statocyst Agent Manifest") {
+		t.Fatalf("expected manifest markdown heading, got %q", manifestMDResp.Body.String())
+	}
+	if !strings.Contains(manifestMDResp.Body.String(), "GET /v1/agents/me/manifest") {
+		t.Fatalf("expected manifest route contract in markdown, got %q", manifestMDResp.Body.String())
+	}
+
+	notAcceptableReq := httptest.NewRequest(http.MethodGet, "/v1/agents/me/manifest", nil)
+	notAcceptableReq.Header.Set("Authorization", "Bearer "+tokenA)
+	notAcceptableReq.Header.Set("Accept", "application/xml")
+	notAcceptableResp := httptest.NewRecorder()
+	router.ServeHTTP(notAcceptableResp, notAcceptableReq)
+	if notAcceptableResp.Code != http.StatusNotAcceptable {
+		t.Fatalf("expected 406 for unsupported manifest accept header, got %d %s", notAcceptableResp.Code, notAcceptableResp.Body.String())
+	}
+	notAcceptablePayload := decodeJSONMap(t, notAcceptableResp.Body.Bytes())
+	if notAcceptablePayload["error"] != "not_acceptable" {
+		t.Fatalf("expected not_acceptable error code, got %v", notAcceptablePayload["error"])
 	}
 }
 
@@ -2882,4 +2937,197 @@ func TestAgentLimitAndSuperAdminBypass(t *testing.T) {
 	_, _, _ = registerMyAgent(t, router, "root", "root@molten.bot", rootOrg, "root-agent-1")
 	_, _, _ = registerMyAgent(t, router, "root", "root@molten.bot", rootOrg, "root-agent-2")
 	_, _, _ = registerMyAgent(t, router, "root", "root@molten.bot", rootOrg, "root-agent-3")
+}
+
+func TestErrorPayloadIncludesRequestCorrelationMetadata(t *testing.T) {
+	router := newTestRouter()
+	req := httptest.NewRequest(http.MethodGet, "/v1/agents/me", nil)
+	req.Header.Set("X-Request-ID", "agent-runtime-test-id")
+	resp := httptest.NewRecorder()
+
+	router.ServeHTTP(resp, req)
+
+	if resp.Code != http.StatusUnauthorized {
+		t.Fatalf("expected unauthorized response, got %d %s", resp.Code, resp.Body.String())
+	}
+	if got := resp.Header().Get("X-Request-ID"); got != "agent-runtime-test-id" {
+		t.Fatalf("expected response request id echo, got %q", got)
+	}
+	payload := decodeJSONMap(t, resp.Body.Bytes())
+	if payload["request_id"] != "agent-runtime-test-id" {
+		t.Fatalf("expected request_id in error payload, got %v", payload["request_id"])
+	}
+	detail, ok := payload["error_detail"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected error_detail object, got %v", payload["error_detail"])
+	}
+	if detail["code"] != "unauthorized" {
+		t.Fatalf("expected detail.code=unauthorized, got %v", detail["code"])
+	}
+	if detail["request_id"] != "agent-runtime-test-id" {
+		t.Fatalf("expected detail.request_id echo, got %v", detail["request_id"])
+	}
+}
+
+func TestAgentMutatingRoutesRejectUnsupportedMediaType(t *testing.T) {
+	router := newTestRouter()
+	_, _, tokenA, agentUUIDB, _, _, _, _ := setupTrustedAgents(t, router)
+
+	tests := []struct {
+		name   string
+		method string
+		path   string
+		body   string
+		token  string
+	}{
+		{
+			name:   "bind",
+			method: http.MethodPost,
+			path:   "/v1/agents/bind",
+			body:   `{"bind_token":"x"}`,
+		},
+		{
+			name:   "agent profile patch",
+			method: http.MethodPatch,
+			path:   "/v1/agents/me",
+			body:   `{"metadata":{"public":true}}`,
+			token:  tokenA,
+		},
+		{
+			name:   "agent metadata patch",
+			method: http.MethodPatch,
+			path:   "/v1/agents/me/metadata",
+			body:   `{"metadata":{"public":true}}`,
+			token:  tokenA,
+		},
+		{
+			name:   "publish",
+			method: http.MethodPost,
+			path:   "/v1/messages/publish",
+			body:   fmt.Sprintf(`{"to_agent_uuid":"%s","content_type":"text/plain","payload":"hello"}`, agentUUIDB),
+			token:  tokenA,
+		},
+		{
+			name:   "ack",
+			method: http.MethodPost,
+			path:   "/v1/messages/ack",
+			body:   `{"delivery_id":"delivery-1"}`,
+		},
+		{
+			name:   "nack",
+			method: http.MethodPost,
+			path:   "/v1/messages/nack",
+			body:   `{"delivery_id":"delivery-1"}`,
+		},
+	}
+
+	for _, tc := range tests {
+		req := httptest.NewRequest(tc.method, tc.path, strings.NewReader(tc.body))
+		req.Header.Set("Content-Type", "text/plain")
+		if tc.token != "" {
+			req.Header.Set("Authorization", "Bearer "+tc.token)
+		}
+		resp := httptest.NewRecorder()
+		router.ServeHTTP(resp, req)
+
+		if resp.Code != http.StatusUnsupportedMediaType {
+			t.Fatalf("%s: expected 415 unsupported media type, got %d %s", tc.name, resp.Code, resp.Body.String())
+		}
+		payload := decodeJSONMap(t, resp.Body.Bytes())
+		if payload["error"] != "unsupported_media_type" {
+			t.Fatalf("%s: expected unsupported_media_type error, got %v", tc.name, payload["error"])
+		}
+	}
+}
+
+func TestAgentDiscoveryRoutesRejectUnsupportedAcceptHeaders(t *testing.T) {
+	router := newTestRouter()
+	_, _, tokenA, _, _, _, _, _ := setupTrustedAgents(t, router)
+
+	tests := []struct {
+		name string
+		path string
+	}{
+		{name: "manifest", path: "/v1/agents/me/manifest"},
+		{name: "skill", path: "/v1/agents/me/skill"},
+		{name: "capabilities", path: "/v1/agents/me/capabilities"},
+	}
+
+	for _, tc := range tests {
+		req := httptest.NewRequest(http.MethodGet, tc.path, nil)
+		req.Header.Set("Authorization", "Bearer "+tokenA)
+		req.Header.Set("Accept", "application/xml")
+		resp := httptest.NewRecorder()
+		router.ServeHTTP(resp, req)
+
+		if resp.Code != http.StatusNotAcceptable {
+			t.Fatalf("%s: expected 406 not acceptable, got %d %s", tc.name, resp.Code, resp.Body.String())
+		}
+		payload := decodeJSONMap(t, resp.Body.Bytes())
+		if payload["error"] != "not_acceptable" {
+			t.Fatalf("%s: expected not_acceptable error code, got %v", tc.name, payload["error"])
+		}
+	}
+}
+
+func TestAgentRuntimeUnauthorizedErrorEnvelopeContract(t *testing.T) {
+	router := newTestRouter()
+
+	tests := []struct {
+		name   string
+		method string
+		path   string
+		body   any
+	}{
+		{name: "me", method: http.MethodGet, path: "/v1/agents/me"},
+		{name: "manifest", method: http.MethodGet, path: "/v1/agents/me/manifest"},
+		{name: "capabilities", method: http.MethodGet, path: "/v1/agents/me/capabilities"},
+		{name: "skill", method: http.MethodGet, path: "/v1/agents/me/skill"},
+		{name: "profile-patch", method: http.MethodPatch, path: "/v1/agents/me", body: map[string]any{"metadata": map[string]any{"public": true}}},
+		{name: "metadata-patch", method: http.MethodPatch, path: "/v1/agents/me/metadata", body: map[string]any{"metadata": map[string]any{"public": true}}},
+		{name: "publish", method: http.MethodPost, path: "/v1/messages/publish", body: map[string]any{"to_agent_uuid": "11111111-1111-1111-1111-111111111111", "content_type": "text/plain", "payload": "hello"}},
+		{name: "pull", method: http.MethodGet, path: "/v1/messages/pull?timeout_ms=0"},
+		{name: "ack", method: http.MethodPost, path: "/v1/messages/ack", body: map[string]any{"delivery_id": "delivery-1"}},
+		{name: "nack", method: http.MethodPost, path: "/v1/messages/nack", body: map[string]any{"delivery_id": "delivery-1"}},
+		{name: "status", method: http.MethodGet, path: "/v1/messages/message-1"},
+	}
+
+	for _, tc := range tests {
+		resp := doJSONRequest(t, router, tc.method, tc.path, tc.body, nil)
+		if resp.Code != http.StatusUnauthorized {
+			t.Fatalf("%s: expected 401 unauthorized, got %d %s", tc.name, resp.Code, resp.Body.String())
+		}
+		requestID := strings.TrimSpace(resp.Header().Get("X-Request-ID"))
+		if requestID == "" {
+			t.Fatalf("%s: expected X-Request-ID header", tc.name)
+		}
+		payload := decodeJSONMap(t, resp.Body.Bytes())
+		if payload["error"] != "unauthorized" {
+			t.Fatalf("%s: expected unauthorized error code, got %v", tc.name, payload["error"])
+		}
+		if payload["request_id"] != requestID {
+			t.Fatalf("%s: expected request_id to match X-Request-ID header, got request_id=%v header=%s", tc.name, payload["request_id"], requestID)
+		}
+		if payload["retryable"] != false {
+			t.Fatalf("%s: expected retryable=false for unauthorized, got %v", tc.name, payload["retryable"])
+		}
+		nextAction, _ := payload["next_action"].(string)
+		if strings.TrimSpace(nextAction) == "" {
+			t.Fatalf("%s: expected next_action guidance", tc.name)
+		}
+
+		detail, ok := payload["error_detail"].(map[string]any)
+		if !ok {
+			t.Fatalf("%s: expected error_detail object, got %v", tc.name, payload["error_detail"])
+		}
+		if detail["code"] != "unauthorized" {
+			t.Fatalf("%s: expected error_detail.code unauthorized, got %v", tc.name, detail["code"])
+		}
+		if detail["request_id"] != requestID {
+			t.Fatalf("%s: expected error_detail.request_id to match header, got %v", tc.name, detail["request_id"])
+		}
+		if detail["retryable"] != false {
+			t.Fatalf("%s: expected error_detail.retryable=false, got %v", tc.name, detail["retryable"])
+		}
+	}
 }

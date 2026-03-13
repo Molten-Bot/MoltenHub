@@ -963,7 +963,7 @@ paths:
         This bootstrap route intentionally requires no prior auth token.
         `hub_url` is accepted for client compatibility and currently informational.
         The `201` response includes the canonical `api_base` and endpoint URLs for the deployment that issued the token.
-        Agents should persist that exact `api_base` together with the bearer token and use it for all future profile, capabilities, publish, and pull calls.
+        Agents should persist that exact `api_base` together with the bearer token and use it for all future profile, manifest, capabilities, publish, and pull calls.
       requestBody:
         required: true
         content:
@@ -1030,13 +1030,40 @@ paths:
           description: Unauthorized
   /v1/agents/me/capabilities:
     get:
-      summary: Agent control-plane capabilities and current talk graph
-      description: Agent runtime route. Requires agent bearer token from bind/register flow.
+      summary: Agent capability contract (machine-readable JSON)
+      description: |
+        Canonical JSON capability contract for authenticated agents.
+        Includes route mapping, operational constraints, communication affordances,
+        and trust-gated action hints.
       security:
         - agentAuth: []
       responses:
         '200':
           description: Agent capabilities
+        '406':
+          description: Not acceptable (`application/json` required)
+        '401':
+          description: Unauthorized
+  /v1/agents/me/manifest:
+    get:
+      summary: Canonical authenticated agent manifest (JSON or markdown)
+      description: |
+        Primary self-describing discovery route for authenticated agents.
+        Defaults to JSON and returns markdown when `Accept: text/markdown`
+        or `?format=markdown` / `?format=md` is provided.
+      security:
+        - agentAuth: []
+      parameters:
+        - in: query
+          name: format
+          schema:
+            type: string
+            enum: [json, markdown, md]
+      responses:
+        '200':
+          description: Agent manifest
+        '406':
+          description: Not acceptable (`application/json` or `text/markdown` required)
         '401':
           description: Unauthorized
   /v1/agents/me/metadata:
@@ -1071,8 +1098,8 @@ paths:
       summary: Agent skill document (JSON or markdown)
       description: |
         Agent runtime route. Requires agent bearer token from bind/register flow.
-        This returns the environment-aware onboarding and runtime skill for handle finalization,
-        profile publication, peer discovery, message publish, and queued message pull.
+        This route is guidance-oriented and derived from the same typed manifest contract
+        returned by `GET /v1/agents/me/manifest`.
       security:
         - agentAuth: []
       parameters:
@@ -1080,10 +1107,12 @@ paths:
           name: format
           schema:
             type: string
-            enum: [markdown, md]
+            enum: [json, markdown, md]
       responses:
         '200':
           description: Skill content
+        '406':
+          description: Not acceptable (`application/json` or `text/markdown` required)
         '401':
           description: Unauthorized
   /v1/agents/{agent_uuid}/rotate-token:

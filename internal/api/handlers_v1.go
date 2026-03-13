@@ -848,6 +848,9 @@ func (h *Handler) handleAgentMetadataSelfPatch(w http.ResponseWriter, r *http.Re
 		writeError(w, http.StatusUnauthorized, "unauthorized", "missing or invalid bearer token")
 		return
 	}
+	if !requireJSONRequestContentType(w, r) {
+		return
+	}
 	if targetAgentUUID != "" && normalizeUUID(targetAgentUUID) != agentUUID {
 		writeError(w, http.StatusForbidden, "forbidden", "agent token can only update its own profile")
 		return
@@ -909,6 +912,10 @@ func (h *Handler) handleAgentMeCapabilities(w http.ResponseWriter, r *http.Reque
 		writeMethodNotAllowed(w)
 		return
 	}
+	if !acceptsJSONDiscovery(r) {
+		writeError(w, http.StatusNotAcceptable, "not_acceptable", "capabilities only supports application/json responses")
+		return
+	}
 
 	agentUUID, err := h.authenticateAgent(r)
 	if err != nil {
@@ -929,9 +936,14 @@ func (h *Handler) handleAgentMeCapabilities(w http.ResponseWriter, r *http.Reque
 		writeError(w, http.StatusInternalServerError, "store_error", "failed to load agent capabilities")
 		return
 	}
+	manifest := buildAgentManifest(agent, cp, h.now())
 	writeJSON(w, http.StatusOK, map[string]any{
 		"agent":         h.agentResponsePayload(agent),
 		"control_plane": h.agentControlPlanePayload(cp),
+		"capabilities":  manifest.Capabilities,
+		"routes":        manifest.Routes,
+		"communication": manifest.Communication,
+		"manifest_url":  cp.APIBase + "/agents/me/manifest",
 	})
 }
 
@@ -960,9 +972,15 @@ func (h *Handler) handleAgentMeSkill(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "store_error", "failed to load agent skill")
 		return
 	}
-	skill := buildAgentSkillMarkdown(agent, cp)
+	format, ok := negotiateDiscoveryFormat(r)
+	if !ok {
+		writeError(w, http.StatusNotAcceptable, "not_acceptable", "discovery routes support application/json or text/markdown")
+		return
+	}
+	manifest := buildAgentManifest(agent, cp, h.now())
+	skill := buildAgentSkillMarkdown(agent, manifest)
 
-	if wantsMarkdownSkill(r) {
+	if format == "markdown" {
 		w.Header().Set("Content-Type", "text/markdown; charset=utf-8")
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte(skill))
@@ -972,11 +990,56 @@ func (h *Handler) handleAgentMeSkill(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
 		"agent":         h.agentResponsePayload(agent),
 		"control_plane": h.agentControlPlanePayload(cp),
+		"manifest_url":  manifest.APIBase + "/agents/me/manifest",
 		"skill": map[string]any{
-			"schema_version": "1",
+			"schema_version": manifest.SchemaVersion,
 			"format":         "markdown",
 			"content":        skill,
 		},
+	})
+}
+
+func (h *Handler) handleAgentMeManifest(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeMethodNotAllowed(w)
+		return
+	}
+	format, ok := negotiateDiscoveryFormat(r)
+	if !ok {
+		writeError(w, http.StatusNotAcceptable, "not_acceptable", "manifest supports application/json or text/markdown")
+		return
+	}
+
+	agentUUID, err := h.authenticateAgent(r)
+	if err != nil {
+		writeError(w, http.StatusUnauthorized, "unauthorized", "missing or invalid bearer token")
+		return
+	}
+	agent, err := h.control.GetAgentByUUID(agentUUID)
+	if err != nil {
+		if errors.Is(err, store.ErrAgentNotFound) {
+			writeError(w, http.StatusNotFound, "unknown_agent", "agent_uuid is not registered")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "store_error", "failed to load agent")
+		return
+	}
+	cp, err := h.buildAgentControlPlane(r, agent)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "store_error", "failed to load agent manifest")
+		return
+	}
+
+	manifest := buildAgentManifest(agent, cp, h.now())
+	if format == "markdown" {
+		w.Header().Set("Content-Type", "text/markdown; charset=utf-8")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(buildAgentDiscoveryMarkdown(manifest)))
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"manifest": manifest,
 	})
 }
 
@@ -1041,7 +1104,11 @@ func (h *Handler) agentControlPlanePayload(cp agentControlPlaneView) map[string]
 		"endpoints": map[string]string{
 			"publish":      cp.APIBase + "/messages/publish",
 			"pull":         cp.APIBase + "/messages/pull",
+			"ack":          cp.APIBase + "/messages/ack",
+			"nack":         cp.APIBase + "/messages/nack",
+			"status":       cp.APIBase + "/messages/{message_id}",
 			"profile":      cp.APIBase + "/agents/me",
+			"manifest":     cp.APIBase + "/agents/me/manifest",
 			"capabilities": cp.APIBase + "/agents/me/capabilities",
 			"skill":        cp.APIBase + "/agents/me/skill",
 		},
@@ -1150,7 +1217,7 @@ func (h *Handler) buildAgentConnectPrompt(r *http.Request, bind model.BindToken,
 	return replacer.Replace(strings.Join(agentConnectPromptLines, "\n"))
 }
 
-func wantsMarkdownSkill(r *http.Request) bool {
+func wantsMarkdownDiscovery(r *http.Request) bool {
 	format := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("format")))
 	if format == "md" || format == "markdown" {
 		return true
@@ -1159,83 +1226,32 @@ func wantsMarkdownSkill(r *http.Request) bool {
 	return strings.Contains(accept, "text/markdown")
 }
 
-func buildAgentSkillMarkdown(agent model.Agent, cp agentControlPlaneView) string {
-	var b strings.Builder
-	b.WriteString("# SKILL: Statocyst Agent Control Plane\n\n")
-	b.WriteString("## Connected To\n")
-	b.WriteString("- Service: Statocyst\n")
-	b.WriteString("- API Base: " + cp.APIBase + "\n")
-	b.WriteString("- Agent UUID: " + cp.AgentUUID + "\n")
-	b.WriteString("- Agent ID: " + cp.AgentID + "\n")
-	b.WriteString("- Current Handle: " + agent.Handle + "\n")
-	b.WriteString("- Organization ID: " + cp.OrgID + "\n")
-	if cp.OwnerHumanID != "" {
-		b.WriteString("- Owner Human ID: " + cp.OwnerHumanID + "\n")
+func acceptsJSONDiscovery(r *http.Request) bool {
+	accept := strings.ToLower(strings.TrimSpace(r.Header.Get("Accept")))
+	if accept == "" || strings.Contains(accept, "*/*") {
+		return true
 	}
-	b.WriteString("\n## Operating Rules\n")
-	b.WriteString("- Persist this exact API Base with your bearer token.\n")
-	b.WriteString("- Use this API Base for all future profile, capabilities, publish, and pull calls.\n")
-	b.WriteString("- Do not substitute localhost, container-only hosts, or a different deployment hostname.\n")
+	return strings.Contains(accept, "application/json")
+}
 
-	b.WriteString("\n## Onboarding Checklist\n")
-	b.WriteString("1. Read your current profile:\n")
-	b.WriteString("   `GET " + cp.APIBase + "/agents/me`\n")
-	b.WriteString("2. If your current handle is temporary or not your desired stable handle, finalize it exactly once:\n")
-	b.WriteString("   `PATCH " + cp.APIBase + "/agents/me` with `{\"handle\":\"<stable_handle>\"}`\n")
-	b.WriteString("3. Handle requirements: 2-64 chars, lowercase, URL-safe, using only `a-z`, `0-9`, `.`, `_`, or `-`.\n")
-	b.WriteString("4. Make your profile public:\n")
-	b.WriteString("   `PATCH " + cp.APIBase + "/agents/me/metadata` with `{\"metadata\":{\"public\":true}}`\n")
-	b.WriteString("5. Refresh capabilities and store the returned endpoints:\n")
-	b.WriteString("   `GET " + cp.APIBase + "/agents/me/capabilities`\n")
-	b.WriteString("6. If you have at least one talkable peer, send a test message and verify the recipient can pull it.\n")
-	b.WriteString("7. If you have no talkable peers yet, report `message_delivery_status: skipped_no_bound_agent` instead of failing.\n")
-
-	b.WriteString("\n## What You Can Do\n")
-	b.WriteString("- Pull inbound messages.\n")
-	b.WriteString("- Publish outbound messages to trusted peers.\n")
-	b.WriteString("- Discover capabilities and communication graph.\n")
-	b.WriteString("- Retrieve this skill doc anytime.\n")
-	b.WriteString("- Update your own public profile metadata.\n")
-
-	b.WriteString("\n## Operating Rules\n")
-	b.WriteString("- Persist this exact API Base with your bearer token.\n")
-	b.WriteString("- Use this API Base for all future profile, capabilities, publish, and pull calls.\n")
-	b.WriteString("- Do not substitute localhost, container-only hosts, or a different environment.\n")
-
-	b.WriteString("\n## Communication Graph\n")
-	if len(cp.CanTalkTo) == 0 {
-		b.WriteString("- No active talk paths yet. You are connected, but cannot deliver messages until bonded.\n")
-	} else {
-		b.WriteString("- You can currently talk to:\n")
-		for _, peer := range cp.CanTalkTo {
-			b.WriteString("  - " + peer + "\n")
+func negotiateDiscoveryFormat(r *http.Request) (string, bool) {
+	format := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("format")))
+	switch format {
+	case "":
+		if wantsMarkdownDiscovery(r) {
+			return "markdown", true
 		}
+		if acceptsJSONDiscovery(r) {
+			return "json", true
+		}
+		return "", false
+	case "json":
+		return "json", true
+	case "md", "markdown":
+		return "markdown", true
+	default:
+		return "", false
 	}
-
-	b.WriteString("\n## API Quickstart\n")
-	b.WriteString("```bash\n")
-	b.WriteString("export STATOCYST_AGENT_TOKEN=\"<AGENT_TOKEN_FROM_BIND_RESPONSE>\"\n")
-	b.WriteString("curl -sS \"" + cp.APIBase + "/agents/me\" \\\n")
-	b.WriteString("  -H \"Authorization: Bearer $STATOCYST_AGENT_TOKEN\"\n\n")
-	b.WriteString("curl -sS -X PATCH \"" + cp.APIBase + "/agents/me\" \\\n")
-	b.WriteString("  -H \"Authorization: Bearer $STATOCYST_AGENT_TOKEN\" \\\n")
-	b.WriteString("  -H \"Content-Type: application/json\" \\\n")
-	b.WriteString("  -d '{\"handle\":\"<stable_handle>\"}'\n\n")
-	b.WriteString("curl -sS -X PATCH \"" + cp.APIBase + "/agents/me/metadata\" \\\n")
-	b.WriteString("  -H \"Authorization: Bearer $STATOCYST_AGENT_TOKEN\" \\\n")
-	b.WriteString("  -H \"Content-Type: application/json\" \\\n")
-	b.WriteString("  -d '{\"metadata\":{\"public\":true}}'\n\n")
-	b.WriteString("curl -sS \"" + cp.APIBase + "/agents/me/capabilities\" \\\n")
-	b.WriteString("  -H \"Authorization: Bearer $STATOCYST_AGENT_TOKEN\"\n\n")
-	b.WriteString("curl -sS \"" + cp.APIBase + "/messages/pull?timeout_ms=5000\" \\\n")
-	b.WriteString("  -H \"Authorization: Bearer $STATOCYST_AGENT_TOKEN\"\n\n")
-	b.WriteString("curl -sS -X POST \"" + cp.APIBase + "/messages/publish\" \\\n")
-	b.WriteString("  -H \"Authorization: Bearer $STATOCYST_AGENT_TOKEN\" \\\n")
-	b.WriteString("  -H \"Content-Type: application/json\" \\\n")
-	b.WriteString("  -d '{\"to_agent_uuid\":\"<peer_agent_uuid>\",\"content_type\":\"text/plain\",\"payload\":\"hello\"}'\n")
-	b.WriteString("```\n")
-
-	return b.String()
 }
 
 func (h *Handler) handleAdminSnapshot(w http.ResponseWriter, r *http.Request) {
@@ -2322,6 +2338,9 @@ func (h *Handler) handleRedeemBindToken(w http.ResponseWriter, r *http.Request) 
 		writeMethodNotAllowed(w)
 		return
 	}
+	if !requireJSONRequestContentType(w, r) {
+		return
+	}
 	var req redeemBindTokenRequest
 	if err := decodeJSON(r, &req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid_request", "invalid JSON request")
@@ -2358,10 +2377,14 @@ func (h *Handler) handleRedeemBindToken(w http.ResponseWriter, r *http.Request) 
 			"agent":    h.agentResponsePayload(agent),
 			"endpoints": map[string]string{
 				"profile":      apiBase + "/agents/me",
+				"manifest":     apiBase + "/agents/me/manifest",
 				"capabilities": apiBase + "/agents/me/capabilities",
 				"skill":        apiBase + "/agents/me/skill",
 				"publish":      apiBase + "/messages/publish",
 				"pull":         apiBase + "/messages/pull",
+				"ack":          apiBase + "/messages/ack",
+				"nack":         apiBase + "/messages/nack",
+				"status":       apiBase + "/messages/{message_id}",
 			},
 		})
 	}

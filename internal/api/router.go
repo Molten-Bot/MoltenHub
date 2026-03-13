@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"mime"
 	"net/http"
 	"net/url"
 	"regexp"
@@ -51,6 +52,13 @@ type Handler struct {
 	storageHealth     store.StorageHealthStatus
 	queueRuntimeError string
 	peerHTTPClient    *http.Client
+}
+
+type requestIDContextKey struct{}
+
+type errorHint struct {
+	Retryable  bool
+	NextAction string
 }
 
 type humanActor struct {
@@ -138,6 +146,7 @@ func NewRouterWithOptions(handler *Handler, opts RouterOptions) http.Handler {
 	mux.HandleFunc("/v1/agents/bind", handler.handleRedeemBindToken)
 	mux.HandleFunc("/v1/agents/me", handler.handleAgentMe)
 	mux.HandleFunc("/v1/agents/me/metadata", handler.handleAgentMeMetadata)
+	mux.HandleFunc("/v1/agents/me/manifest", handler.handleAgentMeManifest)
 	mux.HandleFunc("/v1/agents/me/capabilities", handler.handleAgentMeCapabilities)
 	mux.HandleFunc("/v1/agents/me/skill", handler.handleAgentMeSkill)
 	mux.HandleFunc("/v1/agents/", handler.handleAgentsSubroutes)
@@ -155,6 +164,7 @@ func NewRouterWithOptions(handler *Handler, opts RouterOptions) http.Handler {
 	if opts.EnableLocalCORS || len(opts.AllowedCORSOrigins) > 0 {
 		router = withAPICORS(router, opts.EnableLocalCORS, opts.AllowedCORSOrigins)
 	}
+	router = withRequestCorrelation(router)
 	return router
 }
 
@@ -577,14 +587,95 @@ func pruneEmptyObjects(value any) (any, bool) {
 }
 
 func writeError(w http.ResponseWriter, status int, code string, message string) {
-	writeJSON(w, status, map[string]string{
+	payload := map[string]any{
 		"error":   code,
 		"message": message,
-	})
+	}
+	if requestID := strings.TrimSpace(w.Header().Get("X-Request-ID")); requestID != "" {
+		payload["request_id"] = requestID
+	}
+	if hint, ok := defaultErrorHint(code); ok {
+		payload["retryable"] = hint.Retryable
+		if hint.NextAction != "" {
+			payload["next_action"] = hint.NextAction
+		}
+	}
+	detail := map[string]any{
+		"code":    code,
+		"message": message,
+	}
+	if requestID, ok := payload["request_id"]; ok {
+		detail["request_id"] = requestID
+	}
+	if retryable, ok := payload["retryable"]; ok {
+		detail["retryable"] = retryable
+	}
+	if nextAction, ok := payload["next_action"]; ok {
+		detail["next_action"] = nextAction
+	}
+	payload["error_detail"] = detail
+	writeJSON(w, status, payload)
 }
 
 func writeMethodNotAllowed(w http.ResponseWriter) {
 	writeError(w, http.StatusMethodNotAllowed, "method_not_allowed", "method not allowed")
+}
+
+func defaultErrorHint(code string) (errorHint, bool) {
+	switch code {
+	case "store_error":
+		return errorHint{
+			Retryable:  true,
+			NextAction: "retry with backoff; if repeated, check statocyst health and storage backends",
+		}, true
+	case "unsupported_media_type":
+		return errorHint{
+			Retryable:  false,
+			NextAction: "send Content-Type: application/json",
+		}, true
+	case "not_acceptable":
+		return errorHint{
+			Retryable:  false,
+			NextAction: "request application/json or text/markdown on discovery routes",
+		}, true
+	case "invalid_request":
+		return errorHint{
+			Retryable:  false,
+			NextAction: "fix request payload shape and retry",
+		}, true
+	case "unauthorized":
+		return errorHint{
+			Retryable:  false,
+			NextAction: "present valid credentials for this route class",
+		}, true
+	}
+	return errorHint{}, false
+}
+
+func withRequestCorrelation(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requestID := strings.TrimSpace(r.Header.Get("X-Request-ID"))
+		if requestID == "" {
+			generated, err := newUUIDv7()
+			if err == nil {
+				requestID = generated
+			}
+		}
+		if requestID != "" {
+			w.Header().Set("X-Request-ID", requestID)
+			r = r.WithContext(context.WithValue(r.Context(), requestIDContextKey{}, requestID))
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+func requireJSONRequestContentType(w http.ResponseWriter, r *http.Request) bool {
+	mediaType, _, err := mime.ParseMediaType(r.Header.Get("Content-Type"))
+	if err != nil || !strings.EqualFold(strings.TrimSpace(mediaType), "application/json") {
+		writeError(w, http.StatusUnsupportedMediaType, "unsupported_media_type", "request content type must be application/json")
+		return false
+	}
+	return true
 }
 
 func decodeJSON(r *http.Request, out any) error {

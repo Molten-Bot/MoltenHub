@@ -82,6 +82,9 @@ func (h *Handler) handlePublish(w http.ResponseWriter, r *http.Request) {
 		writeMethodNotAllowed(w)
 		return
 	}
+	if !requireJSONRequestContentType(w, r) {
+		return
+	}
 
 	senderAgentUUID, err := h.authenticateAgent(r)
 	if err != nil {
@@ -403,6 +406,9 @@ func (h *Handler) handleAckDelivery(w http.ResponseWriter, r *http.Request) {
 		writeMethodNotAllowed(w)
 		return
 	}
+	if !requireJSONRequestContentType(w, r) {
+		return
+	}
 	receiverAgentUUID, err := h.authenticateAgent(r)
 	if err != nil {
 		writeError(w, http.StatusUnauthorized, "unauthorized", "missing or invalid bearer token")
@@ -436,6 +442,9 @@ func (h *Handler) handleAckDelivery(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) handleNackDelivery(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		writeMethodNotAllowed(w)
+		return
+	}
+	if !requireJSONRequestContentType(w, r) {
 		return
 	}
 	receiverAgentUUID, err := h.authenticateAgent(r)
