@@ -10,6 +10,9 @@ concurrency:
 permissions:
   contents: read
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
 jobs:
   guard-main:
     runs-on: ubuntu-latest
@@ -33,7 +36,7 @@ jobs:
         uses: actions/setup-go@v5
         with:
           go-version: '1.22.x'
-          cache: true
+          cache: false
 
       - name: Run tests
         run: go test ./...
@@ -137,7 +140,7 @@ jobs:
         uses: actions/setup-go@v5
         with:
           go-version: '1.22.x'
-          cache: true
+          cache: false
 
       - name: Resolve Docker Hub settings
         id: dockerhub
