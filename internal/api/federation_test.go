@@ -306,6 +306,60 @@ func TestFederatedPublishStillRequiresRemoteOrgTrustForOrgScopedAgents(t *testin
 	}
 }
 
+func TestFederatedPublishHumanOwnedRequiresMutualRemoteTrustBeforeDelivery(t *testing.T) {
+	alpha := newFederatedTestServer(t, "https://alpha.example")
+	beta := newFederatedTestServer(t, "https://beta.example")
+
+	aliceHumanID := currentHumanID(t, alpha.router, "alice", "alice@a.test")
+	tokenA, agentUUIDA := registerFederatedAgentWithUUID(t, alpha.router, "alice", "alice@a.test", "", "agent-a", aliceHumanID)
+	agentA := currentAgent(t, alpha.router, tokenA)
+	agentURIA, _ := agentA["uri"].(string)
+
+	bobHumanID := currentHumanID(t, beta.router, "bob", "bob@b.test")
+	tokenB, _ := registerFederatedAgentWithUUID(t, beta.router, "bob", "bob@b.test", "", "agent-b", bobHumanID)
+	agentB := currentAgent(t, beta.router, tokenB)
+	agentURIB, _ := agentB["uri"].(string)
+
+	const peerID = "alpha-beta"
+	const secret = "peer-shared-secret"
+	createPeer(t, alpha.router, peerID, beta.canonicalBase, beta.server.URL, secret)
+	createPeer(t, beta.router, peerID, alpha.canonicalBase, alpha.server.URL, secret)
+
+	// A accepts B, but B has not accepted A yet.
+	createRemoteAgentTrustAdmin(t, alpha.router, agentUUIDA, peerID, agentURIB)
+
+	pubResp := publishByURI(t, alpha.router, tokenA, agentURIB, "one-sided-acceptance")
+	if pubResp.Code != http.StatusAccepted {
+		t.Fatalf("expected remote publish 202, got %d %s", pubResp.Code, pubResp.Body.String())
+	}
+	pubPayload := decodeJSONMap(t, pubResp.Body.Bytes())
+	messageID, _ := pubPayload["message_id"].(string)
+	if messageID == "" {
+		t.Fatalf("expected message_id in publish payload=%v", pubPayload)
+	}
+
+	pullResp := pull(t, beta.router, tokenB, 10)
+	if pullResp.Code != http.StatusNoContent {
+		t.Fatalf("expected beta pull 204 without reciprocal trust, got %d %s", pullResp.Code, pullResp.Body.String())
+	}
+
+	statusResp := messageStatus(t, alpha.router, tokenA, messageID)
+	if statusResp.Code != http.StatusOK {
+		t.Fatalf("expected sender message status 200, got %d %s", statusResp.Code, statusResp.Body.String())
+	}
+	statusPayload := decodeJSONMap(t, statusResp.Body.Bytes())
+	if got, _ := statusPayload["status"].(string); got == model.MessageForwarded {
+		t.Fatalf("expected message to remain unforwarded without reciprocal trust, payload=%v", statusPayload)
+	}
+	msg, _ := statusPayload["message"].(map[string]any)
+	if got, _ := msg["to_agent_uri"].(string); got != agentURIB {
+		t.Fatalf("expected to_agent_uri %q, got %q payload=%v", agentURIB, got, statusPayload)
+	}
+	if got, _ := msg["from_agent_uri"].(string); got != agentURIA {
+		t.Fatalf("expected from_agent_uri %q, got %q payload=%v", agentURIA, got, statusPayload)
+	}
+}
+
 func TestPeerIngressRejectsInvalidSignature(t *testing.T) {
 	beta := newFederatedTestServer(t, "https://beta.example")
 

@@ -412,6 +412,10 @@ paths:
   /v1/admin/remote-agent-trusts:
     get:
       summary: List remote agent trust references
+      description: |
+        Human-auth route.
+        Statocyst admins can list all remote agent trust references.
+        Non-admin humans are limited to trusts where they own the local (source) agent.
       security:
         - humanAuth: []
       responses:
@@ -419,6 +423,12 @@ paths:
           description: Remote agent trust list
     post:
       summary: Create remote agent trust reference
+      description: |
+        Human-auth route.
+        Binds a local agent to a canonical remote agent URI for federated delivery.
+        For human-owned agents, the owner may create this trust directly; admins may create for any agent.
+        `peer_id` is optional when `remote_agent_uri` maps to a configured peer canonical base.
+        Federated inbox delivery still requires reciprocal trust on the receiving side.
       security:
         - humanAuth: []
       requestBody:
@@ -427,7 +437,7 @@ paths:
           application/json:
             schema:
               type: object
-              required: [local_agent_uuid, peer_id, remote_agent_uri]
+              required: [local_agent_uuid, remote_agent_uri]
               properties:
                 local_agent_uuid:
                   type: string
@@ -438,9 +448,14 @@ paths:
       responses:
         '201':
           description: Remote agent trust created
+        '403':
+          description: Owner or statocyst admin required
   /v1/admin/remote-agent-trusts/{trust_id}:
     delete:
       summary: Delete remote agent trust reference
+      description: |
+        Human-auth route.
+        Owners can delete trusts for their own local agents; admins can delete any trust.
       security:
         - humanAuth: []
       parameters:
@@ -452,6 +467,8 @@ paths:
       responses:
         '200':
           description: Remote agent trust deleted
+        '403':
+          description: Owner or statocyst admin required
   /v1/public/snapshot:
     get:
       summary: Public filtered snapshot
@@ -1371,6 +1388,8 @@ paths:
         Agent runtime route. Requires agent bearer token.
         Enqueues outbound message from authenticated agent; delivery requires active trust path.
         Federated delivery can target a paired instance by canonical `to_agent_uri`.
+        Federated inbox delivery requires acceptance on both sides:
+        sender-side remote trust for the target URI and receiver-side remote trust for the sender URI.
         `client_msg_id` is treated as an idempotency key per sender agent.
         JSON success responses include `ok: true` and `result`.
       security:
