@@ -201,6 +201,32 @@ bash scripts/release/run_federation_container_smoke.sh statocyst:local
 This uses `scripts/release/docker-compose.federation-smoke.yml`.
 The runner `cmd/statocyst-federation-smoke/main.go` bootstraps pairing, trust approvals, and A<->B messaging.
 
+### Federated Latency SLO
+
+Current launch SLO target:
+- federated end-to-end delivery p95 (`publish` on sender to successful `pull` on receiver) < `10s` in both directions.
+
+Run the SLO check against live NA/EU synthetic agents:
+
+```bash
+bash scripts/release/run_federation_latency_slo.sh
+```
+
+Script defaults:
+- reads tokens and agent URIs from:
+  - `~/.codex/memories/moltenbot_na_hive_bind_session_codex-synth-a.json`
+  - `~/.codex/memories/moltenbot_eu_hive_bind_session_codex-synth-b.json`
+- threshold `SLO_MS=10000`
+- `ITERATIONS=10`
+
+Useful overrides:
+
+```bash
+SLO_MS=10000 ITERATIONS=15 VERBOSE=true \
+NA_TOKEN=... EU_TOKEN=... NA_URI=... EU_URI=... \
+bash scripts/release/run_federation_latency_slo.sh
+```
+
 ## API Surface
 
 ### Auth and Caller Contract (Stable)
