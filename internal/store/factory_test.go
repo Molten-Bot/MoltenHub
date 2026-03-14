@@ -137,7 +137,7 @@ func TestNewStoresFromEnv_S3StateConfigured(t *testing.T) {
 	}
 }
 
-func TestNewStoresFromEnv_S3StateAlsoHandlesS3Queue(t *testing.T) {
+func TestNewStoresFromEnv_S3StateAndS3QueueUseIndependentStores(t *testing.T) {
 	server := newFakeS3StoreServer(t)
 	defer server.Close()
 
@@ -147,6 +147,10 @@ func TestNewStoresFromEnv_S3StateAlsoHandlesS3Queue(t *testing.T) {
 	t.Setenv("STATOCYST_STATE_S3_BUCKET", "state-bucket")
 	t.Setenv("STATOCYST_STATE_S3_PREFIX", "statocyst-state")
 	t.Setenv("STATOCYST_STATE_S3_PATH_STYLE", "true")
+	t.Setenv("STATOCYST_QUEUE_S3_ENDPOINT", "http://localhost:9000")
+	t.Setenv("STATOCYST_QUEUE_S3_BUCKET", "queue-bucket")
+	t.Setenv("STATOCYST_QUEUE_S3_PREFIX", "statocyst-queue")
+	t.Setenv("STATOCYST_QUEUE_S3_PATH_STYLE", "true")
 
 	control, queue, err := NewStoresFromEnv()
 	if err != nil {
@@ -156,8 +160,29 @@ func TestNewStoresFromEnv_S3StateAlsoHandlesS3Queue(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected s3 state control store, got %T", control)
 	}
-	if queue != state {
-		t.Fatalf("expected queue to reuse s3 state store when state backend=s3")
+	if _, ok := queue.(*s3QueueStore); !ok {
+		t.Fatalf("expected dedicated s3 queue store, got %T", queue)
+	}
+	if queue == state {
+		t.Fatalf("expected queue store to be independent from s3 state store")
+	}
+}
+
+func TestNewStoresFromEnv_S3StateAndS3QueueRequiresQueueConfig(t *testing.T) {
+	server := newFakeS3StoreServer(t)
+	defer server.Close()
+
+	t.Setenv("STATOCYST_STATE_BACKEND", "s3")
+	t.Setenv("STATOCYST_QUEUE_BACKEND", "s3")
+	t.Setenv("STATOCYST_STATE_S3_ENDPOINT", server.URL)
+	t.Setenv("STATOCYST_STATE_S3_BUCKET", "state-bucket")
+	t.Setenv("STATOCYST_STATE_S3_PREFIX", "statocyst-state")
+	t.Setenv("STATOCYST_STATE_S3_PATH_STYLE", "true")
+	t.Setenv("STATOCYST_QUEUE_S3_ENDPOINT", "")
+	t.Setenv("STATOCYST_QUEUE_S3_BUCKET", "")
+
+	if _, _, err := NewStoresFromEnv(); err == nil {
+		t.Fatalf("expected error when queue backend is s3 without queue endpoint/bucket config")
 	}
 }
 

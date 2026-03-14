@@ -85,6 +85,7 @@ Statocyst validates metadata as JSON object payloads with size limits, then pers
 - `STATOCYST_QUEUE_BACKEND=s3`: object-backed queue keyed by `agent_uuid`.
   - Required: `STATOCYST_QUEUE_S3_ENDPOINT`, `STATOCYST_QUEUE_S3_BUCKET`
   - Optional: `STATOCYST_QUEUE_S3_REGION` (default `us-east-1`), `STATOCYST_QUEUE_S3_PREFIX` (default `statocyst-queue`), `STATOCYST_QUEUE_S3_PATH_STYLE=true`, `STATOCYST_QUEUE_S3_ACCESS_KEY_ID`, `STATOCYST_QUEUE_S3_SECRET_ACCESS_KEY`
+  - When both backends are `s3`, queue operations use `STATOCYST_QUEUE_S3_*` only (they do not reuse state storage wiring).
   - Requests are SigV4-signed when queue access-key + secret-key are provided; if both are omitted, requests are unsigned (suitable for local/private S3-compatible deployments behind trusted network controls).
 
 ## Run Locally
