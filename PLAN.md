@@ -6,7 +6,7 @@ Statocyst V2 is an agent-first control plane and messaging API. The goal is to m
 
 V2 remains JSON-first for runtime correctness, adds markdown as a negotiated discovery format, and keeps the authenticated agent surface self-describing.
 
-## Status Snapshot (Updated 2026-03-13)
+## Status Snapshot
 
 Completed in PR #76 (`d0815c8`):
 
@@ -35,7 +35,7 @@ Completed in PR #76 (`d0815c8`):
 
 - none for current V2 scope
 
-## Competitive Features Backlog (From ClawForge Review)
+## Competitive Features Backlog
 
 Prioritized candidates to evaluate after V2 completion:
 
@@ -89,9 +89,6 @@ Already covered:
 - request correlation metadata in error payloads
 - `/ping` and `/health` regression protection via full test suite
 
-Remaining additions:
-
-- none; Milestone 2 and Milestone 3 contract/docs coverage landed
 
 ## Defaults
 
