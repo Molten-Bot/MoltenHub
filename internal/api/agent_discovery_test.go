@@ -16,14 +16,16 @@ func TestBuildAgentDiscoveryMarkdownRendersTemplateTokens(t *testing.T) {
 		OrgID:     "org-alpha",
 	}
 	cp := agentControlPlaneView{
-		APIBase:       "https://hub.example/v1",
-		AgentUUID:     agent.AgentUUID,
-		AgentID:       agent.AgentID,
-		OrgID:         agent.OrgID,
-		OwnerHumanID:  "human-alice",
-		CanTalkTo:     []string{"22222222-2222-2222-2222-222222222222"},
-		CanTalkToURIs: []string{"https://hub.example/org-bob/agent-b"},
-		Capabilities:  []string{"publish_messages", "pull_messages"},
+		APIBase:          "https://hub.example/v1",
+		AgentUUID:        agent.AgentUUID,
+		AgentID:          agent.AgentID,
+		OrgID:            agent.OrgID,
+		OwnerHumanID:     "human-alice",
+		CanTalkTo:        []string{"22222222-2222-2222-2222-222222222222"},
+		CanTalkToURIs:    []string{"https://hub.example/org-bob/agent-b"},
+		Capabilities:     []string{"publish_messages", "pull_messages"},
+		AdvertisedSkills: []agentSkillSummary{{Name: "weather_lookup", Description: "Get current weather for a location."}},
+		PeerSkillCatalog: []agentPeerSkillSummary{{AgentID: "org-bob/agent-b", AgentURI: "https://hub.example/org-bob/agent-b", Skills: []agentSkillSummary{{Name: "math.add", Description: "Add two numbers."}}}},
 	}
 	manifest := buildAgentManifest(agent, cp, time.Date(2026, 3, 14, 0, 0, 0, 0, time.UTC))
 
@@ -53,6 +55,15 @@ func TestBuildAgentDiscoveryMarkdownRendersTemplateTokens(t *testing.T) {
 	if !strings.Contains(markdown, "## Retry Guidance") || !strings.Contains(markdown, "`store_error`: retryable=`true`") {
 		t.Fatalf("expected retry guidance section in markdown, got markdown=%q", markdown)
 	}
+	if !strings.Contains(markdown, "## Advertised Skills") || !strings.Contains(markdown, "`weather_lookup`: Get current weather for a location.") {
+		t.Fatalf("expected advertised skills section in markdown, got markdown=%q", markdown)
+	}
+	if !strings.Contains(markdown, "## Talkable Peer Skills") || !strings.Contains(markdown, "org-bob/agent-b") {
+		t.Fatalf("expected peer skill catalog section in markdown, got markdown=%q", markdown)
+	}
+	if !strings.Contains(markdown, "## Skill Call Contract") || !strings.Contains(markdown, "\"type\": \"skill_request\"") {
+		t.Fatalf("expected skill call contract in markdown, got markdown=%q", markdown)
+	}
 }
 
 func TestBuildAgentSkillMarkdownRendersTemplateTokens(t *testing.T) {
@@ -63,14 +74,16 @@ func TestBuildAgentSkillMarkdownRendersTemplateTokens(t *testing.T) {
 		OrgID:     "org-alpha",
 	}
 	cp := agentControlPlaneView{
-		APIBase:       "https://hub.example/v1",
-		AgentUUID:     agent.AgentUUID,
-		AgentID:       agent.AgentID,
-		OrgID:         agent.OrgID,
-		OwnerHumanID:  "human-alice",
-		CanTalkTo:     []string{"22222222-2222-2222-2222-222222222222"},
-		CanTalkToURIs: []string{"https://hub.example/org-bob/agent-b"},
-		Capabilities:  []string{"publish_messages", "pull_messages"},
+		APIBase:          "https://hub.example/v1",
+		AgentUUID:        agent.AgentUUID,
+		AgentID:          agent.AgentID,
+		OrgID:            agent.OrgID,
+		OwnerHumanID:     "human-alice",
+		CanTalkTo:        []string{"22222222-2222-2222-2222-222222222222"},
+		CanTalkToURIs:    []string{"https://hub.example/org-bob/agent-b"},
+		Capabilities:     []string{"publish_messages", "pull_messages"},
+		AdvertisedSkills: []agentSkillSummary{{Name: "weather_lookup", Description: "Get current weather for a location."}},
+		PeerSkillCatalog: []agentPeerSkillSummary{{AgentID: "org-bob/agent-b", AgentURI: "https://hub.example/org-bob/agent-b", Skills: []agentSkillSummary{{Name: "math.add", Description: "Add two numbers."}}}},
 	}
 	manifest := buildAgentManifest(agent, cp, time.Date(2026, 3, 14, 0, 0, 0, 0, time.UTC))
 
@@ -97,6 +110,18 @@ func TestBuildAgentSkillMarkdownRendersTemplateTokens(t *testing.T) {
 	if !strings.Contains(markdown, "## Operating Rules") || !strings.Contains(markdown, "Honor retryable and next_action fields") {
 		t.Fatalf("expected operating rules section in skill markdown, got markdown=%q", markdown)
 	}
+	if !strings.Contains(markdown, "never include secrets, keys, tokens, or passwords") {
+		t.Fatalf("expected no-secrets guidance in skill markdown, got markdown=%q", markdown)
+	}
+	if !strings.Contains(markdown, "## Advertised Skills") || !strings.Contains(markdown, "`weather_lookup`: Get current weather for a location.") {
+		t.Fatalf("expected advertised skills in skill markdown, got markdown=%q", markdown)
+	}
+	if !strings.Contains(markdown, "## Talkable Peer Skills") || !strings.Contains(markdown, "`math.add`: Add two numbers.") {
+		t.Fatalf("expected peer skills in skill markdown, got markdown=%q", markdown)
+	}
+	if !strings.Contains(markdown, "## Skill Call Contract") || !strings.Contains(markdown, "\"type\": \"skill_result\"") {
+		t.Fatalf("expected skill call contract in skill markdown, got markdown=%q", markdown)
+	}
 }
 
 func TestBuildAgentSkillMarkdownNoTalkPathsFallback(t *testing.T) {
@@ -118,5 +143,32 @@ func TestBuildAgentSkillMarkdownNoTalkPathsFallback(t *testing.T) {
 	markdown := buildAgentSkillMarkdown(agent, manifest)
 	if !strings.Contains(markdown, "No active talk paths yet. You are connected, but cannot deliver messages until bonded.") {
 		t.Fatalf("expected no-talk-path fallback, got markdown=%q", markdown)
+	}
+	if !strings.Contains(markdown, "## Advertised Skills") || !strings.Contains(markdown, "- none advertised") {
+		t.Fatalf("expected no-skills fallback in skill markdown, got markdown=%q", markdown)
+	}
+}
+
+func TestParseAdvertisedSkillsFiltersAndNormalizes(t *testing.T) {
+	metadata := map[string]any{
+		"skills": []any{
+			map[string]any{"name": " Weather_Lookup ", "description": "Get weather."},
+			map[string]any{"name": "bad skill!", "description": "invalid"},
+			map[string]any{"name": "math.add", "description": "Add numbers."},
+			map[string]any{"name": "math.add", "description": "Duplicate should overwrite."},
+			map[string]any{"name": "x", "description": "too short"},
+			map[string]any{"name": "ok-but-no-description"},
+		},
+	}
+
+	skills := parseAdvertisedSkills(metadata)
+	if len(skills) != 2 {
+		t.Fatalf("expected exactly 2 normalized skills, got %d skills=%v", len(skills), skills)
+	}
+	if skills[0].Name != "math.add" || skills[0].Description != "Duplicate should overwrite." {
+		t.Fatalf("unexpected first skill: %+v", skills[0])
+	}
+	if skills[1].Name != "weather_lookup" || skills[1].Description != "Get weather." {
+		t.Fatalf("unexpected second skill: %+v", skills[1])
 	}
 }

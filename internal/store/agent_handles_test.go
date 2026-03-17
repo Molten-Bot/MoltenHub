@@ -614,6 +614,39 @@ func TestMemoryStoreAgentMetadataNormalizesAgentType(t *testing.T) {
 	if got := unknownType.Metadata[model.AgentMetadataKeyType]; got != model.AgentTypeUnknown {
 		t.Fatalf("expected missing agent_type to default to %q, got %v", model.AgentTypeUnknown, got)
 	}
+	updatedSkills, err := mem.UpdateAgentMetadataSelf(agent.AgentUUID, map[string]any{
+		"agent_type": "codex",
+		"skills": []map[string]any{
+			{"name": "Weather.Lookup", "description": "Get current weather for a location."},
+			{"name": "math.add", "description": "Add two numbers."},
+		},
+	}, now.Add(250*time.Second))
+	if err != nil {
+		t.Fatalf("UpdateAgentMetadataSelf valid skills failed: %v", err)
+	}
+	rawSkills, ok := updatedSkills.Metadata[model.AgentMetadataKeySkills].([]map[string]any)
+	if !ok || len(rawSkills) != 2 {
+		t.Fatalf("expected normalized metadata.skills with 2 entries, got %T %v", updatedSkills.Metadata[model.AgentMetadataKeySkills], updatedSkills.Metadata[model.AgentMetadataKeySkills])
+	}
+	if rawSkills[0]["name"] != "math.add" || rawSkills[1]["name"] != "weather.lookup" {
+		t.Fatalf("expected normalized sorted skill names [math.add weather.lookup], got %v", rawSkills)
+	}
+
+	if _, err := mem.UpdateAgentMetadataSelf(agent.AgentUUID, map[string]any{
+		"skills": []map[string]any{
+			{"name": "weather_lookup", "description": "Use API key ABC123 to query upstream"},
+		},
+	}, now.Add(260*time.Second)); !errors.Is(err, ErrInvalidSkillDescription) {
+		t.Fatalf("expected secret-like skill description to fail with ErrInvalidSkillDescription, got %v", err)
+	}
+
+	if _, err := mem.UpdateAgentMetadataSelf(agent.AgentUUID, map[string]any{
+		"skills": []map[string]any{
+			{"name": "bad skill!", "description": "invalid name"},
+		},
+	}, now.Add(270*time.Second)); !errors.Is(err, ErrInvalidAgentSkills) {
+		t.Fatalf("expected invalid skills shape/name to fail with ErrInvalidAgentSkills, got %v", err)
+	}
 
 	if _, err := mem.UpdateAgentMetadataSelf(agent.AgentUUID, map[string]any{
 		"agent_type": "bad type!",

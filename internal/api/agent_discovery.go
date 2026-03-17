@@ -1,6 +1,7 @@
 package api
 
 import (
+	"encoding/json"
 	"sort"
 	"strconv"
 	"strings"
@@ -10,14 +11,17 @@ import (
 )
 
 type agentManifest struct {
-	SchemaVersion string                    `json:"schema_version"`
-	GeneratedAt   string                    `json:"generated_at"`
-	Agent         map[string]any            `json:"agent"`
-	APIBase       string                    `json:"api_base"`
-	Endpoints     map[string]string         `json:"endpoints"`
-	Capabilities  []agentCapabilityContract `json:"capabilities"`
-	Routes        []agentRouteContract      `json:"routes"`
-	Communication map[string]any            `json:"communication"`
+	SchemaVersion     string                    `json:"schema_version"`
+	GeneratedAt       string                    `json:"generated_at"`
+	Agent             map[string]any            `json:"agent"`
+	APIBase           string                    `json:"api_base"`
+	Endpoints         map[string]string         `json:"endpoints"`
+	Capabilities      []agentCapabilityContract `json:"capabilities"`
+	Routes            []agentRouteContract      `json:"routes"`
+	Communication     map[string]any            `json:"communication"`
+	AdvertisedSkills  []agentSkillSummary       `json:"advertised_skills"`
+	PeerSkillCatalog  []agentPeerSkillSummary   `json:"peer_skill_catalog"`
+	SkillCallContract map[string]any            `json:"skill_call_contract"`
 }
 
 type agentCapabilityContract struct {
@@ -279,11 +283,14 @@ func buildAgentManifest(agent model.Agent, cp agentControlPlaneView, now time.Ti
 			"handle":     agent.Handle,
 			"org_id":     agent.OrgID,
 		},
-		APIBase:       cp.APIBase,
-		Endpoints:     endpoints,
-		Capabilities:  capabilities,
-		Routes:        routes,
-		Communication: communication,
+		APIBase:           cp.APIBase,
+		Endpoints:         endpoints,
+		Capabilities:      capabilities,
+		Routes:            routes,
+		Communication:     communication,
+		AdvertisedSkills:  cp.AdvertisedSkills,
+		PeerSkillCatalog:  cp.PeerSkillCatalog,
+		SkillCallContract: defaultSkillCallContract(cp.APIBase),
 	}
 }
 
@@ -323,6 +330,13 @@ const (
 `
 	discoveryRouteRequestTypesHeader  = "- Request Content Types:\n"
 	discoveryRouteResponseTypesHeader = "- Response Content Types:\n"
+	discoverySkillsHeading            = "\n## Advertised Skills\n"
+	discoveryPeerSkillsHeading        = "\n## Talkable Peer Skills\n"
+	discoverySkillLine                = "- `{{SKILL_NAME}}`: {{SKILL_DESCRIPTION}}\n"
+	discoveryPeerHeaderLine           = "- {{PEER_LABEL}}\n"
+	discoveryPeerSkillLine            = "  - `{{SKILL_NAME}}`: {{SKILL_DESCRIPTION}}\n"
+	discoverySkillCallContractHeading = "\n## Skill Call Contract\n"
+	discoverySkillCallContractBlock   = "Use content type `application/json` for skill call envelopes.\n\n### skill_request JSON\n```json\n{{SKILL_REQUEST_JSON}}\n```\n\n### skill_result JSON\n```json\n{{SKILL_RESULT_JSON}}\n```\n"
 	discoveryRetryGuidanceHeading     = "\n## Retry Guidance\n"
 	discoveryRetryGuidanceLine        = "- `{{ERROR_CODE}}`: retryable=`{{RETRYABLE}}`; next_action={{NEXT_ACTION}}\n"
 
@@ -352,9 +366,21 @@ const (
 {{OPERATING_RULES_BLOCK}}
 ## Communication Graph
 {{COMMUNICATION_BLOCK}}
+## Advertised Skills
+{{ADVERTISED_SKILLS_BLOCK}}
+## Talkable Peer Skills
+{{PEER_SKILLS_BLOCK}}
+## Skill Call Contract
+{{SKILL_CALL_CONTRACT_BLOCK}}
 ## Route Index
 {{ROUTE_INDEX_LINES}}`
 	skillNoTalkPathsLine       = "- No active talk paths yet. You are connected, but cannot deliver messages until bonded.\n"
+	skillNoSkillsLine          = "- none advertised\n"
+	skillPeerNoSkillsLine      = "  - no skills advertised\n"
+	skillPeerHeaderLine        = "- {{PEER_LABEL}}\n"
+	skillPeerSkillLine         = "  - `{{SKILL_NAME}}`: {{SKILL_DESCRIPTION}}\n"
+	skillSelfSkillLine         = "- `{{SKILL_NAME}}`: {{SKILL_DESCRIPTION}}\n"
+	skillCallContractTemplate  = "Use content type `application/json` and these envelope fields.\n\n### skill_request\n```json\n{{SKILL_REQUEST_JSON}}\n```\n\n### skill_result\n```json\n{{SKILL_RESULT_JSON}}\n```\n"
 	skillTalkPathsHeader       = "- You can currently talk to:\n"
 	skillRouteIndexLine        = "- `{{ROUTE_METHOD}} {{ROUTE_PATH}}`: {{ROUTE_DESCRIPTION}}\n"
 	skillCommunicationPeerLine = "  - {{VALUE}}\n"
@@ -387,6 +413,88 @@ func renderMarkdownPlainBullets(values []string, lineTemplate string) string {
 		lines = append(lines, renderMarkdownTemplate(lineTemplate, "{{VALUE}}", value))
 	}
 	return strings.Join(lines, "")
+}
+
+func renderSkillListMarkdown(skills []agentSkillSummary, lineTemplate string, fallback string) string {
+	if len(skills) == 0 {
+		return fallback
+	}
+	lines := make([]string, 0, len(skills))
+	for _, skill := range skills {
+		if strings.TrimSpace(skill.Name) == "" || strings.TrimSpace(skill.Description) == "" {
+			continue
+		}
+		lines = append(lines, renderMarkdownTemplate(
+			lineTemplate,
+			"{{SKILL_NAME}}", skill.Name,
+			"{{SKILL_DESCRIPTION}}", skill.Description,
+		))
+	}
+	if len(lines) == 0 {
+		return fallback
+	}
+	return strings.Join(lines, "")
+}
+
+func renderPeerSkillCatalogMarkdown(peers []agentPeerSkillSummary, peerHeaderTemplate string, peerSkillTemplate string, noSkillLine string, noPeersFallback string) string {
+	if len(peers) == 0 {
+		return noPeersFallback
+	}
+	lines := make([]string, 0, len(peers))
+	for _, peer := range peers {
+		peerLabel := strings.TrimSpace(peer.AgentID)
+		if peerLabel == "" {
+			peerLabel = strings.TrimSpace(peer.AgentURI)
+		}
+		if peerLabel == "" {
+			continue
+		}
+		lines = append(lines, renderMarkdownTemplate(peerHeaderTemplate, "{{PEER_LABEL}}", peerLabel))
+		if len(peer.Skills) == 0 {
+			lines = append(lines, noSkillLine)
+			continue
+		}
+		for _, skill := range peer.Skills {
+			if strings.TrimSpace(skill.Name) == "" || strings.TrimSpace(skill.Description) == "" {
+				continue
+			}
+			lines = append(lines, renderMarkdownTemplate(
+				peerSkillTemplate,
+				"{{SKILL_NAME}}", skill.Name,
+				"{{SKILL_DESCRIPTION}}", skill.Description,
+			))
+		}
+	}
+	if len(lines) == 0 {
+		return noPeersFallback
+	}
+	return strings.Join(lines, "")
+}
+
+func renderSkillCallContractMarkdown(contract map[string]any, template string) string {
+	requestJSON := "{}"
+	resultJSON := "{}"
+
+	if request, ok := contract["request"].(map[string]any); ok {
+		if example, ok := request["json_example"]; ok {
+			if body, err := json.MarshalIndent(example, "", "  "); err == nil {
+				requestJSON = string(body)
+			}
+		}
+	}
+	if result, ok := contract["result"].(map[string]any); ok {
+		if example, ok := result["json_example"]; ok {
+			if body, err := json.MarshalIndent(example, "", "  "); err == nil {
+				resultJSON = string(body)
+			}
+		}
+	}
+
+	return renderMarkdownTemplate(
+		template,
+		"{{SKILL_REQUEST_JSON}}", requestJSON,
+		"{{SKILL_RESULT_JSON}}", resultJSON,
+	)
 }
 
 func buildAgentDiscoveryMarkdown(manifest agentManifest) string {
@@ -462,6 +570,20 @@ func buildAgentDiscoveryMarkdown(manifest agentManifest) string {
 		))
 	}
 	markdown = append(markdown, strings.Join(routeSections, ""))
+
+	markdown = append(markdown, discoverySkillsHeading)
+	markdown = append(markdown, renderSkillListMarkdown(manifest.AdvertisedSkills, discoverySkillLine, "- none advertised\n"))
+	markdown = append(markdown, discoveryPeerSkillsHeading)
+	markdown = append(markdown, renderPeerSkillCatalogMarkdown(
+		manifest.PeerSkillCatalog,
+		discoveryPeerHeaderLine,
+		discoveryPeerSkillLine,
+		"  - no skills advertised\n",
+		"- no talkable peers\n",
+	))
+	markdown = append(markdown, discoverySkillCallContractHeading)
+	markdown = append(markdown, renderSkillCallContractMarkdown(manifest.SkillCallContract, discoverySkillCallContractBlock))
+
 	markdown = append(markdown, discoveryRetryGuidanceHeading)
 	markdown = append(markdown, renderDiscoveryRetryGuidance(manifest))
 
@@ -506,11 +628,22 @@ func buildAgentSkillMarkdown(agent model.Agent, manifest agentManifest) string {
 	if len(talkableAgents) > 0 {
 		communicationBlock = skillTalkPathsHeader + renderMarkdownPlainBullets(talkableAgents, skillCommunicationPeerLine)
 	}
+	advertisedSkillsBlock := renderSkillListMarkdown(manifest.AdvertisedSkills, skillSelfSkillLine, skillNoSkillsLine)
+	peerSkillsBlock := renderPeerSkillCatalogMarkdown(
+		manifest.PeerSkillCatalog,
+		skillPeerHeaderLine,
+		skillPeerSkillLine,
+		skillPeerNoSkillsLine,
+		skillNoSkillsLine,
+	)
+	skillCallContractBlock := renderSkillCallContractMarkdown(manifest.SkillCallContract, skillCallContractTemplate)
+
 	operatingRules := []string{
 		"Do not use human control-plane credentials on agent runtime routes.",
 		"Persist token and api_base exactly as returned by bind/register responses.",
 		"Honor retryable and next_action fields before retrying failed requests.",
 		"Treat bind tokens and agent bearer tokens as secrets.",
+		"Keep metadata.skills descriptions brief and non-sensitive; never include secrets, keys, tokens, or passwords.",
 	}
 	operatingRulesBlock := renderMarkdownPlainBullets(operatingRules, skillOperatingRuleLine)
 
@@ -540,6 +673,9 @@ func buildAgentSkillMarkdown(agent model.Agent, manifest agentManifest) string {
 		"{{PUBLISH_URL}}", manifest.Endpoints["publish"],
 		"{{OPERATING_RULES_BLOCK}}", operatingRulesBlock,
 		"{{COMMUNICATION_BLOCK}}", communicationBlock,
+		"{{ADVERTISED_SKILLS_BLOCK}}", advertisedSkillsBlock,
+		"{{PEER_SKILLS_BLOCK}}", peerSkillsBlock,
+		"{{SKILL_CALL_CONTRACT_BLOCK}}", skillCallContractBlock,
 		"{{ROUTE_INDEX_LINES}}", strings.Join(routeIndexLines, ""),
 	)
 }

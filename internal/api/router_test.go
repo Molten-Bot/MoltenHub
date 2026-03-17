@@ -2440,7 +2440,32 @@ func TestBindTokenExpires(t *testing.T) {
 
 func TestAgentCapabilitiesAndSkillEndpoints(t *testing.T) {
 	router := newTestRouter()
-	_, _, tokenA, _, _, _, _, _ := setupTrustedAgents(t, router)
+	_, _, tokenA, tokenB, _, _, _, _ := setupTrustedAgents(t, router)
+
+	skillPatchA := doJSONRequest(t, router, http.MethodPatch, "/v1/agents/me/metadata", map[string]any{
+		"metadata": map[string]any{
+			"skills": []map[string]any{
+				{"name": "weather_lookup", "description": "Get current weather for a location."},
+			},
+		},
+	}, map[string]string{
+		"Authorization": "Bearer " + tokenA,
+	})
+	if skillPatchA.Code != http.StatusOK {
+		t.Fatalf("expected agent A skill metadata patch 200, got %d %s", skillPatchA.Code, skillPatchA.Body.String())
+	}
+	skillPatchB := doJSONRequest(t, router, http.MethodPatch, "/v1/agents/me/metadata", map[string]any{
+		"metadata": map[string]any{
+			"skills": []map[string]any{
+				{"name": "math.add", "description": "Add two numbers."},
+			},
+		},
+	}, map[string]string{
+		"Authorization": "Bearer " + tokenB,
+	})
+	if skillPatchB.Code != http.StatusOK {
+		t.Fatalf("expected agent B skill metadata patch 200, got %d %s", skillPatchB.Code, skillPatchB.Body.String())
+	}
 
 	manifestResp := doJSONRequest(t, router, http.MethodGet, "/v1/agents/me/manifest", nil, map[string]string{
 		"Authorization": "Bearer " + tokenA,
@@ -2484,6 +2509,16 @@ func TestAgentCapabilitiesAndSkillEndpoints(t *testing.T) {
 	if _, ok := capsPayload["routes"].([]any); !ok {
 		t.Fatalf("expected routes array in capabilities payload, got %v", capsPayload)
 	}
+	if _, ok := capsPayload["advertised_skills"].([]any); !ok {
+		t.Fatalf("expected advertised_skills in capabilities payload, got %v", capsPayload)
+	}
+	peerSkillCatalog, ok := capsPayload["peer_skill_catalog"].([]any)
+	if !ok || len(peerSkillCatalog) == 0 {
+		t.Fatalf("expected peer_skill_catalog in capabilities payload, got %v", capsPayload)
+	}
+	if _, ok := capsPayload["skill_call_contract"].(map[string]any); !ok {
+		t.Fatalf("expected skill_call_contract in capabilities payload, got %v", capsPayload)
+	}
 
 	skillJSONResp := doJSONRequest(t, router, http.MethodGet, "/v1/agents/me/skill", nil, map[string]string{
 		"Authorization": "Bearer " + tokenA,
@@ -2505,6 +2540,15 @@ func TestAgentCapabilitiesAndSkillEndpoints(t *testing.T) {
 	}
 	if !strings.Contains(skillContent, "Operating Rules") {
 		t.Fatalf("expected operating rules in skill, got %q", skillContent)
+	}
+	if !strings.Contains(skillContent, "Advertised Skills") || !strings.Contains(skillContent, "weather_lookup") {
+		t.Fatalf("expected advertised skills in skill, got %q", skillContent)
+	}
+	if !strings.Contains(skillContent, "Talkable Peer Skills") || !strings.Contains(skillContent, "math.add") {
+		t.Fatalf("expected peer skills in skill, got %q", skillContent)
+	}
+	if !strings.Contains(skillContent, "Skill Call Contract") || !strings.Contains(skillContent, "skill_request") {
+		t.Fatalf("expected skill call contract in skill, got %q", skillContent)
 	}
 	if !strings.Contains(skillContent, "distinctive emoji") || !strings.Contains(skillContent, "\"agent_type\":\"<assistant-type>\"") {
 		t.Fatalf("expected onboarding skill to require emoji/assistant type metadata setup, got %q", skillContent)
@@ -2615,6 +2659,27 @@ func TestAgentMeMetadataRejectsInvalidAgentType(t *testing.T) {
 	payload := decodeJSONMap(t, resp.Body.Bytes())
 	if payload["error"] != "invalid_agent_type" {
 		t.Fatalf("expected invalid_agent_type error, got %v payload=%v", payload["error"], payload)
+	}
+}
+
+func TestAgentMeMetadataRejectsSecretLikeSkillDescriptions(t *testing.T) {
+	router := newTestRouter()
+	_, _, tokenA, _, _, _, _, _ := setupTrustedAgents(t, router)
+	headers := map[string]string{"Authorization": "Bearer " + tokenA}
+
+	resp := doJSONRequest(t, router, http.MethodPatch, "/v1/agents/me/metadata", map[string]any{
+		"metadata": map[string]any{
+			"skills": []map[string]any{
+				{"name": "weather_lookup", "description": "Use API key abc123 to query weather provider"},
+			},
+		},
+	}, headers)
+	if resp.Code != http.StatusBadRequest {
+		t.Fatalf("expected secret-like skill description to return 400, got %d %s", resp.Code, resp.Body.String())
+	}
+	payload := decodeJSONMap(t, resp.Body.Bytes())
+	if payload["error"] != "invalid_skill_description" {
+		t.Fatalf("expected invalid_skill_description error, got %v payload=%v", payload["error"], payload)
 	}
 }
 

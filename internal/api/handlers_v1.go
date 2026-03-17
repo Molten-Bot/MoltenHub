@@ -114,14 +114,16 @@ type createOrgAccessKeyRequest struct {
 }
 
 type agentControlPlaneView struct {
-	APIBase       string
-	AgentUUID     string
-	AgentID       string
-	OrgID         string
-	OwnerHumanID  string
-	CanTalkTo     []string
-	CanTalkToURIs []string
-	Capabilities  []string
+	APIBase          string
+	AgentUUID        string
+	AgentID          string
+	OrgID            string
+	OwnerHumanID     string
+	CanTalkTo        []string
+	CanTalkToURIs    []string
+	Capabilities     []string
+	AdvertisedSkills []agentSkillSummary
+	PeerSkillCatalog []agentPeerSkillSummary
 }
 
 var (
@@ -882,6 +884,10 @@ func (h *Handler) handleAgentMetadataSelfPatch(w http.ResponseWriter, r *http.Re
 				writeError(w, http.StatusNotFound, "unknown_agent", "agent_uuid is not registered")
 			case errors.Is(err, store.ErrInvalidAgentType):
 				writeError(w, http.StatusBadRequest, "invalid_agent_type", "metadata.agent_type must be 2-64 chars: a-z, 0-9, ., _, -")
+			case errors.Is(err, store.ErrInvalidAgentSkills):
+				writeError(w, http.StatusBadRequest, "invalid_agent_skills", "metadata.skills must be an array of {name, description}; name must be 2-64 chars: a-z, 0-9, ., _, -; description must be 1-240 chars")
+			case errors.Is(err, store.ErrInvalidSkillDescription):
+				writeError(w, http.StatusBadRequest, "invalid_skill_description", "metadata.skills[].description must not include secrets, tokens, passwords, or keys")
 			default:
 				writeError(w, http.StatusInternalServerError, "store_error", "failed to update agent metadata")
 			}
@@ -933,12 +939,15 @@ func (h *Handler) handleAgentMeCapabilities(w http.ResponseWriter, r *http.Reque
 	}
 	manifest := buildAgentManifest(agent, cp, h.now())
 	writeAgentRuntimeSuccess(w, http.StatusOK, map[string]any{
-		"agent":         h.agentResponsePayload(agent),
-		"control_plane": h.agentControlPlanePayload(cp),
-		"capabilities":  manifest.Capabilities,
-		"routes":        manifest.Routes,
-		"communication": manifest.Communication,
-		"manifest_url":  cp.APIBase + "/agents/me/manifest",
+		"agent":               h.agentResponsePayload(agent),
+		"control_plane":       h.agentControlPlanePayload(cp),
+		"capabilities":        manifest.Capabilities,
+		"routes":              manifest.Routes,
+		"communication":       manifest.Communication,
+		"advertised_skills":   manifest.AdvertisedSkills,
+		"peer_skill_catalog":  manifest.PeerSkillCatalog,
+		"skill_call_contract": manifest.SkillCallContract,
+		"manifest_url":        cp.APIBase + "/agents/me/manifest",
 	})
 }
 
@@ -983,9 +992,12 @@ func (h *Handler) handleAgentMeSkill(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeAgentRuntimeSuccess(w, http.StatusOK, map[string]any{
-		"agent":         h.agentResponsePayload(agent),
-		"control_plane": h.agentControlPlanePayload(cp),
-		"manifest_url":  manifest.APIBase + "/agents/me/manifest",
+		"agent":               h.agentResponsePayload(agent),
+		"control_plane":       h.agentControlPlanePayload(cp),
+		"manifest_url":        manifest.APIBase + "/agents/me/manifest",
+		"advertised_skills":   manifest.AdvertisedSkills,
+		"peer_skill_catalog":  manifest.PeerSkillCatalog,
+		"skill_call_contract": manifest.SkillCallContract,
 		"skill": map[string]any{
 			"schema_version": manifest.SchemaVersion,
 			"format":         "markdown",
@@ -1044,34 +1056,64 @@ func (h *Handler) buildAgentControlPlane(r *http.Request, agent model.Agent) (ag
 		return agentControlPlaneView{}, err
 	}
 	talkableURIs := make([]string, 0, len(peers))
+	peerSkillCatalog := make([]agentPeerSkillSummary, 0, len(peers))
 	for _, peerUUID := range peers {
 		peerAgent, err := h.control.GetAgentByUUID(peerUUID)
 		if err != nil {
 			return agentControlPlaneView{}, err
 		}
-		talkableURIs = append(talkableURIs, h.agentURI(peerAgent))
+		peerURI := h.agentURI(peerAgent)
+		talkableURIs = append(talkableURIs, peerURI)
+		peerSkillCatalog = append(peerSkillCatalog, agentPeerSkillSummary{
+			AgentUUID: peerAgent.AgentUUID,
+			AgentID:   peerAgent.AgentID,
+			AgentURI:  peerURI,
+			Skills:    parseAdvertisedSkills(peerAgent.Metadata),
+		})
 	}
 	remoteTrusts, err := h.control.ListRemoteAgentTrustsForLocalAgent(agent.AgentUUID)
 	if err != nil {
 		return agentControlPlaneView{}, err
 	}
 	for _, trust := range remoteTrusts {
-		talkableURIs = append(talkableURIs, trust.RemoteAgentURI)
+		remoteURI := strings.TrimSpace(trust.RemoteAgentURI)
+		if remoteURI == "" {
+			continue
+		}
+		talkableURIs = append(talkableURIs, remoteURI)
+		peerSkillCatalog = append(peerSkillCatalog, agentPeerSkillSummary{
+			AgentURI: remoteURI,
+			Skills:   []agentSkillSummary{},
+		})
 	}
 	sort.Strings(talkableURIs)
+	sort.Slice(peerSkillCatalog, func(i, j int) bool {
+		left := strings.TrimSpace(peerSkillCatalog[i].AgentID)
+		if left == "" {
+			left = strings.TrimSpace(peerSkillCatalog[i].AgentURI)
+		}
+		right := strings.TrimSpace(peerSkillCatalog[j].AgentID)
+		if right == "" {
+			right = strings.TrimSpace(peerSkillCatalog[j].AgentURI)
+		}
+		return left < right
+	})
+
 	ownerHumanID := ""
 	if agent.OwnerHumanID != nil {
 		ownerHumanID = *agent.OwnerHumanID
 	}
 	return agentControlPlaneView{
-		APIBase:       h.apiBaseURL(r),
-		AgentUUID:     agent.AgentUUID,
-		AgentID:       agent.AgentID,
-		OrgID:         agent.OrgID,
-		OwnerHumanID:  ownerHumanID,
-		CanTalkTo:     peers,
-		CanTalkToURIs: talkableURIs,
-		Capabilities:  []string{"publish_messages", "pull_messages", "read_capabilities", "read_skill", "update_profile"},
+		APIBase:          h.apiBaseURL(r),
+		AgentUUID:        agent.AgentUUID,
+		AgentID:          agent.AgentID,
+		OrgID:            agent.OrgID,
+		OwnerHumanID:     ownerHumanID,
+		CanTalkTo:        peers,
+		CanTalkToURIs:    talkableURIs,
+		Capabilities:     []string{"publish_messages", "pull_messages", "read_capabilities", "read_skill", "update_profile"},
+		AdvertisedSkills: parseAdvertisedSkills(agent.Metadata),
+		PeerSkillCatalog: peerSkillCatalog,
 	}, nil
 }
 
@@ -1087,15 +1129,18 @@ func (h *Handler) agentControlPlanePayload(cp agentControlPlaneView) map[string]
 		}
 	}
 	return map[string]any{
-		"api_base":         cp.APIBase,
-		"agent_uuid":       cp.AgentUUID,
-		"agent_id":         cp.AgentID,
-		"org_id":           cp.OrgID,
-		"owner":            owner,
-		"can_talk_to":      cp.CanTalkTo,
-		"can_talk_to_uris": cp.CanTalkToURIs,
-		"capabilities":     cp.Capabilities,
-		"can_communicate":  len(cp.CanTalkToURIs) > 0,
+		"api_base":            cp.APIBase,
+		"agent_uuid":          cp.AgentUUID,
+		"agent_id":            cp.AgentID,
+		"org_id":              cp.OrgID,
+		"owner":               owner,
+		"can_talk_to":         cp.CanTalkTo,
+		"can_talk_to_uris":    cp.CanTalkToURIs,
+		"capabilities":        cp.Capabilities,
+		"can_communicate":     len(cp.CanTalkToURIs) > 0,
+		"advertised_skills":   cp.AdvertisedSkills,
+		"peer_skill_catalog":  cp.PeerSkillCatalog,
+		"skill_call_contract": defaultSkillCallContract(cp.APIBase),
 		"endpoints": map[string]string{
 			"publish":      cp.APIBase + "/messages/publish",
 			"pull":         cp.APIBase + "/messages/pull",
