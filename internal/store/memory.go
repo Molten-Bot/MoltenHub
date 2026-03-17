@@ -38,6 +38,8 @@ var (
 	ErrAgentHandleLocked        = errors.New("agent handle is already finalized")
 	ErrAgentRevoked             = errors.New("agent revoked")
 	ErrInvalidAgentType         = errors.New("invalid agent type")
+	ErrInvalidAgentSkills       = errors.New("invalid agent skills metadata")
+	ErrInvalidSkillDescription  = errors.New("invalid agent skill description")
 	ErrTrustNotFound            = errors.New("trust edge not found")
 	ErrUnauthorizedRole         = errors.New("unauthorized role")
 	ErrInvalidRole              = errors.New("invalid role")
@@ -1516,18 +1518,131 @@ func validateAndNormalizeAgentMetadata(metadata map[string]any) (map[string]any,
 	rawType, hasType := normalized[model.AgentMetadataKeyType]
 	if !hasType {
 		normalized[model.AgentMetadataKeyType] = model.AgentTypeUnknown
-		return normalized, nil
+	} else {
+		rawTypeValue, ok := rawType.(string)
+		if !ok {
+			return nil, ErrInvalidAgentType
+		}
+		agentType, ok := normalizeAgentType(rawTypeValue)
+		if !ok {
+			return nil, ErrInvalidAgentType
+		}
+		normalized[model.AgentMetadataKeyType] = agentType
 	}
-	rawTypeValue, ok := rawType.(string)
-	if !ok {
-		return nil, ErrInvalidAgentType
+
+	normalizedSkills, hasSkills, err := normalizeAndValidateAgentSkillsMetadata(normalized, model.AgentMetadataKeySkills)
+	if err != nil {
+		return nil, err
 	}
-	agentType, ok := normalizeAgentType(rawTypeValue)
-	if !ok {
-		return nil, ErrInvalidAgentType
+	if hasSkills {
+		normalized[model.AgentMetadataKeySkills] = normalizedSkills
+	} else {
+		delete(normalized, model.AgentMetadataKeySkills)
 	}
-	normalized[model.AgentMetadataKeyType] = agentType
+
 	return normalized, nil
+}
+
+func normalizeAndValidateAgentSkillsMetadata(metadata map[string]any, key string) ([]map[string]any, bool, error) {
+	raw, ok := metadata[key]
+	if !ok {
+		return nil, false, nil
+	}
+	if raw == nil {
+		return []map[string]any{}, true, nil
+	}
+
+	entries := []map[string]any{}
+	switch typed := raw.(type) {
+	case []map[string]any:
+		entries = append(entries, typed...)
+	case []any:
+		for _, value := range typed {
+			obj, ok := value.(map[string]any)
+			if !ok {
+				return nil, true, ErrInvalidAgentSkills
+			}
+			entries = append(entries, obj)
+		}
+	default:
+		return nil, true, ErrInvalidAgentSkills
+	}
+
+	byName := map[string]string{}
+	for _, entry := range entries {
+		rawName, _ := entry["name"].(string)
+		name, ok := normalizeAgentSkillName(rawName)
+		if !ok {
+			return nil, true, ErrInvalidAgentSkills
+		}
+		description, _ := entry["description"].(string)
+		description = strings.TrimSpace(description)
+		if description == "" || len(description) > 240 {
+			return nil, true, ErrInvalidAgentSkills
+		}
+		if containsLikelySecret(description) {
+			return nil, true, ErrInvalidSkillDescription
+		}
+		byName[name] = description
+	}
+
+	names := make([]string, 0, len(byName))
+	for name := range byName {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+
+	normalized := make([]map[string]any, 0, len(names))
+	for _, name := range names {
+		normalized = append(normalized, map[string]any{
+			"name":        name,
+			"description": byName[name],
+		})
+	}
+	return normalized, true, nil
+}
+
+func normalizeAgentSkillName(raw string) (string, bool) {
+	normalized := strings.ToLower(strings.TrimSpace(raw))
+	if len(normalized) < 2 || len(normalized) > 64 {
+		return "", false
+	}
+	for _, ch := range normalized {
+		switch {
+		case ch >= 'a' && ch <= 'z':
+		case ch >= '0' && ch <= '9':
+		case ch == '-', ch == '_', ch == '.':
+		default:
+			return "", false
+		}
+	}
+	return normalized, true
+}
+
+func containsLikelySecret(value string) bool {
+	normalized := strings.ToLower(strings.TrimSpace(value))
+	if normalized == "" {
+		return false
+	}
+	secretMarkers := []string{
+		"api key",
+		"api_key",
+		"apikey",
+		"access key",
+		"secret",
+		"password",
+		"passwd",
+		"private key",
+		"bearer ",
+		"token=",
+		"token:",
+	}
+	for _, marker := range secretMarkers {
+		if strings.Contains(normalized, marker) {
+			return true
+		}
+	}
+	return false
 }
 
 func agentTypeFromMetadata(metadata map[string]any) string {

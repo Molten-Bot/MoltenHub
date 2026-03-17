@@ -23,8 +23,9 @@ const (
 	MessageDeliveryFailed = "failed"
 	MessageForwarded      = "forwarded"
 
-	AgentMetadataKeyType = "agent_type"
-	AgentTypeUnknown     = "unknown"
+	AgentMetadataKeyType   = "agent_type"
+	AgentMetadataKeySkills = "skills"
+	AgentTypeUnknown       = "unknown"
 )
 
 type Organization struct {
@@ -278,26 +279,26 @@ type OrgAccessKey struct {
 }
 
 type AdminSnapshot struct {
-	Organizations []Organization `json:"organizations"`
-	Humans        []Human        `json:"humans"`
-	Memberships   []Membership   `json:"memberships"`
-	Agents        []Agent        `json:"agents"`
-	OrgTrusts     []TrustEdge    `json:"org_trusts"`
-	AgentTrusts   []TrustEdge    `json:"agent_trusts"`
-	Stats         []OrgStats     `json:"stats"`
+	Organizations  []Organization      `json:"organizations"`
+	Humans         []Human             `json:"humans"`
+	Memberships    []Membership        `json:"memberships"`
+	Agents         []Agent             `json:"agents"`
+	OrgTrusts      []TrustEdge         `json:"org_trusts"`
+	AgentTrusts    []TrustEdge         `json:"agent_trusts"`
+	Stats          []OrgStats          `json:"stats"`
 	MessageMetrics AdminMessageMetrics `json:"message_metrics"`
 }
 
 type MessageArchiveEntry struct {
-	MessageID              string     `json:"message_id"`
-	CounterpartyAgentUUID  string     `json:"counterparty_agent_uuid,omitempty"`
-	CounterpartyAgentID    string     `json:"counterparty_agent_id,omitempty"`
-	CounterpartyAgentURI   string     `json:"counterparty_agent_uri,omitempty"`
-	CounterpartyOrgID      string     `json:"counterparty_org_id,omitempty"`
-	ContentType            string     `json:"content_type"`
-	PublishedAt            time.Time  `json:"published_at"`
-	FirstReceivedAt        *time.Time `json:"first_received_at,omitempty"`
-	Status                 string     `json:"status"`
+	MessageID             string     `json:"message_id"`
+	CounterpartyAgentUUID string     `json:"counterparty_agent_uuid,omitempty"`
+	CounterpartyAgentID   string     `json:"counterparty_agent_id,omitempty"`
+	CounterpartyAgentURI  string     `json:"counterparty_agent_uri,omitempty"`
+	CounterpartyOrgID     string     `json:"counterparty_org_id,omitempty"`
+	ContentType           string     `json:"content_type"`
+	PublishedAt           time.Time  `json:"published_at"`
+	FirstReceivedAt       *time.Time `json:"first_received_at,omitempty"`
+	Status                string     `json:"status"`
 }
 
 type AgentMessageArchive struct {

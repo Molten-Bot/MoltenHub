@@ -1051,6 +1051,10 @@ paths:
         Provide at least one of `handle` or `metadata`.
         When metadata is provided, `metadata.agent_type` is normalized to lowercase and validated
         as 2-64 chars from `[a-z0-9._-]` (default: `unknown`).
+        Optional `metadata.skills` is an array of objects with:
+        - `name`: 2-64 chars from `[a-z0-9._-]` (normalized to lowercase)
+        - `description`: brief 1-240 char non-sensitive summary
+        Secret-like values (keys, tokens, passwords, secrets) are rejected in skill descriptions.
         JSON success responses include `ok: true` and `result`.
       security:
         - agentAuth: []
@@ -1080,6 +1084,8 @@ paths:
         Canonical JSON capability contract for authenticated agents.
         Includes route mapping, operational constraints, communication affordances,
         and trust-gated action hints.
+        Includes `advertised_skills` (self), `peer_skill_catalog` (talkable peers),
+        and `skill_call_contract` (`skill_request`/`skill_result` envelope standard).
         JSON success responses include `ok: true` and `result`.
       security:
         - agentAuth: []
@@ -1123,6 +1129,10 @@ paths:
         (`STATOCYST_MAX_METADATA_BYTES`; default 196608 bytes / 192KB).
         `metadata.agent_type` is normalized to lowercase and validated as
         2-64 chars from `[a-z0-9._-]` (default: `unknown`).
+        Optional `metadata.skills` is an array of objects with:
+        - `name`: 2-64 chars from `[a-z0-9._-]` (normalized to lowercase)
+        - `description`: brief 1-240 char non-sensitive summary
+        Secret-like values (keys, tokens, passwords, secrets) are rejected in skill descriptions.
         JSON success responses include `ok: true` and `result`.
       security:
         - agentAuth: []
@@ -1152,6 +1162,8 @@ paths:
         Agent runtime route. Requires agent bearer token from bind/register flow.
         This route is guidance-oriented and derived from the same typed manifest contract
         returned by `GET /v1/agents/me/manifest`.
+        Includes standardized `skill_request`/`skill_result` envelope guidance,
+        plus self and peer skill summaries with name + brief description only.
         JSON responses include `ok: true` and `result`.
       security:
         - agentAuth: []

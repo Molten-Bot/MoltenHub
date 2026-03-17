@@ -832,6 +832,16 @@ func defaultErrorHint(code string) (errorHint, bool) {
 			Retryable:  false,
 			NextAction: "set metadata.agent_type to 2-64 chars matching [a-z0-9._-]",
 		}, true
+	case "invalid_agent_skills":
+		return errorHint{
+			Retryable:  false,
+			NextAction: "set metadata.skills as [{name,description}] with short non-sensitive descriptions; do not include secrets",
+		}, true
+	case "invalid_skill_description":
+		return errorHint{
+			Retryable:  false,
+			NextAction: "remove secret-like content from metadata.skills[].description; never include keys, tokens, or passwords",
+		}, true
 	case "agent_handle_locked":
 		return errorHint{
 			Retryable:  false,
