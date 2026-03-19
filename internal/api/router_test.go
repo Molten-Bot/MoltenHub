@@ -1223,6 +1223,51 @@ func TestOwnerCanRevokeHumanMembership(t *testing.T) {
 	}
 }
 
+func TestOnlyOwnerCanDeleteOrganization(t *testing.T) {
+	router := newTestRouter()
+	orgID := createOrg(t, router, "owner", "owner@a.test", "Org Owner Delete Guard")
+	inviteMember := createInvite(t, router, "owner", "owner@a.test", orgID, "member@a.test", "member")
+	acceptInvite(t, router, "member", "member@a.test", inviteMember)
+	inviteAdmin := createInvite(t, router, "owner", "owner@a.test", orgID, "admin@a.test", "admin")
+	acceptInvite(t, router, "admin", "admin@a.test", inviteAdmin)
+
+	ownerHumanID := currentHumanID(t, router, "owner", "owner@a.test")
+	_, agentUUID := registerAgentWithUUID(t, router, "owner", "owner@a.test", orgID, "owner-agent", ownerHumanID)
+
+	memberDeleteOrg := doJSONRequest(t, router, http.MethodDelete, "/v1/orgs/"+orgID, nil, humanHeaders("member", "member@a.test"))
+	if memberDeleteOrg.Code != http.StatusForbidden {
+		t.Fatalf("expected member org delete to be forbidden, got %d %s", memberDeleteOrg.Code, memberDeleteOrg.Body.String())
+	}
+
+	adminDeleteOrg := doJSONRequest(t, router, http.MethodDelete, "/v1/orgs/"+orgID, nil, humanHeaders("admin", "admin@a.test"))
+	if adminDeleteOrg.Code != http.StatusForbidden {
+		t.Fatalf("expected admin org delete to be forbidden, got %d %s", adminDeleteOrg.Code, adminDeleteOrg.Body.String())
+	}
+
+	listAgents := doJSONRequest(t, router, http.MethodGet, "/v1/orgs/"+orgID+"/agents", nil, humanHeaders("owner", "owner@a.test"))
+	if listAgents.Code != http.StatusOK {
+		t.Fatalf("expected owner agent list after forbidden deletes to succeed, got %d %s", listAgents.Code, listAgents.Body.String())
+	}
+	listPayload := decodeJSONMap(t, listAgents.Body.Bytes())
+	agents, _ := listPayload["agents"].([]any)
+	foundAgent := false
+	for _, raw := range agents {
+		agent, _ := raw.(map[string]any)
+		if gotAgentUUID, _ := agent["agent_uuid"].(string); gotAgentUUID == agentUUID {
+			foundAgent = true
+			break
+		}
+	}
+	if !foundAgent {
+		t.Fatalf("expected org agent to remain after forbidden org delete attempts")
+	}
+
+	ownerDeleteOrg := doJSONRequest(t, router, http.MethodDelete, "/v1/orgs/"+orgID, nil, humanHeaders("owner", "owner@a.test"))
+	if ownerDeleteOrg.Code != http.StatusOK {
+		t.Fatalf("expected owner org delete to succeed, got %d %s", ownerDeleteOrg.Code, ownerDeleteOrg.Body.String())
+	}
+}
+
 func TestRoleEnforcementOnInvites(t *testing.T) {
 	router := newTestRouter()
 	orgID := createOrg(t, router, "owner", "owner@a.test", "Org A")
@@ -1847,16 +1892,21 @@ func TestDeleteAgentRecordAuthorizationMatrix(t *testing.T) {
 	}
 
 	agentOwnerDelete := doJSONRequest(t, router, http.MethodDelete, "/v1/agents/"+bobOwnedAgentUUID+"/record", nil, humanHeaders("bob", "bob@b.test"))
-	if agentOwnerDelete.Code != http.StatusOK {
-		t.Fatalf("expected agent owner delete to succeed, got %d %s", agentOwnerDelete.Code, agentOwnerDelete.Body.String())
-	}
-	if decodeJSONMap(t, agentOwnerDelete.Body.Bytes())["result"] != "deleted" {
-		t.Fatalf("expected agent owner delete response to report deleted")
+	if agentOwnerDelete.Code != http.StatusForbidden {
+		t.Fatalf("expected member-owned delete to be forbidden for non-owner member, got %d %s", agentOwnerDelete.Code, agentOwnerDelete.Body.String())
 	}
 
-	orgOwnerDeleteHumanOwned := doJSONRequest(t, router, http.MethodDelete, "/v1/agents/"+bobOrgManagedAgentUUID+"/record", nil, humanHeaders("alice", "alice@a.test"))
+	orgOwnerDeleteHumanOwned := doJSONRequest(t, router, http.MethodDelete, "/v1/agents/"+bobOwnedAgentUUID+"/record", nil, humanHeaders("alice", "alice@a.test"))
 	if orgOwnerDeleteHumanOwned.Code != http.StatusOK {
-		t.Fatalf("expected org owner delete of human-owned org agent to succeed, got %d %s", orgOwnerDeleteHumanOwned.Code, orgOwnerDeleteHumanOwned.Body.String())
+		t.Fatalf("expected org owner delete of member-owned agent to succeed, got %d %s", orgOwnerDeleteHumanOwned.Code, orgOwnerDeleteHumanOwned.Body.String())
+	}
+	if decodeJSONMap(t, orgOwnerDeleteHumanOwned.Body.Bytes())["result"] != "deleted" {
+		t.Fatalf("expected org owner delete response to report deleted")
+	}
+
+	orgOwnerDeleteSecondHumanOwned := doJSONRequest(t, router, http.MethodDelete, "/v1/agents/"+bobOrgManagedAgentUUID+"/record", nil, humanHeaders("alice", "alice@a.test"))
+	if orgOwnerDeleteSecondHumanOwned.Code != http.StatusOK {
+		t.Fatalf("expected org owner delete of second human-owned org agent to succeed, got %d %s", orgOwnerDeleteSecondHumanOwned.Code, orgOwnerDeleteSecondHumanOwned.Body.String())
 	}
 
 	adminDeleteOrgOwned := doJSONRequest(t, router, http.MethodDelete, "/v1/agents/"+orgOwnedAgentUUID+"/record", nil, humanHeaders("charlie", "charlie@c.test"))

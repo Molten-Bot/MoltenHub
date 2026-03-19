@@ -266,7 +266,7 @@ func TestMemoryStoreRevokeAgentPurgesTrustAndQueuedMessages(t *testing.T) {
 	}
 }
 
-func TestMemoryStoreDeleteAgentRequiresOwnerOrOrgOwner(t *testing.T) {
+func TestMemoryStoreDeleteAgentRequiresOrgOwner(t *testing.T) {
 	now := time.Date(2026, 3, 8, 0, 0, 0, 0, time.UTC)
 	ids := &seqID{}
 	mem := NewMemoryStore()
@@ -308,18 +308,21 @@ func TestMemoryStoreDeleteAgentRequiresOwnerOrOrgOwner(t *testing.T) {
 	if err := mem.DeleteAgent(agent.AgentUUID, charlie.HumanID, now.Add(time.Minute), false); !errors.Is(err, ErrUnauthorizedRole) {
 		t.Fatalf("expected org admin delete to fail with ErrUnauthorizedRole, got %v", err)
 	}
-	if err := mem.DeleteAgent(agent.AgentUUID, bob.HumanID, now.Add(2*time.Minute), false); err != nil {
-		t.Fatalf("expected agent owner delete to succeed, got %v", err)
+	if err := mem.DeleteAgent(agent.AgentUUID, bob.HumanID, now.Add(2*time.Minute), false); !errors.Is(err, ErrUnauthorizedRole) {
+		t.Fatalf("expected non-owner member delete to fail with ErrUnauthorizedRole, got %v", err)
+	}
+	if err := mem.DeleteAgent(agent.AgentUUID, alice.HumanID, now.Add(3*time.Minute), false); err != nil {
+		t.Fatalf("expected org owner delete to succeed, got %v", err)
 	}
 	if _, err := mem.GetAgentByUUID(agent.AgentUUID); !errors.Is(err, ErrAgentNotFound) {
 		t.Fatalf("expected deleted agent not found, got %v", err)
 	}
 
-	agentByOwner, err := mem.RegisterAgent(org.OrgID, "owned-bot-2", &bob.HumanID, "tok-owned-bot-2", bob.HumanID, now.Add(3*time.Minute), false)
+	agentByOwner, err := mem.RegisterAgent(org.OrgID, "owned-bot-2", &bob.HumanID, "tok-owned-bot-2", bob.HumanID, now.Add(4*time.Minute), false)
 	if err != nil {
 		t.Fatalf("RegisterAgent second agent failed: %v", err)
 	}
-	if err := mem.DeleteAgent(agentByOwner.AgentUUID, alice.HumanID, now.Add(4*time.Minute), false); err != nil {
+	if err := mem.DeleteAgent(agentByOwner.AgentUUID, alice.HumanID, now.Add(5*time.Minute), false); err != nil {
 		t.Fatalf("expected org owner delete to succeed, got %v", err)
 	}
 	if agents := mem.ListHumanAgents(alice.HumanID); len(agents) != 0 {

@@ -1248,9 +1248,9 @@ paths:
     delete:
       summary: Delete agent record (human control-plane)
       description: |
-        Permanently delete an agent record. Allowed for the owning human, the owning
-        organization owner, or a super-admin. Also purges queued messages and linked
-        agent trust edges for that agent.
+        Permanently delete an agent record. Allowed only for the organization owner
+        or a super-admin. Also purges queued messages and linked agent trust edges
+        for that agent.
       security:
         - humanAuth: []
       parameters:

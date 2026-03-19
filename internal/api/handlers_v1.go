@@ -2673,7 +2673,7 @@ func (h *Handler) handleAgentsSubroutes(w http.ResponseWriter, r *http.Request) 
 			case errors.Is(err, store.ErrAgentNotFound):
 				writeError(w, http.StatusNotFound, "unknown_agent", "agent_uuid is not registered")
 			case errors.Is(err, store.ErrUnauthorizedRole):
-				writeError(w, http.StatusForbidden, "forbidden", "agent owner, org owner, or super-admin required")
+				writeError(w, http.StatusForbidden, "forbidden", "org owner or super-admin required")
 			default:
 				writeError(w, http.StatusInternalServerError, "store_error", "failed to delete agent")
 			}
