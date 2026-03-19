@@ -266,7 +266,7 @@ func TestMemoryStoreRevokeAgentPurgesTrustAndQueuedMessages(t *testing.T) {
 	}
 }
 
-func TestMemoryStoreDeleteAgentRequiresOrgOwner(t *testing.T) {
+func TestMemoryStoreDeleteAgentAuthorizationMatrix(t *testing.T) {
 	now := time.Date(2026, 3, 8, 0, 0, 0, 0, time.UTC)
 	ids := &seqID{}
 	mem := NewMemoryStore()
@@ -327,6 +327,20 @@ func TestMemoryStoreDeleteAgentRequiresOrgOwner(t *testing.T) {
 	}
 	if agents := mem.ListHumanAgents(alice.HumanID); len(agents) != 0 {
 		t.Fatalf("expected org owner managed list to exclude deleted agent, got %d entries", len(agents))
+	}
+
+	personalAgent, err := mem.RegisterAgent("", "owned-bot-personal", &bob.HumanID, "tok-owned-bot-personal", bob.HumanID, now.Add(6*time.Minute), false)
+	if err != nil {
+		t.Fatalf("RegisterAgent personal agent failed: %v", err)
+	}
+	if err := mem.DeleteAgent(personalAgent.AgentUUID, alice.HumanID, now.Add(7*time.Minute), false); !errors.Is(err, ErrUnauthorizedRole) {
+		t.Fatalf("expected non-owner delete of personal agent to fail with ErrUnauthorizedRole, got %v", err)
+	}
+	if err := mem.DeleteAgent(personalAgent.AgentUUID, bob.HumanID, now.Add(8*time.Minute), false); err != nil {
+		t.Fatalf("expected personal owner delete to succeed, got %v", err)
+	}
+	if _, err := mem.GetAgentByUUID(personalAgent.AgentUUID); !errors.Is(err, ErrAgentNotFound) {
+		t.Fatalf("expected deleted personal agent not found, got %v", err)
 	}
 }
 

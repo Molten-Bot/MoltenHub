@@ -1961,6 +1961,22 @@ func TestDeleteAgentRecordAuthorizationMatrix(t *testing.T) {
 		t.Fatalf("expected member-owned delete to be forbidden for non-owner member, got %d %s", agentOwnerDelete.Code, agentOwnerDelete.Body.String())
 	}
 
+	_, personalOrgID, danaPersonalAgentUUID := registerMyAgent(t, router, "dana", "dana@d.test", "", "dana-personal-delete")
+	if strings.TrimSpace(personalOrgID) != "" {
+		t.Fatalf("expected personal agent org_id empty, got %q", personalOrgID)
+	}
+	nonOwnerDeletePersonal := doJSONRequest(t, router, http.MethodDelete, "/v1/agents/"+danaPersonalAgentUUID+"/record", nil, humanHeaders("bob", "bob@b.test"))
+	if nonOwnerDeletePersonal.Code != http.StatusForbidden {
+		t.Fatalf("expected non-owner delete of personal agent to be forbidden, got %d %s", nonOwnerDeletePersonal.Code, nonOwnerDeletePersonal.Body.String())
+	}
+	ownerDeletePersonal := doJSONRequest(t, router, http.MethodDelete, "/v1/agents/"+danaPersonalAgentUUID+"/record", nil, humanHeaders("dana", "dana@d.test"))
+	if ownerDeletePersonal.Code != http.StatusOK {
+		t.Fatalf("expected personal owner delete to succeed, got %d %s", ownerDeletePersonal.Code, ownerDeletePersonal.Body.String())
+	}
+	if decodeJSONMap(t, ownerDeletePersonal.Body.Bytes())["result"] != "deleted" {
+		t.Fatalf("expected personal owner delete response to report deleted")
+	}
+
 	orgOwnerDeleteHumanOwned := doJSONRequest(t, router, http.MethodDelete, "/v1/agents/"+bobOwnedAgentUUID+"/record", nil, humanHeaders("alice", "alice@a.test"))
 	if orgOwnerDeleteHumanOwned.Code != http.StatusOK {
 		t.Fatalf("expected org owner delete of member-owned agent to succeed, got %d %s", orgOwnerDeleteHumanOwned.Code, orgOwnerDeleteHumanOwned.Body.String())
@@ -2002,6 +2018,19 @@ func TestDeleteAgentRecordAuthorizationMatrix(t *testing.T) {
 		agent, _ := raw.(map[string]any)
 		if agent["agent_uuid"] == bobOwnedAgentUUID || agent["agent_uuid"] == bobOrgManagedAgentUUID || agent["agent_uuid"] == orgOwnedAgentUUID {
 			t.Fatalf("expected deleted agent to be absent from bob list, got %v", agent)
+		}
+	}
+
+	danaListResp := doJSONRequest(t, router, http.MethodGet, "/v1/me/agents", nil, humanHeaders("dana", "dana@d.test"))
+	if danaListResp.Code != http.StatusOK {
+		t.Fatalf("expected dana /v1/me/agents 200 after personal delete, got %d %s", danaListResp.Code, danaListResp.Body.String())
+	}
+	danaListPayload := decodeJSONMap(t, danaListResp.Body.Bytes())
+	danaAgents, _ := danaListPayload["agents"].([]any)
+	for _, raw := range danaAgents {
+		agent, _ := raw.(map[string]any)
+		if agent["agent_uuid"] == danaPersonalAgentUUID {
+			t.Fatalf("expected deleted personal agent to be absent from dana list, got %v", agent)
 		}
 	}
 

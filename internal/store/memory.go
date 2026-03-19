@@ -3388,6 +3388,9 @@ func (s *MemoryStore) canManageAgentLocked(agent model.Agent, humanID string) bo
 }
 
 func (s *MemoryStore) canDeleteAgentLocked(agent model.Agent, humanID string) bool {
+	if agent.OrgID == "" {
+		return agent.OwnerHumanID != nil && *agent.OwnerHumanID == humanID
+	}
 	return s.membershipRoleLocked(agent.OrgID, humanID) == model.RoleOwner
 }
 
