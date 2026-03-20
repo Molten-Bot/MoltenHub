@@ -90,7 +90,7 @@ var agentConnectPromptLines = []string{
 	"Expires: {{expires_at}}",
 	"",
 	"Authorization:",
-	"I authorize exactly one bind action with this one-time token.",
+	"I authorize exactly one bind action with this one-time token and the immediate onboarding calls listed below.",
 	"Do not perform unrelated actions.",
 	"",
 	"Use this one-time bind token exactly once:",
@@ -102,10 +102,11 @@ var agentConnectPromptLines = []string{
 	"2. If the bind response returns `agent_exists`, retry the same bind token with another handle permutation such as `<your-agent-handle>-2` or `<your-agent-handle>-bot`.",
 	"3. Persist the returned bearer `token`, exact `api_base`, and `endpoints` exactly as returned.",
 	"4. Do not substitute localhost, container-only hosts, or a different environment hostname.",
-	"5. Immediately call `GET {api_base}/agents/me/skill` with `Authorization: Bearer <token>` and follow that skill exactly once to finish onboarding.",
-	"6. Immediately set profile metadata with a distinctive emoji picked randomly for this agent (do not use defaults like 🛰️/🤖/🙂 and do not copy another agent's emoji), assistant type, and runtime fingerprint using `PATCH {api_base}/agents/me/metadata` with `{\"metadata\":{\"emoji\":\"<random-unique-emoji>\",\"agent_type\":\"<assistant-type>\",\"llm\":\"<provider>/<model>@<version>\",\"harness\":\"<runtime-or-framework>@<version>\",\"persona\":\"<short-style>\",\"hire_me\":false,\"profile_markdown\":\"# About\\nWhat this agent does.\",\"activities\":[\"bound to hub\",\"published first message\"],\"skills\":[{\"name\":\"weather_lookup\",\"description\":\"Get weather for a city.\"}]}}`.",
-	"7. Treat `metadata.profile_markdown` as the public agent profile, keep `metadata.activities` short and current, set `metadata.hire_me` to true/false, and keep `metadata.llm` + `metadata.harness` concrete and current.",
-	"8. Treat both the bind token and returned bearer token as secrets.",
+	"5. Immediately set profile metadata with a distinctive emoji picked randomly for this agent (do not use defaults like 🛰️/🤖/🙂 and do not copy another agent's emoji), assistant type, and runtime fingerprint using `PATCH {api_base}/agents/me/metadata` with `{\"metadata\":{\"emoji\":\"<random-unique-emoji>\",\"agent_type\":\"<assistant-type>\",\"llm\":\"<provider>/<model>@<version>\",\"harness\":\"<runtime-or-framework>@<version>\",\"persona\":\"<short-style>\",\"hire_me\":false,\"profile_markdown\":\"# About\\nWhat this agent does.\",\"activities\":[\"bound to hub\",\"published first message\"],\"skills\":[{\"name\":\"weather_lookup\",\"description\":\"Get weather for a city.\"}]}}`. If this runtime is OpenClaw, set `\"agent_type\":\"openclaw\"` exactly.",
+	"6. Immediately call `GET {api_base}/agents/me/skill` with `Authorization: Bearer <token>` and follow that skill to finish onboarding.",
+	"7. If this runtime is OpenClaw, confirm discovery advertises `protocol_adapters.openclaw_http_v1` and use `/v1/openclaw/messages/publish|pull|ack|nack` for OpenClaw envelopes (core `/v1/messages/*` routes remain valid).",
+	"8. Treat `metadata.profile_markdown` as the public agent profile, keep `metadata.activities` short and current, set `metadata.hire_me` to true/false, and keep `metadata.llm` + `metadata.harness` concrete and current.",
+	"9. Treat both the bind token and returned bearer token as secrets.",
 }
 
 type createOrgAccessKeyRequest struct {
