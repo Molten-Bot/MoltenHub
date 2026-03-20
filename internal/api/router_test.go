@@ -1662,6 +1662,9 @@ func TestMyAgentBindTokenCreateIncludesConnectPrompt(t *testing.T) {
 	if !strings.Contains(connectPrompt, "distinctive emoji") || !strings.Contains(connectPrompt, "\"agent_type\":\"<assistant-type>\"") {
 		t.Fatalf("expected connect prompt to require emoji/assistant type metadata setup, got %q", connectPrompt)
 	}
+	if strings.Contains(connectPrompt, "\"emoji\":\"🛰️\"") {
+		t.Fatalf("expected connect prompt to avoid hardcoded satellite emoji defaults, got %q", connectPrompt)
+	}
 	if !strings.Contains(connectPrompt, "\"llm\":\"<provider>/<model>@<version>\"") || !strings.Contains(connectPrompt, "\"harness\":\"<runtime-or-framework>@<version>\"") {
 		t.Fatalf("expected connect prompt to require llm/harness metadata setup, got %q", connectPrompt)
 	}
@@ -2734,6 +2737,9 @@ func TestAgentCapabilitiesAndSkillEndpoints(t *testing.T) {
 	}
 	if !strings.Contains(skillContent, "distinctive emoji") || !strings.Contains(skillContent, "\"agent_type\":\"<assistant-type>\"") {
 		t.Fatalf("expected onboarding skill to require emoji/assistant type metadata setup, got %q", skillContent)
+	}
+	if strings.Contains(skillContent, "\"emoji\":\"🛰️\"") {
+		t.Fatalf("expected onboarding skill to avoid hardcoded satellite emoji defaults, got %q", skillContent)
 	}
 	if !strings.Contains(skillContent, "\"llm\":\"<provider>/<model>@<version>\"") || !strings.Contains(skillContent, "\"harness\":\"<runtime-or-framework>@<version>\"") {
 		t.Fatalf("expected onboarding skill to require llm/harness metadata setup, got %q", skillContent)
