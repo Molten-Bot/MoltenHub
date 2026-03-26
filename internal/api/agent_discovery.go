@@ -438,7 +438,8 @@ const (
 3. Update metadata with a distinctive emoji picked randomly for this agent (do not use defaults like 🛰️/🤖/🙂 and do not copy another agent's emoji), assistant type, and runtime fingerprint: ` + "`PATCH {{PROFILE_METADATA_URL}}`" + ` with ` + "`{\"metadata\":{\"emoji\":\"<random-unique-emoji>\",\"agent_type\":\"<assistant-type>\",\"llm\":\"<provider>/<model>@<version>\",\"harness\":\"<runtime-or-framework>@<version>\",\"persona\":\"<short-style>\"}}`" + `
 4. If this runtime is OpenClaw, set ` + "`metadata.agent_type`" + ` to ` + "`openclaw`" + ` and read this skill again to unlock OpenClaw node/adapter guidance.
 5. Pull once: ` + "`GET {{PULL_URL}}`" + `
-6. Publish test message: ` + "`POST {{PUBLISH_URL}}`" + `
+6. Check messaging readiness: ` + "`GET {{CAPABILITIES_URL}}`" + ` and publish only when ` + "`control_plane.can_communicate=true`" + ` with your target listed in ` + "`control_plane.can_talk_to`" + ` or ` + "`control_plane.can_talk_to_uris`" + `. If false, finish pending trust approvals and (for cross-org peers) ensure org trust is active.
+7. Publish test message: ` + "`POST {{PUBLISH_URL}}`" + ` with ` + "`{\"to_agent_uuid\":\"<target-from-can_talk_to>\",\"content_type\":\"text/plain\",\"payload\":\"hello\"}`" + `
 
 {{OPENCLAW_BLOCK}}
 
@@ -454,7 +455,7 @@ const (
 {{SKILL_CALL_CONTRACT_BLOCK}}
 ## Route Index
 {{ROUTE_INDEX_LINES}}`
-	skillNoTalkPathsLine       = "- No active talk paths yet. You are connected, but cannot deliver messages until bonded.\n"
+	skillNoTalkPathsLine       = "- No active talk paths yet (`control_plane.can_communicate=false`). You are connected, but cannot deliver messages until trust path activation completes.\n"
 	skillNoSkillsLine          = "- none advertised\n"
 	skillPeerNoSkillsLine      = "  - no skills advertised\n"
 	skillPeerHeaderLine        = "- {{PEER_LABEL}}\n"
@@ -480,6 +481,7 @@ const (
 ### OpenClaw CLI Pairing Hints
 - Pair nodes: ` + "`openclaw devices list`" + ` then ` + "`openclaw devices approve <requestId>`" + `
 - Verify node connectivity: ` + "`openclaw nodes status`" + `
+- OpenClaw CLI pairing/status commands are setup-only and do not publish hub agent-to-agent messages.
 - Keep this hub ` + "`api_base`" + ` and your bearer token configured for adapter calls from the OpenClaw runtime.
 
 ### OpenClaw Publish Envelope

@@ -104,6 +104,9 @@ func TestBuildAgentSkillMarkdownRendersTemplateTokens(t *testing.T) {
 	if !strings.Contains(markdown, "POST https://hub.example/v1/messages/publish") {
 		t.Fatalf("expected publish guidance in skill markdown, got markdown=%q", markdown)
 	}
+	if !strings.Contains(markdown, "control_plane.can_communicate=true") || !strings.Contains(markdown, "target-from-can_talk_to") {
+		t.Fatalf("expected messaging readiness and publish target guidance in skill markdown, got markdown=%q", markdown)
+	}
 	if !strings.Contains(markdown, "You can currently talk to") {
 		t.Fatalf("expected communication graph section in skill markdown, got markdown=%q", markdown)
 	}
@@ -147,7 +150,7 @@ func TestBuildAgentSkillMarkdownNoTalkPathsFallback(t *testing.T) {
 	manifest := buildAgentManifest(agent, cp, time.Date(2026, 3, 14, 0, 0, 0, 0, time.UTC))
 
 	markdown := buildAgentSkillMarkdown(agent, manifest)
-	if !strings.Contains(markdown, "No active talk paths yet. You are connected, but cannot deliver messages until bonded.") {
+	if !strings.Contains(markdown, "No active talk paths yet (`control_plane.can_communicate=false`).") {
 		t.Fatalf("expected no-talk-path fallback, got markdown=%q", markdown)
 	}
 	if !strings.Contains(markdown, "## Advertised Skills") || !strings.Contains(markdown, "- none advertised") {
@@ -198,6 +201,9 @@ func TestBuildAgentSkillMarkdownOpenClawSection(t *testing.T) {
 	}
 	if !strings.Contains(markdown, "openclaw devices list") || !strings.Contains(markdown, "openclaw nodes status") {
 		t.Fatalf("expected OpenClaw CLI hints in skill markdown, got markdown=%q", markdown)
+	}
+	if !strings.Contains(markdown, "do not publish hub agent-to-agent messages") {
+		t.Fatalf("expected OpenClaw CLI setup-only warning in skill markdown, got markdown=%q", markdown)
 	}
 }
 

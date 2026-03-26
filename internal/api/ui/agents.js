@@ -430,7 +430,7 @@ function renderPendingRows(edges) {
 
   const table = document.createElement("table");
   const thead = document.createElement("thead");
-  thead.innerHTML = "<tr><th>Edge</th><th>Agents</th><th>State</th><th>Can Talk</th><th>Actions</th></tr>";
+  thead.innerHTML = "<tr><th>Edge</th><th>Agents</th><th>State</th><th>Route Ready</th><th>Actions</th></tr>";
   table.appendChild(thead);
 
   const tbody = document.createElement("tbody");
@@ -447,7 +447,14 @@ function renderPendingRows(edges) {
     tdState.textContent = `${edge.state || ""} | L:${edge.left_approved ? "Y" : "N"} R:${edge.right_approved ? "Y" : "N"}`;
 
     const tdTalk = document.createElement("td");
-    tdTalk.textContent = String(edge.state || "").toLowerCase() === "active" ? "Yes" : "No";
+    const state = String(edge.state || "").toLowerCase();
+    if (typeof edge.can_talk === "boolean") {
+      tdTalk.textContent = edge.can_talk ? "Yes" : "No";
+    } else if (state === "active") {
+      tdTalk.textContent = "Check caps";
+    } else {
+      tdTalk.textContent = "No";
+    }
 
     const tdActions = document.createElement("td");
     const wrap = document.createElement("div");
