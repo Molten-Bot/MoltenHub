@@ -1215,6 +1215,98 @@ func TestInviteAcceptTransfersPersonalAgentIntoOrgAndKeepsOwnerManagement(t *tes
 	}
 }
 
+func TestOrgOwnerCanListMemberAgentsWithinOrgContext(t *testing.T) {
+	router := newTestRouter()
+	orgID := createOrg(t, router, "alice", "alice@a.test", "Org Member Agent Visibility")
+	bobHumanID := currentHumanID(t, router, "bob", "bob@b.test")
+	charlieHumanID := currentHumanID(t, router, "charlie", "charlie@c.test")
+
+	inviteID := createInvite(t, router, "alice", "alice@a.test", orgID, "bob@b.test", "member")
+	acceptInvite(t, router, "bob", "bob@b.test", inviteID)
+
+	otherOrgID := createOrg(t, router, "bob", "bob@b.test", "Bob Other Org")
+	_, bobOtherOrgAgentUUID := registerAgentWithUUID(t, router, "bob", "bob@b.test", otherOrgID, "bob-other-org", bobHumanID)
+	revokeOtherOrgAgent := doJSONRequest(
+		t,
+		router,
+		http.MethodDelete,
+		"/v1/agents/"+bobOtherOrgAgentUUID,
+		nil,
+		humanHeaders("bob", "bob@b.test"),
+	)
+	if revokeOtherOrgAgent.Code != http.StatusOK {
+		t.Fatalf("expected bob other-org revoke to succeed, got %d %s", revokeOtherOrgAgent.Code, revokeOtherOrgAgent.Body.String())
+	}
+
+	_, bobPersonalOrgID, bobPersonalAgentUUID := registerMyAgent(t, router, "bob", "bob@b.test", "", "bob-personal-visible")
+	if bobPersonalOrgID != "" {
+		t.Fatalf("expected bob personal agent org_id empty, got %q", bobPersonalOrgID)
+	}
+	_, bobOrgScopedAgentUUID := registerAgentWithUUID(t, router, "bob", "bob@b.test", orgID, "bob-org-visible", bobHumanID)
+
+	ownerList := doJSONRequest(
+		t,
+		router,
+		http.MethodGet,
+		"/v1/orgs/"+orgID+"/humans/"+bobHumanID+"/agents",
+		nil,
+		humanHeaders("alice", "alice@a.test"),
+	)
+	if ownerList.Code != http.StatusOK {
+		t.Fatalf("expected owner member-agent list 200, got %d %s", ownerList.Code, ownerList.Body.String())
+	}
+	ownerPayload := decodeJSONMap(t, ownerList.Body.Bytes())
+	ownerAgents, _ := ownerPayload["agents"].([]any)
+	foundPersonal := false
+	foundOrgScoped := false
+	foundOtherOrg := false
+	for _, raw := range ownerAgents {
+		agent, _ := raw.(map[string]any)
+		agentUUID, _ := agent["agent_uuid"].(string)
+		switch agentUUID {
+		case bobPersonalAgentUUID:
+			foundPersonal = true
+		case bobOrgScopedAgentUUID:
+			foundOrgScoped = true
+		case bobOtherOrgAgentUUID:
+			foundOtherOrg = true
+		}
+	}
+	if !foundPersonal {
+		t.Fatalf("expected owner list to include bob personal agent %q", bobPersonalAgentUUID)
+	}
+	if !foundOrgScoped {
+		t.Fatalf("expected owner list to include bob org-scoped agent %q", bobOrgScopedAgentUUID)
+	}
+	if foundOtherOrg {
+		t.Fatalf("did not expect owner list to include bob other-org agent %q", bobOtherOrgAgentUUID)
+	}
+
+	memberList := doJSONRequest(
+		t,
+		router,
+		http.MethodGet,
+		"/v1/orgs/"+orgID+"/humans/"+bobHumanID+"/agents",
+		nil,
+		humanHeaders("bob", "bob@b.test"),
+	)
+	if memberList.Code != http.StatusForbidden {
+		t.Fatalf("expected member list to be forbidden, got %d %s", memberList.Code, memberList.Body.String())
+	}
+
+	unknownMembership := doJSONRequest(
+		t,
+		router,
+		http.MethodGet,
+		"/v1/orgs/"+orgID+"/humans/"+charlieHumanID+"/agents",
+		nil,
+		humanHeaders("alice", "alice@a.test"),
+	)
+	if unknownMembership.Code != http.StatusNotFound {
+		t.Fatalf("expected unknown member list to return 404, got %d %s", unknownMembership.Code, unknownMembership.Body.String())
+	}
+}
+
 func TestInviteCodeRedeemFlow(t *testing.T) {
 	router := newTestRouter()
 	orgID := createOrg(t, router, "alice", "alice@a.test", "Org Invite Codes")

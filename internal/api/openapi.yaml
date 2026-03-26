@@ -937,6 +937,30 @@ paths:
       responses:
         '200':
           description: Human list
+  /v1/orgs/{org_id}/humans/{human_id}/agents:
+    get:
+      summary: List a member's agents in org context
+      description: |
+        Returns agents owned by `human_id` that are relevant to `org_id`:
+        - personal agents (`org_id == ""`)
+        - agents scoped to the same `org_id`
+        Requires org owner role (or statocyst admin). Intended for owner-visible bind discovery.
+      security:
+        - humanAuth: []
+      parameters:
+        - in: path
+          name: org_id
+          required: true
+          schema:
+            type: string
+        - in: path
+          name: human_id
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Agent list
   /v1/orgs/{org_id}/humans/{human_id}:
     delete:
       summary: Revoke a human membership in org
