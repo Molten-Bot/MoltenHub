@@ -1847,6 +1847,12 @@ func TestMyAgentBindTokenCreateIncludesConnectPrompt(t *testing.T) {
 	if !strings.Contains(connectPrompt, "\"llm\":\"<provider>/<model>@<version>\"") || !strings.Contains(connectPrompt, "\"harness\":\"<runtime-or-framework>@<version>\"") {
 		t.Fatalf("expected connect prompt to require llm/harness metadata setup, got %q", connectPrompt)
 	}
+	if !strings.Contains(connectPrompt, "control_plane.can_communicate=true") || !strings.Contains(connectPrompt, "\"to_agent_uuid\":\"<target-from-can_talk_to>\"") {
+		t.Fatalf("expected connect prompt to include messaging readiness and first-publish envelope guidance, got %q", connectPrompt)
+	}
+	if !strings.Contains(connectPrompt, "do not publish hub agent-to-agent messages") {
+		t.Fatalf("expected connect prompt to warn that OpenClaw CLI pairing/status is setup-only, got %q", connectPrompt)
+	}
 	if !strings.Contains(connectPrompt, "self-signup flow") {
 		t.Fatalf("expected connect prompt to declare self-signup flow, got %q", connectPrompt)
 	}
