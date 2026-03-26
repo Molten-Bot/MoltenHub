@@ -1996,6 +1996,38 @@ func (h *Handler) handleOrgSubroutes(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
+		if len(parts) == 6 {
+			if parts[5] != "agents" {
+				writeError(w, http.StatusNotFound, "not_found", "route not found")
+				return
+			}
+			if r.Method != http.MethodGet {
+				writeMethodNotAllowed(w)
+				return
+			}
+			targetHumanID := strings.TrimSpace(parts[4])
+			if targetHumanID == "" {
+				writeError(w, http.StatusBadRequest, "invalid_human_id", "human_id is required")
+				return
+			}
+			agents, err := h.control.ListOrgHumanAgents(orgID, targetHumanID, actor.Human.HumanID, actor.IsSuperAdmin)
+			if err != nil {
+				switch {
+				case errors.Is(err, store.ErrOrgNotFound):
+					writeError(w, http.StatusNotFound, "unknown_org", "org_id is not registered")
+				case errors.Is(err, store.ErrMembershipNotFound):
+					writeError(w, http.StatusNotFound, "unknown_membership", "human is not an active member in this organization")
+				case errors.Is(err, store.ErrUnauthorizedRole):
+					writeError(w, http.StatusForbidden, "forbidden", "owner role required")
+				default:
+					writeError(w, http.StatusInternalServerError, "store_error", "failed to list human agents")
+				}
+				return
+			}
+			writeJSON(w, http.StatusOK, map[string]any{"agents": h.agentListResponsePayload(agents)})
+			return
+		}
+
 		if len(parts) == 5 {
 			if r.Method != http.MethodDelete {
 				writeMethodNotAllowed(w)

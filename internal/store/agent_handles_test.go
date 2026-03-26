@@ -707,6 +707,69 @@ func TestMemoryStoreAcceptInviteTransfersHumanScopedAgentsToOrg(t *testing.T) {
 	}
 }
 
+func TestMemoryStoreListOrgHumanAgentsWithinOrgContext(t *testing.T) {
+	now := time.Date(2026, 3, 7, 3, 0, 0, 0, time.UTC)
+	ids := &seqID{}
+	mem := NewMemoryStore()
+
+	alice := mustCreateHuman(t, mem, ids, "alice", "alice@a.test", "alice", now)
+	bob := mustCreateHuman(t, mem, ids, "bob", "bob@b.test", "bob", now)
+	charlie := mustCreateHuman(t, mem, ids, "charlie", "charlie@c.test", "charlie", now)
+
+	orgA := mustCreateOrg(t, mem, ids, alice, "org-a", "Org A", now)
+	invite, err := mem.CreateInvite(orgA.OrgID, bob.Email, model.RoleMember, alice.HumanID, ids.mustID(t), "invite-bob-org-a", now.Add(24*time.Hour), now, false)
+	if err != nil {
+		t.Fatalf("create invite failed: %v", err)
+	}
+	if _, err := mem.AcceptInvite(invite.InviteID, bob.HumanID, bob.Email, now.Add(time.Minute), ids.next); err != nil {
+		t.Fatalf("accept invite failed: %v", err)
+	}
+
+	personalAgent, err := mem.RegisterAgent("", "bob-personal", &bob.HumanID, "tok-bob-personal", bob.HumanID, now.Add(2*time.Minute), false)
+	if err != nil {
+		t.Fatalf("register personal bob agent failed: %v", err)
+	}
+	if personalAgent.OrgID != "" {
+		t.Fatalf("expected bob personal agent org_id empty, got %q", personalAgent.OrgID)
+	}
+
+	orgAAgent, err := mem.RegisterAgent(orgA.OrgID, "bob-org-a", &bob.HumanID, "tok-bob-org-a", bob.HumanID, now.Add(3*time.Minute), false)
+	if err != nil {
+		t.Fatalf("register bob org-a agent failed: %v", err)
+	}
+
+	orgB := mustCreateOrg(t, mem, ids, bob, "org-b", "Org B", now.Add(4*time.Minute))
+	orgBAgent, err := mem.RegisterAgent(orgB.OrgID, "bob-org-b", &bob.HumanID, "tok-bob-org-b", bob.HumanID, now.Add(5*time.Minute), false)
+	if err != nil {
+		t.Fatalf("register bob org-b agent failed: %v", err)
+	}
+
+	agents, err := mem.ListOrgHumanAgents(orgA.OrgID, bob.HumanID, alice.HumanID, false)
+	if err != nil {
+		t.Fatalf("ListOrgHumanAgents failed: %v", err)
+	}
+	seen := map[string]bool{}
+	for _, agent := range agents {
+		seen[agent.AgentUUID] = true
+	}
+	if !seen[personalAgent.AgentUUID] {
+		t.Fatalf("expected personal agent %q in org human list", personalAgent.AgentUUID)
+	}
+	if !seen[orgAAgent.AgentUUID] {
+		t.Fatalf("expected org-scoped agent %q in org human list", orgAAgent.AgentUUID)
+	}
+	if seen[orgBAgent.AgentUUID] {
+		t.Fatalf("did not expect other-org agent %q in org human list", orgBAgent.AgentUUID)
+	}
+
+	if _, err := mem.ListOrgHumanAgents(orgA.OrgID, bob.HumanID, bob.HumanID, false); !errors.Is(err, ErrUnauthorizedRole) {
+		t.Fatalf("expected member requester to fail with ErrUnauthorizedRole, got %v", err)
+	}
+	if _, err := mem.ListOrgHumanAgents(orgA.OrgID, charlie.HumanID, alice.HumanID, false); !errors.Is(err, ErrMembershipNotFound) {
+		t.Fatalf("expected non-member target to fail with ErrMembershipNotFound, got %v", err)
+	}
+}
+
 func TestMemoryStoreFinalizeAgentHandleSelfOnce(t *testing.T) {
 	now := time.Date(2026, 3, 7, 0, 0, 0, 0, time.UTC)
 	ids := &seqID{}

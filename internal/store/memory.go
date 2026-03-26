@@ -997,6 +997,38 @@ func (s *MemoryStore) ListOrgHumans(orgID, requesterHumanID string, isSuperAdmin
 	return out, nil
 }
 
+func (s *MemoryStore) ListOrgHumanAgents(orgID, humanID, requesterHumanID string, isSuperAdmin bool) ([]model.Agent, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	orgID = strings.TrimSpace(orgID)
+	humanID = strings.TrimSpace(humanID)
+	requesterHumanID = strings.TrimSpace(requesterHumanID)
+
+	if _, ok := s.orgs[orgID]; !ok {
+		return nil, ErrOrgNotFound
+	}
+	if s.membershipRoleLocked(orgID, humanID) == "" {
+		return nil, ErrMembershipNotFound
+	}
+	if !isSuperAdmin && s.membershipRoleLocked(orgID, requesterHumanID) != model.RoleOwner {
+		return nil, ErrUnauthorizedRole
+	}
+
+	out := make([]model.Agent, 0)
+	for _, agent := range s.agents {
+		if agent.OwnerHumanID == nil || strings.TrimSpace(*agent.OwnerHumanID) != humanID {
+			continue
+		}
+		// Keep org context local: include personal agents and agents already scoped to this org.
+		if agent.OrgID != "" && agent.OrgID != orgID {
+			continue
+		}
+		out = append(out, agent)
+	}
+	return out, nil
+}
+
 func (s *MemoryStore) RegisterAgent(orgID, agentID string, ownerHumanID *string, tokenHash, actorHumanID string, now time.Time, isSuperAdmin bool) (model.Agent, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
