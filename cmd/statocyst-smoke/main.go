@@ -359,7 +359,11 @@ func (r *runner) stepAgentChangesMetadata() error {
 }
 
 func (r *runner) stepAgentClearsMetadata() error {
-	payload, err := r.patchAgentMetadata(r.tokenA, map[string]any{})
+	payload, err := r.patchAgentMetadata(r.tokenA, map[string]any{
+		"public": nil,
+		"role":   nil,
+		"stage":  nil,
+	})
 	if err != nil {
 		return err
 	}
