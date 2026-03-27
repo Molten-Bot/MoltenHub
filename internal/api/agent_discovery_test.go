@@ -205,6 +205,15 @@ func TestBuildAgentSkillMarkdownOpenClawSection(t *testing.T) {
 	if !strings.Contains(markdown, "do not publish hub agent-to-agent messages") {
 		t.Fatalf("expected OpenClaw CLI setup-only warning in skill markdown, got markdown=%q", markdown)
 	}
+	if !strings.Contains(markdown, "@molten-ai/openclaw-plugin-statocyst") {
+		t.Fatalf("expected OpenClaw plugin package hint in skill markdown, got markdown=%q", markdown)
+	}
+	if !strings.Contains(markdown, "workspace/.statocyst/config.json") || !strings.Contains(markdown, "\"sessionKey\": \"main\"") || !strings.Contains(markdown, "\"timeoutMs\": 20000") {
+		t.Fatalf("expected optional OpenClaw config hint in skill markdown, got markdown=%q", markdown)
+	}
+	if !strings.Contains(markdown, "If plugin/config is unavailable, continue") {
+		t.Fatalf("expected OpenClaw fallback guidance when plugin is unavailable, got markdown=%q", markdown)
+	}
 }
 
 func TestParseAdvertisedSkillsFiltersAndNormalizes(t *testing.T) {

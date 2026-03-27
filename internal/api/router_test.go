@@ -1836,43 +1836,37 @@ func TestMyAgentBindTokenCreateIncludesConnectPrompt(t *testing.T) {
 		t.Fatalf("expected connect prompt to instruct agent to pass desired handle, got %q", connectPrompt)
 	}
 	if !strings.Contains(connectPrompt, "agent_exists") || !strings.Contains(connectPrompt, "<your-agent-handle>-2") {
-		t.Fatalf("expected connect prompt to explain duplicate retry permutations, got %q", connectPrompt)
+		t.Fatalf("expected connect prompt to include duplicate-handle retry guidance, got %q", connectPrompt)
 	}
-	if !strings.Contains(connectPrompt, "distinctive emoji") || !strings.Contains(connectPrompt, "\"agent_type\":\"<assistant-type>\"") {
-		t.Fatalf("expected connect prompt to require emoji/assistant type metadata setup, got %q", connectPrompt)
+	if !strings.Contains(connectPrompt, "token") || !strings.Contains(connectPrompt, "api_base") || !strings.Contains(connectPrompt, "endpoints") {
+		t.Fatalf("expected connect prompt to require persisting token/api_base/endpoints, got %q", connectPrompt)
 	}
-	if strings.Contains(connectPrompt, "\"emoji\":\"🛰️\"") {
-		t.Fatalf("expected connect prompt to avoid hardcoded satellite emoji defaults, got %q", connectPrompt)
+	if !strings.Contains(connectPrompt, "GET {api_base}/agents/me/skill") {
+		t.Fatalf("expected connect prompt to include skill read step, got %q", connectPrompt)
 	}
-	if !strings.Contains(connectPrompt, "\"llm\":\"<provider>/<model>@<version>\"") || !strings.Contains(connectPrompt, "\"harness\":\"<runtime-or-framework>@<version>\"") {
-		t.Fatalf("expected connect prompt to require llm/harness metadata setup, got %q", connectPrompt)
+	if !strings.Contains(connectPrompt, "agent_type") || !strings.Contains(connectPrompt, "llm") || !strings.Contains(connectPrompt, "harness") {
+		t.Fatalf("expected connect prompt to include minimal metadata guidance, got %q", connectPrompt)
 	}
-	if !strings.Contains(connectPrompt, "control_plane.can_communicate=true") || !strings.Contains(connectPrompt, "\"to_agent_uuid\":\"<target-from-can_talk_to>\"") {
-		t.Fatalf("expected connect prompt to include messaging readiness and first-publish envelope guidance, got %q", connectPrompt)
+	if !strings.Contains(connectPrompt, "control_plane.can_communicate=true") || !strings.Contains(connectPrompt, "POST {api_base}/messages/publish") {
+		t.Fatalf("expected connect prompt to include readiness + first publish guidance, got %q", connectPrompt)
 	}
-	if !strings.Contains(connectPrompt, "do not publish hub agent-to-agent messages") {
-		t.Fatalf("expected connect prompt to warn that OpenClaw CLI pairing/status is setup-only, got %q", connectPrompt)
+	if !strings.Contains(connectPrompt, "Optional OpenClaw-only hints (not required):") {
+		t.Fatalf("expected connect prompt to include optional OpenClaw hints heading, got %q", connectPrompt)
 	}
-	if !strings.Contains(connectPrompt, "self-signup flow") {
-		t.Fatalf("expected connect prompt to declare self-signup flow, got %q", connectPrompt)
+	if !strings.Contains(connectPrompt, "@molten-ai/openclaw-plugin-statocyst") {
+		t.Fatalf("expected connect prompt to include OpenClaw plugin package hint, got %q", connectPrompt)
 	}
-	if !strings.Contains(connectPrompt, "\"profile_markdown\":\"# About") {
-		t.Fatalf("expected connect prompt to include profile_markdown guidance, got %q", connectPrompt)
+	if !strings.Contains(connectPrompt, "workspace/.statocyst/config.json") {
+		t.Fatalf("expected connect prompt to include optional workspace config path hint, got %q", connectPrompt)
 	}
-	if !strings.Contains(connectPrompt, "\"activities\":[\"bound to hub\",\"published first message\"]") {
-		t.Fatalf("expected connect prompt to include activities guidance, got %q", connectPrompt)
+	if !strings.Contains(connectPrompt, "\"baseUrl\":\"<api_base>\"") || !strings.Contains(connectPrompt, "\"sessionKey\":\"main\"") || !strings.Contains(connectPrompt, "\"timeoutMs\":20000") {
+		t.Fatalf("expected connect prompt to include optional config shape hint, got %q", connectPrompt)
 	}
-	if !strings.Contains(connectPrompt, "\"skills\":[{\"name\":\"weather_lookup\"") {
-		t.Fatalf("expected connect prompt to include skills guidance, got %q", connectPrompt)
+	if !strings.Contains(connectPrompt, "continue with core `/v1/messages/*` routes") {
+		t.Fatalf("expected connect prompt to preserve non-plugin fallback guidance, got %q", connectPrompt)
 	}
-	if !strings.Contains(connectPrompt, "\"hire_me\":false") {
-		t.Fatalf("expected connect prompt to include hire_me guidance, got %q", connectPrompt)
-	}
-	if !strings.Contains(connectPrompt, "metadata.profile_markdown") || !strings.Contains(connectPrompt, "metadata.hire_me") {
-		t.Fatalf("expected connect prompt to include directory metadata field reminders, got %q", connectPrompt)
-	}
-	if !strings.Contains(connectPrompt, "metadata.llm") || !strings.Contains(connectPrompt, "metadata.harness") {
-		t.Fatalf("expected connect prompt to include llm/harness metadata field reminders, got %q", connectPrompt)
+	if !strings.Contains(connectPrompt, "Treat both the bind token and returned bearer token as secrets.") {
+		t.Fatalf("expected connect prompt to include token secrecy guidance, got %q", connectPrompt)
 	}
 }
 
@@ -2920,14 +2914,8 @@ func TestAgentCapabilitiesAndSkillEndpoints(t *testing.T) {
 	if !strings.Contains(skillContent, "Skill Call Contract") || !strings.Contains(skillContent, "skill_request") {
 		t.Fatalf("expected skill call contract in skill, got %q", skillContent)
 	}
-	if !strings.Contains(skillContent, "distinctive emoji") || !strings.Contains(skillContent, "\"agent_type\":\"<assistant-type>\"") {
-		t.Fatalf("expected onboarding skill to require emoji/assistant type metadata setup, got %q", skillContent)
-	}
-	if strings.Contains(skillContent, "\"emoji\":\"🛰️\"") {
-		t.Fatalf("expected onboarding skill to avoid hardcoded satellite emoji defaults, got %q", skillContent)
-	}
-	if !strings.Contains(skillContent, "\"llm\":\"<provider>/<model>@<version>\"") || !strings.Contains(skillContent, "\"harness\":\"<runtime-or-framework>@<version>\"") {
-		t.Fatalf("expected onboarding skill to require llm/harness metadata setup, got %q", skillContent)
+	if !strings.Contains(skillContent, "\"agent_type\":\"<assistant-type>\"") || !strings.Contains(skillContent, "\"llm\":\"<provider>/<model>@<version>\"") || !strings.Contains(skillContent, "\"harness\":\"<runtime-or-framework>@<version>\"") {
+		t.Fatalf("expected onboarding skill to include minimal metadata setup guidance, got %q", skillContent)
 	}
 	if strings.Contains(skillContent, "## OpenClaw Node + Agent HTTP Path") {
 		t.Fatalf("did not expect OpenClaw-only section for non-OpenClaw profile, got %q", skillContent)
