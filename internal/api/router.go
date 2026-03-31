@@ -18,11 +18,11 @@ import (
 	"sync"
 	"time"
 
-	"statocyst/internal/auth"
-	"statocyst/internal/handles"
-	"statocyst/internal/longpoll"
-	"statocyst/internal/model"
-	"statocyst/internal/store"
+	"moltenhub/internal/auth"
+	"moltenhub/internal/handles"
+	"moltenhub/internal/longpoll"
+	"moltenhub/internal/model"
+	"moltenhub/internal/store"
 )
 
 const (
@@ -751,7 +751,7 @@ func defaultErrorHint(code string) (errorHint, bool) {
 	case "store_error":
 		return errorHint{
 			Retryable:  true,
-			NextAction: "retry with backoff; if repeated, check statocyst health and storage backends",
+			NextAction: "retry with backoff; if repeated, check moltenhub health and storage backends",
 		}, true
 	case "unsupported_media_type":
 		return errorHint{
@@ -781,7 +781,7 @@ func defaultErrorHint(code string) (errorHint, bool) {
 	case "id_generation_failed", "token_generation_failed":
 		return errorHint{
 			Retryable:  true,
-			NextAction: "retry with backoff; if repeated, check statocyst runtime health",
+			NextAction: "retry with backoff; if repeated, check moltenhub runtime health",
 		}, true
 	case "invalid_timeout":
 		return errorHint{

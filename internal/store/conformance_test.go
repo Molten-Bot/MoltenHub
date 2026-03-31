@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"statocyst/internal/model"
+	"moltenhub/internal/model"
 )
 
 type queueVectorSuite struct {

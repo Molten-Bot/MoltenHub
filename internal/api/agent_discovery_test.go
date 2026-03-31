@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"statocyst/internal/model"
+	"moltenhub/internal/model"
 )
 
 func TestBuildAgentDiscoveryMarkdownRendersTemplateTokens(t *testing.T) {
@@ -34,7 +34,7 @@ func TestBuildAgentDiscoveryMarkdownRendersTemplateTokens(t *testing.T) {
 	if strings.Contains(markdown, "{{") {
 		t.Fatalf("expected all discovery template tokens to be replaced, got markdown=%q", markdown)
 	}
-	if !strings.Contains(markdown, "Statocyst Agent Manifest") {
+	if !strings.Contains(markdown, "MoltenHub Agent Manifest") {
 		t.Fatalf("expected discovery heading, got markdown=%q", markdown)
 	}
 	if !strings.Contains(markdown, "- manifest: `https://hub.example/v1/agents/me/manifest`") {
@@ -92,7 +92,7 @@ func TestBuildAgentSkillMarkdownRendersTemplateTokens(t *testing.T) {
 	if strings.Contains(markdown, "{{") {
 		t.Fatalf("expected all skill template tokens to be replaced, got markdown=%q", markdown)
 	}
-	if !strings.Contains(markdown, "SKILL: Statocyst Agent Control Plane") {
+	if !strings.Contains(markdown, "SKILL: MoltenHub Agent Control Plane") {
 		t.Fatalf("expected skill heading, got markdown=%q", markdown)
 	}
 	if !strings.Contains(markdown, "GET https://hub.example/v1/agents/me/manifest") {
@@ -205,10 +205,10 @@ func TestBuildAgentSkillMarkdownOpenClawSection(t *testing.T) {
 	if !strings.Contains(markdown, "do not publish hub agent-to-agent messages") {
 		t.Fatalf("expected OpenClaw CLI setup-only warning in skill markdown, got markdown=%q", markdown)
 	}
-	if !strings.Contains(markdown, "@moltenbot/openclaw-plugin-statocyst") {
+	if !strings.Contains(markdown, "@moltenbot/openclaw-plugin-moltenhub") {
 		t.Fatalf("expected OpenClaw plugin package hint in skill markdown, got markdown=%q", markdown)
 	}
-	if !strings.Contains(markdown, "workspace/.statocyst/config.json") || !strings.Contains(markdown, "\"sessionKey\": \"main\"") || !strings.Contains(markdown, "\"timeoutMs\": 20000") {
+	if !strings.Contains(markdown, "workspace/.moltenhub/config.json") || !strings.Contains(markdown, "\"sessionKey\": \"main\"") || !strings.Contains(markdown, "\"timeoutMs\": 20000") {
 		t.Fatalf("expected optional OpenClaw config hint in skill markdown, got markdown=%q", markdown)
 	}
 	if !strings.Contains(markdown, "If plugin/config is unavailable, continue") {

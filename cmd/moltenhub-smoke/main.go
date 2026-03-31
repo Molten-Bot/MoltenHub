@@ -32,7 +32,7 @@ type step struct {
 }
 
 func main() {
-	baseURL := flag.String("base-url", "http://127.0.0.1:18080", "Statocyst base URL")
+	baseURL := flag.String("base-url", "http://127.0.0.1:18080", "MoltenHub base URL")
 	flag.Parse()
 
 	r := &runner{

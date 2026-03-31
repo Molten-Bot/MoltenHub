@@ -13,7 +13,7 @@ import (
 	"testing"
 	"time"
 
-	"statocyst/internal/model"
+	"moltenhub/internal/model"
 )
 
 func TestS3QueueStore_EnqueueDequeueRoundTrip(t *testing.T) {
@@ -96,7 +96,7 @@ func TestS3QueueStore_EnqueueDequeueRoundTrip(t *testing.T) {
 		endpoint:   server.URL,
 		bucket:     "queue-bucket",
 		region:     "us-east-1",
-		prefix:     "statocyst-queue",
+		prefix:     "moltenhub-queue",
 		pathStyle:  true,
 	}
 
@@ -154,7 +154,7 @@ func TestS3QueueStore_EnqueueAppliesDefaultTimeoutWithoutCallerDeadline(t *testi
 		endpoint:   server.URL,
 		bucket:     "queue-bucket",
 		region:     "us-east-1",
-		prefix:     "statocyst-queue",
+		prefix:     "moltenhub-queue",
 		pathStyle:  true,
 		opTimeout:  50 * time.Millisecond,
 	}
@@ -205,7 +205,7 @@ func TestS3QueueStore_DequeueAppliesDefaultTimeoutWithoutCallerDeadline(t *testi
 		endpoint:   server.URL,
 		bucket:     "queue-bucket",
 		region:     "us-east-1",
-		prefix:     "statocyst-queue",
+		prefix:     "moltenhub-queue",
 		pathStyle:  true,
 		opTimeout:  50 * time.Millisecond,
 	}

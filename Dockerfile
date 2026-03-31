@@ -12,14 +12,14 @@ COPY . .
 
 RUN ./scripts/generate_openapi_md.sh
 
-RUN CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH:-amd64} go build -trimpath -ldflags="-s -w" -o /out/statocystd ./cmd/statocystd
+RUN CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH:-amd64} go build -trimpath -ldflags="-s -w" -o /out/moltenhubd ./cmd/moltenhubd
 
 FROM gcr.io/distroless/static:nonroot
 
 WORKDIR /app
-COPY --from=build /out/statocystd /usr/local/bin/statocystd
+COPY --from=build /out/moltenhubd /usr/local/bin/moltenhubd
 
 EXPOSE 8080
 USER nonroot:nonroot
 
-ENTRYPOINT ["/usr/local/bin/statocystd"]
+ENTRYPOINT ["/usr/local/bin/moltenhubd"]

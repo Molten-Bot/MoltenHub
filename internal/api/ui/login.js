@@ -1,7 +1,7 @@
-const TOKEN_KEY = "statocyst_access_token";
-const DEV_ID_KEY = "statocyst_dev_human_id";
-const DEV_EMAIL_KEY = "statocyst_dev_human_email";
-const PENDING_INVITE_CODE_KEY = "statocyst_pending_invite_code";
+const TOKEN_KEY = "moltenhub_access_token";
+const DEV_ID_KEY = "moltenhub_dev_human_id";
+const DEV_EMAIL_KEY = "moltenhub_dev_human_email";
+const PENDING_INVITE_CODE_KEY = "moltenhub_pending_invite_code";
 
 const $ = (id) => document.getElementById(id);
 

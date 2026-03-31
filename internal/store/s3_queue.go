@@ -15,12 +15,12 @@ import (
 	"sync"
 	"time"
 
-	"statocyst/internal/model"
+	"moltenhub/internal/model"
 )
 
 const (
 	defaultS3Region = "us-east-1"
-	defaultS3Prefix = "statocyst-queue"
+	defaultS3Prefix = "moltenhub-queue"
 	// Bound a queue operation when callers provide no deadline.
 	defaultS3QueueOpTimeout = 8 * time.Second
 	// Startup check should fail fast so readiness decisions are not delayed too long.
@@ -47,19 +47,19 @@ type listBucketResult struct {
 }
 
 func NewS3QueueStoreFromEnv() (MessageQueueStore, error) {
-	endpoint := strings.TrimSpace(os.Getenv("STATOCYST_QUEUE_S3_ENDPOINT"))
-	bucket := strings.TrimSpace(os.Getenv("STATOCYST_QUEUE_S3_BUCKET"))
-	region := strings.TrimSpace(os.Getenv("STATOCYST_QUEUE_S3_REGION"))
-	prefix := strings.Trim(strings.TrimSpace(os.Getenv("STATOCYST_QUEUE_S3_PREFIX")), "/")
-	pathStyleRaw := strings.TrimSpace(os.Getenv("STATOCYST_QUEUE_S3_PATH_STYLE"))
-	accessKeyID := strings.TrimSpace(os.Getenv("STATOCYST_QUEUE_S3_ACCESS_KEY_ID"))
-	secretAccessKey := strings.TrimSpace(os.Getenv("STATOCYST_QUEUE_S3_SECRET_ACCESS_KEY"))
+	endpoint := strings.TrimSpace(os.Getenv("MOLTENHUB_QUEUE_S3_ENDPOINT"))
+	bucket := strings.TrimSpace(os.Getenv("MOLTENHUB_QUEUE_S3_BUCKET"))
+	region := strings.TrimSpace(os.Getenv("MOLTENHUB_QUEUE_S3_REGION"))
+	prefix := strings.Trim(strings.TrimSpace(os.Getenv("MOLTENHUB_QUEUE_S3_PREFIX")), "/")
+	pathStyleRaw := strings.TrimSpace(os.Getenv("MOLTENHUB_QUEUE_S3_PATH_STYLE"))
+	accessKeyID := strings.TrimSpace(os.Getenv("MOLTENHUB_QUEUE_S3_ACCESS_KEY_ID"))
+	secretAccessKey := strings.TrimSpace(os.Getenv("MOLTENHUB_QUEUE_S3_SECRET_ACCESS_KEY"))
 
 	if endpoint == "" {
-		return nil, fmt.Errorf("STATOCYST_QUEUE_S3_ENDPOINT is required for s3 queue backend")
+		return nil, fmt.Errorf("MOLTENHUB_QUEUE_S3_ENDPOINT is required for s3 queue backend")
 	}
 	if bucket == "" {
-		return nil, fmt.Errorf("STATOCYST_QUEUE_S3_BUCKET is required for s3 queue backend")
+		return nil, fmt.Errorf("MOLTENHUB_QUEUE_S3_BUCKET is required for s3 queue backend")
 	}
 	if region == "" {
 		region = defaultS3Region
@@ -68,17 +68,17 @@ func NewS3QueueStoreFromEnv() (MessageQueueStore, error) {
 		prefix = defaultS3Prefix
 	}
 	if (accessKeyID == "") != (secretAccessKey == "") {
-		return nil, fmt.Errorf("STATOCYST_QUEUE_S3_ACCESS_KEY_ID and STATOCYST_QUEUE_S3_SECRET_ACCESS_KEY must be set together")
+		return nil, fmt.Errorf("MOLTENHUB_QUEUE_S3_ACCESS_KEY_ID and MOLTENHUB_QUEUE_S3_SECRET_ACCESS_KEY must be set together")
 	}
 	pathStyle := true
 	if pathStyleRaw != "" {
 		pathStyle = strings.EqualFold(pathStyleRaw, "true")
 	}
 	if !pathStyle {
-		return nil, fmt.Errorf("STATOCYST_QUEUE_S3_PATH_STYLE=false is not supported in this build")
+		return nil, fmt.Errorf("MOLTENHUB_QUEUE_S3_PATH_STYLE=false is not supported in this build")
 	}
 	if !strings.HasPrefix(endpoint, "http://") && !strings.HasPrefix(endpoint, "https://") {
-		return nil, fmt.Errorf("STATOCYST_QUEUE_S3_ENDPOINT must include http:// or https:// scheme")
+		return nil, fmt.Errorf("MOLTENHUB_QUEUE_S3_ENDPOINT must include http:// or https:// scheme")
 	}
 
 	return &s3QueueStore{

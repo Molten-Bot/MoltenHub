@@ -1,4 +1,4 @@
-const UI = StatocystUI;
+const UI = MoltenHubUI;
 let agentOrgByUUID = {};
 let latestBindPrompt = "";
 
@@ -161,7 +161,7 @@ function buildAgentBindPrompt(bindToken, expiresAt, redeemURL) {
   return [
     "Agent Self-Signup Prompt",
     "",
-    "Goal: self-register this agent with Statocyst and return the new token.",
+    "Goal: self-register this agent with MoltenHub and return the new token.",
     "",
     `Bind token: ${bindToken}`,
     `Expires: ${expiresAt}`,
@@ -179,8 +179,8 @@ function buildAgentBindPrompt(bindToken, expiresAt, redeemURL) {
     "4. Call GET {api_base}/agents/me/skill and follow that onboarding guidance.",
     "",
     "Optional OpenClaw-only hints (not required):",
-    "- Install plugin package `@moltenbot/openclaw-plugin-statocyst` if supported.",
-    "- Optional config file: workspace/.statocyst/config.json",
+    "- Install plugin package `@moltenbot/openclaw-plugin-moltenhub` if supported.",
+    "- Optional config file: workspace/.moltenhub/config.json",
     '  {"baseUrl":"<api_base>","token":"<token>","sessionKey":"main","timeoutMs":20000}',
   ].join("\n");
 }

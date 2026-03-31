@@ -53,7 +53,7 @@ jobs:
           context: .
           push: false
           platforms: linux/amd64,linux/arm64
-          tags: statocyst:ci
+          tags: moltenhub:ci
 
   container-smoke:
     runs-on: ubuntu-latest
@@ -79,10 +79,10 @@ jobs:
           push: false
           load: true
           platforms: linux/amd64
-          tags: statocyst:smoke-ci
+          tags: moltenhub:smoke-ci
 
       - name: Run container smoke test
-        run: bash scripts/release/run_container_smoke.sh statocyst:smoke-ci
+        run: bash scripts/release/run_container_smoke.sh moltenhub:smoke-ci
 
   federation-container-smoke:
     runs-on: ubuntu-latest
@@ -108,7 +108,7 @@ jobs:
           push: false
           load: true
           platforms: linux/amd64
-          tags: statocyst:federation-smoke-ci
+          tags: moltenhub:federation-smoke-ci
 
       - name: Run federation container smoke test
-        run: bash scripts/release/run_federation_container_smoke.sh statocyst:federation-smoke-ci
+        run: bash scripts/release/run_federation_container_smoke.sh moltenhub:federation-smoke-ci

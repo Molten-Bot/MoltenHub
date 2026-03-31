@@ -15,8 +15,8 @@ import (
 const (
 	peerID       = "alpha-beta"
 	peerSecret   = "local-federation-shared-secret"
-	alphaPeerURL = "http://statocyst-alpha:8080"
-	betaPeerURL  = "http://statocyst-beta:8080"
+	alphaPeerURL = "http://moltenhub-alpha:8080"
+	betaPeerURL  = "http://moltenhub-beta:8080"
 )
 
 type runner struct {
@@ -43,8 +43,8 @@ type step struct {
 }
 
 func main() {
-	alphaBaseURL := flag.String("alpha-base-url", "http://127.0.0.1:18080", "Alpha Statocyst base URL")
-	betaBaseURL := flag.String("beta-base-url", "http://127.0.0.1:18081", "Beta Statocyst base URL")
+	alphaBaseURL := flag.String("alpha-base-url", "http://127.0.0.1:18080", "Alpha MoltenHub base URL")
+	betaBaseURL := flag.String("beta-base-url", "http://127.0.0.1:18081", "Beta MoltenHub base URL")
 	flag.Parse()
 
 	r := &runner{

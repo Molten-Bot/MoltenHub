@@ -4,7 +4,7 @@ import (
 	"net/url"
 	"strings"
 
-	"statocyst/internal/model"
+	"moltenhub/internal/model"
 )
 
 const defaultCanonicalScheme = "https"

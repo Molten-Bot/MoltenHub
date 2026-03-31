@@ -12,21 +12,21 @@ BETA_PORT="${3:-18081}"
 ALPHA_BASE_URL="http://127.0.0.1:${ALPHA_PORT}"
 BETA_BASE_URL="http://127.0.0.1:${BETA_PORT}"
 COMPOSE_FILE="scripts/release/docker-compose.federation-smoke.yml"
-PROJECT_NAME="statocyst-federation-smoke"
+PROJECT_NAME="moltenhub-federation-smoke"
 
 cleanup() {
-  STATOCYST_IMAGE="${IMAGE_REF}" \
-  STATOCYST_ALPHA_PORT="${ALPHA_PORT}" \
-  STATOCYST_BETA_PORT="${BETA_PORT}" \
+  MOLTENHUB_IMAGE="${IMAGE_REF}" \
+  MOLTENHUB_ALPHA_PORT="${ALPHA_PORT}" \
+  MOLTENHUB_BETA_PORT="${BETA_PORT}" \
   docker compose -p "${PROJECT_NAME}" -f "${COMPOSE_FILE}" down -v >/dev/null 2>&1 || true
 }
 
 trap cleanup EXIT
 cleanup
 
-STATOCYST_IMAGE="${IMAGE_REF}" \
-STATOCYST_ALPHA_PORT="${ALPHA_PORT}" \
-STATOCYST_BETA_PORT="${BETA_PORT}" \
+MOLTENHUB_IMAGE="${IMAGE_REF}" \
+MOLTENHUB_ALPHA_PORT="${ALPHA_PORT}" \
+MOLTENHUB_BETA_PORT="${BETA_PORT}" \
 docker compose -p "${PROJECT_NAME}" -f "${COMPOSE_FILE}" up -d >/dev/null
 
 wait_for_ping() {
@@ -43,9 +43,9 @@ wait_for_ping() {
     attempts=$((attempts + 1))
     if [[ "${attempts}" -ge 30 ]]; then
       echo "ERROR: ${label} did not become live at ${base_url}/ping" >&2
-      STATOCYST_IMAGE="${IMAGE_REF}" \
-      STATOCYST_ALPHA_PORT="${ALPHA_PORT}" \
-      STATOCYST_BETA_PORT="${BETA_PORT}" \
+      MOLTENHUB_IMAGE="${IMAGE_REF}" \
+      MOLTENHUB_ALPHA_PORT="${ALPHA_PORT}" \
+      MOLTENHUB_BETA_PORT="${BETA_PORT}" \
       docker compose -p "${PROJECT_NAME}" -f "${COMPOSE_FILE}" logs >&2 || true
       exit 1
     fi
@@ -91,9 +91,9 @@ PY
         head -c 512 "${body_file}" >&2 || true
         echo >&2
       fi
-      STATOCYST_IMAGE="${IMAGE_REF}" \
-      STATOCYST_ALPHA_PORT="${ALPHA_PORT}" \
-      STATOCYST_BETA_PORT="${BETA_PORT}" \
+      MOLTENHUB_IMAGE="${IMAGE_REF}" \
+      MOLTENHUB_ALPHA_PORT="${ALPHA_PORT}" \
+      MOLTENHUB_BETA_PORT="${BETA_PORT}" \
       docker compose -p "${PROJECT_NAME}" -f "${COMPOSE_FILE}" logs >&2 || true
       exit 1
     fi
@@ -106,6 +106,6 @@ wait_for_ping "${BETA_BASE_URL}" "beta"
 wait_for_ready_health "${ALPHA_BASE_URL}" "alpha"
 wait_for_ready_health "${BETA_BASE_URL}" "beta"
 
-go run ./cmd/statocyst-federation-smoke \
+go run ./cmd/moltenhub-federation-smoke \
   -alpha-base-url "${ALPHA_BASE_URL}" \
   -beta-base-url "${BETA_BASE_URL}"

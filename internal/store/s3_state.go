@@ -20,12 +20,12 @@ import (
 	"sync"
 	"time"
 
-	"statocyst/internal/model"
+	"moltenhub/internal/model"
 )
 
 const (
 	defaultS3StateRegion = "us-east-1"
-	defaultS3StatePrefix = "statocyst-state"
+	defaultS3StatePrefix = "moltenhub-state"
 	// Cap end-to-end state flush time per mutation to avoid long request stalls.
 	defaultS3StatePersistTimeout = 8 * time.Second
 	// Best-effort metrics/status writes should not block request paths for long.
@@ -182,22 +182,22 @@ var _ ControlPlaneStore = (*s3StateStore)(nil)
 var _ MessageQueueStore = (*s3StateStore)(nil)
 
 func NewS3StateStoreFromEnv() (*s3StateStore, error) {
-	endpoint := strings.TrimSpace(os.Getenv("STATOCYST_STATE_S3_ENDPOINT"))
-	bucket := strings.TrimSpace(os.Getenv("STATOCYST_STATE_S3_BUCKET"))
-	region := strings.TrimSpace(os.Getenv("STATOCYST_STATE_S3_REGION"))
-	prefix := strings.Trim(strings.TrimSpace(os.Getenv("STATOCYST_STATE_S3_PREFIX")), "/")
-	pathStyleRaw := strings.TrimSpace(os.Getenv("STATOCYST_STATE_S3_PATH_STYLE"))
-	accessKeyID := strings.TrimSpace(os.Getenv("STATOCYST_STATE_S3_ACCESS_KEY_ID"))
-	secretAccessKey := strings.TrimSpace(os.Getenv("STATOCYST_STATE_S3_SECRET_ACCESS_KEY"))
-	hydrationTimeout := parseDurationSecondsEnv("STATOCYST_S3_HYDRATION_TIMEOUT_SEC", defaultS3StateHydrationTimeout)
-	listConcurrency := parsePositiveIntEnv("STATOCYST_S3_HYDRATION_LIST_CONCURRENCY", defaultS3StateListConcurrency)
-	getConcurrency := parsePositiveIntEnv("STATOCYST_S3_HYDRATION_GET_CONCURRENCY", defaultS3StateGetConcurrency)
+	endpoint := strings.TrimSpace(os.Getenv("MOLTENHUB_STATE_S3_ENDPOINT"))
+	bucket := strings.TrimSpace(os.Getenv("MOLTENHUB_STATE_S3_BUCKET"))
+	region := strings.TrimSpace(os.Getenv("MOLTENHUB_STATE_S3_REGION"))
+	prefix := strings.Trim(strings.TrimSpace(os.Getenv("MOLTENHUB_STATE_S3_PREFIX")), "/")
+	pathStyleRaw := strings.TrimSpace(os.Getenv("MOLTENHUB_STATE_S3_PATH_STYLE"))
+	accessKeyID := strings.TrimSpace(os.Getenv("MOLTENHUB_STATE_S3_ACCESS_KEY_ID"))
+	secretAccessKey := strings.TrimSpace(os.Getenv("MOLTENHUB_STATE_S3_SECRET_ACCESS_KEY"))
+	hydrationTimeout := parseDurationSecondsEnv("MOLTENHUB_S3_HYDRATION_TIMEOUT_SEC", defaultS3StateHydrationTimeout)
+	listConcurrency := parsePositiveIntEnv("MOLTENHUB_S3_HYDRATION_LIST_CONCURRENCY", defaultS3StateListConcurrency)
+	getConcurrency := parsePositiveIntEnv("MOLTENHUB_S3_HYDRATION_GET_CONCURRENCY", defaultS3StateGetConcurrency)
 
 	if endpoint == "" {
-		return nil, fmt.Errorf("STATOCYST_STATE_S3_ENDPOINT is required for s3 state backend")
+		return nil, fmt.Errorf("MOLTENHUB_STATE_S3_ENDPOINT is required for s3 state backend")
 	}
 	if bucket == "" {
-		return nil, fmt.Errorf("STATOCYST_STATE_S3_BUCKET is required for s3 state backend")
+		return nil, fmt.Errorf("MOLTENHUB_STATE_S3_BUCKET is required for s3 state backend")
 	}
 	if region == "" {
 		region = defaultS3StateRegion
@@ -206,17 +206,17 @@ func NewS3StateStoreFromEnv() (*s3StateStore, error) {
 		prefix = defaultS3StatePrefix
 	}
 	if (accessKeyID == "") != (secretAccessKey == "") {
-		return nil, fmt.Errorf("STATOCYST_STATE_S3_ACCESS_KEY_ID and STATOCYST_STATE_S3_SECRET_ACCESS_KEY must be set together")
+		return nil, fmt.Errorf("MOLTENHUB_STATE_S3_ACCESS_KEY_ID and MOLTENHUB_STATE_S3_SECRET_ACCESS_KEY must be set together")
 	}
 	pathStyle := true
 	if pathStyleRaw != "" {
 		pathStyle = strings.EqualFold(pathStyleRaw, "true")
 	}
 	if !pathStyle {
-		return nil, fmt.Errorf("STATOCYST_STATE_S3_PATH_STYLE=false is not supported in this build")
+		return nil, fmt.Errorf("MOLTENHUB_STATE_S3_PATH_STYLE=false is not supported in this build")
 	}
 	if !strings.HasPrefix(endpoint, "http://") && !strings.HasPrefix(endpoint, "https://") {
-		return nil, fmt.Errorf("STATOCYST_STATE_S3_ENDPOINT must include http:// or https:// scheme")
+		return nil, fmt.Errorf("MOLTENHUB_STATE_S3_ENDPOINT must include http:// or https:// scheme")
 	}
 
 	store := &s3StateStore{

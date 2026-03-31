@@ -64,4 +64,4 @@ if [[ "${VERBOSE}" == "true" ]]; then
   args+=(-verbose)
 fi
 
-go run ./cmd/statocyst-federation-latency "${args[@]}"
+go run ./cmd/moltenhub-federation-latency "${args[@]}"

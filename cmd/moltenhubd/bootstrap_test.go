@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
-	"statocyst/internal/auth"
-	"statocyst/internal/store"
+	"moltenhub/internal/auth"
+	"moltenhub/internal/store"
 )
 
 func TestBootstrapHandlerPingAndHealthBeforeReady(t *testing.T) {

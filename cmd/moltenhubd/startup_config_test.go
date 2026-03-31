@@ -11,9 +11,9 @@ func TestCollectLaunchDiagnostics_DefaultsStateAndQueueToMemoryWithWarnings(t *t
 		t.Fatalf("expected no error, got %v", err)
 	}
 
-	assertDiagnosticContains(t, diagnostics, "WARN", "STATOCYST_STATE_BACKEND", "defaulting to in-memory state")
-	assertDiagnosticContains(t, diagnostics, "WARN", "STATOCYST_QUEUE_BACKEND", "defaulting to in-memory queue")
-	assertDiagnosticContains(t, diagnostics, "WARN", "STATOCYST_CANONICAL_BASE_URL", "entity uri fields will be omitted")
+	assertDiagnosticContains(t, diagnostics, "WARN", "MOLTENHUB_STATE_BACKEND", "defaulting to in-memory state")
+	assertDiagnosticContains(t, diagnostics, "WARN", "MOLTENHUB_QUEUE_BACKEND", "defaulting to in-memory queue")
+	assertDiagnosticContains(t, diagnostics, "WARN", "MOLTENHUB_CANONICAL_BASE_URL", "entity uri fields will be omitted")
 }
 
 func TestCollectLaunchDiagnostics_FailsWhenSupabaseRequiredVarsMissing(t *testing.T) {
@@ -73,58 +73,58 @@ func TestCollectLaunchDiagnostics_WarnsForUnknownSupabaseKeyFormat(t *testing.T)
 
 func TestCollectLaunchDiagnostics_FailsWhenS3BackendsMissingRequiredVars(t *testing.T) {
 	diagnostics, err := collectLaunchDiagnostics(mapLookup(map[string]string{
-		"STATOCYST_STATE_BACKEND": "s3",
-		"STATOCYST_QUEUE_BACKEND": "s3",
+		"MOLTENHUB_STATE_BACKEND": "s3",
+		"MOLTENHUB_QUEUE_BACKEND": "s3",
 	}))
 	if err == nil {
 		t.Fatal("expected error for missing s3 backend configuration")
 	}
 	for _, name := range []string{
-		"STATOCYST_STATE_S3_ENDPOINT",
-		"STATOCYST_STATE_S3_BUCKET",
-		"STATOCYST_QUEUE_S3_ENDPOINT",
-		"STATOCYST_QUEUE_S3_BUCKET",
+		"MOLTENHUB_STATE_S3_ENDPOINT",
+		"MOLTENHUB_STATE_S3_BUCKET",
+		"MOLTENHUB_QUEUE_S3_ENDPOINT",
+		"MOLTENHUB_QUEUE_S3_BUCKET",
 	} {
 		if !strings.Contains(err.Error(), name) {
 			t.Fatalf("expected %s in error, got %v", name, err)
 		}
 	}
 
-	assertDiagnosticContains(t, diagnostics, "ERROR", "STATOCYST_STATE_S3_ENDPOINT", "cannot start without an endpoint URL")
-	assertDiagnosticContains(t, diagnostics, "ERROR", "STATOCYST_QUEUE_S3_BUCKET", "cannot start without a bucket name")
-	assertDiagnosticContains(t, diagnostics, "WARN", "STATOCYST_STATE_S3_REGION", "default signing region")
-	assertDiagnosticContains(t, diagnostics, "WARN", "STATOCYST_QUEUE_S3_ACCESS_KEY_ID/STATOCYST_QUEUE_S3_SECRET_ACCESS_KEY", "requests will be unsigned")
+	assertDiagnosticContains(t, diagnostics, "ERROR", "MOLTENHUB_STATE_S3_ENDPOINT", "cannot start without an endpoint URL")
+	assertDiagnosticContains(t, diagnostics, "ERROR", "MOLTENHUB_QUEUE_S3_BUCKET", "cannot start without a bucket name")
+	assertDiagnosticContains(t, diagnostics, "WARN", "MOLTENHUB_STATE_S3_REGION", "default signing region")
+	assertDiagnosticContains(t, diagnostics, "WARN", "MOLTENHUB_QUEUE_S3_ACCESS_KEY_ID/MOLTENHUB_QUEUE_S3_SECRET_ACCESS_KEY", "requests will be unsigned")
 }
 
 func TestCollectLaunchDiagnostics_FailsWhenS3SigningPairIsIncomplete(t *testing.T) {
 	diagnostics, err := collectLaunchDiagnostics(mapLookup(map[string]string{
-		"STATOCYST_STATE_BACKEND":          "s3",
-		"STATOCYST_STATE_S3_ENDPOINT":      "http://localhost:9000",
-		"STATOCYST_STATE_S3_BUCKET":        "state-bucket",
-		"STATOCYST_STATE_S3_ACCESS_KEY_ID": "abc123",
+		"MOLTENHUB_STATE_BACKEND":          "s3",
+		"MOLTENHUB_STATE_S3_ENDPOINT":      "http://localhost:9000",
+		"MOLTENHUB_STATE_S3_BUCKET":        "state-bucket",
+		"MOLTENHUB_STATE_S3_ACCESS_KEY_ID": "abc123",
 	}))
 	if err == nil {
 		t.Fatal("expected error for incomplete s3 signing pair")
 	}
-	if !strings.Contains(err.Error(), "STATOCYST_STATE_S3_SECRET_ACCESS_KEY") {
+	if !strings.Contains(err.Error(), "MOLTENHUB_STATE_S3_SECRET_ACCESS_KEY") {
 		t.Fatalf("expected secret access key in error, got %v", err)
 	}
 
-	assertDiagnosticContains(t, diagnostics, "ERROR", "STATOCYST_STATE_S3_SECRET_ACCESS_KEY", "requires both access key id and secret access key")
+	assertDiagnosticContains(t, diagnostics, "ERROR", "MOLTENHUB_STATE_S3_SECRET_ACCESS_KEY", "requires both access key id and secret access key")
 }
 
 func TestCollectLaunchDiagnostics_FailsWhenCORSAllowedOriginsIsInvalid(t *testing.T) {
 	diagnostics, err := collectLaunchDiagnostics(mapLookup(map[string]string{
-		"STATOCYST_CORS_ALLOWED_ORIGINS": "app.molten.bot",
+		"MOLTENHUB_CORS_ALLOWED_ORIGINS": "app.molten.bot",
 	}))
 	if err == nil {
 		t.Fatal("expected error for invalid CORS allowed origins")
 	}
-	if !strings.Contains(err.Error(), "STATOCYST_CORS_ALLOWED_ORIGINS") {
-		t.Fatalf("expected STATOCYST_CORS_ALLOWED_ORIGINS in error, got %v", err)
+	if !strings.Contains(err.Error(), "MOLTENHUB_CORS_ALLOWED_ORIGINS") {
+		t.Fatalf("expected MOLTENHUB_CORS_ALLOWED_ORIGINS in error, got %v", err)
 	}
 
-	assertDiagnosticContains(t, diagnostics, "ERROR", "STATOCYST_CORS_ALLOWED_ORIGINS", "scheme must be http or https")
+	assertDiagnosticContains(t, diagnostics, "ERROR", "MOLTENHUB_CORS_ALLOWED_ORIGINS", "scheme must be http or https")
 }
 
 func TestDiagnosticLogValueRedactsSensitiveValues(t *testing.T) {

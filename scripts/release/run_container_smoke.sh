@@ -9,7 +9,7 @@ fi
 IMAGE_REF="$1"
 HOST_PORT="${2:-18080}"
 BASE_URL="http://127.0.0.1:${HOST_PORT}"
-CONTAINER_NAME="statocyst-smoke-${HOST_PORT}"
+CONTAINER_NAME="moltenhub-smoke-${HOST_PORT}"
 
 cleanup() {
   docker rm -f "${CONTAINER_NAME}" >/dev/null 2>&1 || true
@@ -84,10 +84,10 @@ docker run -d \
   --name "${CONTAINER_NAME}" \
   -p "127.0.0.1:${HOST_PORT}:8080" \
   -e HUMAN_AUTH_PROVIDER=dev \
-  -e STATOCYST_CANONICAL_BASE_URL="${BASE_URL}" \
+  -e MOLTENHUB_CANONICAL_BASE_URL="${BASE_URL}" \
   "${IMAGE_REF}" >/dev/null
 
 wait_for_ping
 wait_for_ready_health
 
-go run ./cmd/statocyst-smoke -base-url "${BASE_URL}"
+go run ./cmd/moltenhub-smoke -base-url "${BASE_URL}"

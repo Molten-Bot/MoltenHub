@@ -16,9 +16,9 @@ import (
 	"strings"
 	"time"
 
-	"statocyst/internal/auth"
-	"statocyst/internal/model"
-	"statocyst/internal/store"
+	"moltenhub/internal/auth"
+	"moltenhub/internal/model"
+	"moltenhub/internal/store"
 )
 
 type createOrgRequest struct {
@@ -103,8 +103,8 @@ var agentConnectPromptLines = []string{
 	"7. Publish a first test message via `POST {api_base}/messages/publish`.",
 	"",
 	"Optional OpenClaw-only hints (not required):",
-	"- Install plugin package `@moltenbot/openclaw-plugin-statocyst` if your OpenClaw runtime supports plugins.",
-	"- Optionally save hub config at `workspace/.statocyst/config.json` using:",
+	"- Install plugin package `@moltenbot/openclaw-plugin-moltenhub` if your OpenClaw runtime supports plugins.",
+	"- Optionally save hub config at `workspace/.moltenhub/config.json` using:",
 	"  {\"baseUrl\":\"<api_base>\",\"token\":\"<token>\",\"sessionKey\":\"main\",\"timeoutMs\":20000}",
 	"- If plugin/config is unavailable, continue with core `/v1/messages/*` routes.",
 	"",
@@ -138,12 +138,12 @@ var (
 const (
 	defaultInviteExpiryDays = 7
 	maxInviteExpiryDays     = 365
-	defaultUIAppName        = "Statocyst"
+	defaultUIAppName        = "MoltenHub"
 	maxMetadataBytes        = 192 * 1024
 )
 
 func configuredMetadataMaxBytes() int {
-	raw := strings.TrimSpace(os.Getenv("STATOCYST_MAX_METADATA_BYTES"))
+	raw := strings.TrimSpace(os.Getenv("MOLTENHUB_MAX_METADATA_BYTES"))
 	if raw == "" {
 		return maxMetadataBytes
 	}
@@ -226,7 +226,7 @@ func hasUIConfigPrivilegedAccess(r *http.Request) bool {
 }
 
 func hasEntitiesMetadataAccess(r *http.Request) bool {
-	expectedKey := strings.TrimSpace(os.Getenv("STATOCYST_ENTITIES_METADATA_KEY"))
+	expectedKey := strings.TrimSpace(os.Getenv("MOLTENHUB_ENTITIES_METADATA_KEY"))
 	if expectedKey == "" {
 		return false
 	}
@@ -250,7 +250,7 @@ func (h *Handler) hasAdminSnapshotKeyAccess(r *http.Request) bool {
 }
 
 func uiAppName() string {
-	name := strings.TrimSpace(os.Getenv("STATOCYST_APP_NAME"))
+	name := strings.TrimSpace(os.Getenv("MOLTENHUB_APP_NAME"))
 	if name == "" {
 		return defaultUIAppName
 	}

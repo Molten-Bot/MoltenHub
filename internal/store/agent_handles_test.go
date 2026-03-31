@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"statocyst/internal/model"
+	"moltenhub/internal/model"
 )
 
 type seqID struct {

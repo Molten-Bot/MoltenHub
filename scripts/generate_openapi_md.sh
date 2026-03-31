@@ -13,7 +13,7 @@ fi
 
 {
   cat <<'HEADER'
-# Statocyst OpenAPI Companion
+# MoltenHub OpenAPI Companion
 
 Machine-readable source of truth:
 - Canonical spec: `/openapi.yaml`

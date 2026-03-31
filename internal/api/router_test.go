@@ -16,10 +16,10 @@ import (
 	"testing"
 	"time"
 
-	"statocyst/internal/auth"
-	"statocyst/internal/longpoll"
-	"statocyst/internal/model"
-	"statocyst/internal/store"
+	"moltenhub/internal/auth"
+	"moltenhub/internal/longpoll"
+	"moltenhub/internal/model"
+	"moltenhub/internal/store"
 )
 
 func newTestRouter() http.Handler {
@@ -1853,10 +1853,10 @@ func TestMyAgentBindTokenCreateIncludesConnectPrompt(t *testing.T) {
 	if !strings.Contains(connectPrompt, "Optional OpenClaw-only hints (not required):") {
 		t.Fatalf("expected connect prompt to include optional OpenClaw hints heading, got %q", connectPrompt)
 	}
-	if !strings.Contains(connectPrompt, "@moltenbot/openclaw-plugin-statocyst") {
+	if !strings.Contains(connectPrompt, "@moltenbot/openclaw-plugin-moltenhub") {
 		t.Fatalf("expected connect prompt to include OpenClaw plugin package hint, got %q", connectPrompt)
 	}
-	if !strings.Contains(connectPrompt, "workspace/.statocyst/config.json") {
+	if !strings.Contains(connectPrompt, "workspace/.moltenhub/config.json") {
 		t.Fatalf("expected connect prompt to include optional workspace config path hint, got %q", connectPrompt)
 	}
 	if !strings.Contains(connectPrompt, "\"baseUrl\":\"<api_base>\"") || !strings.Contains(connectPrompt, "\"sessionKey\":\"main\"") || !strings.Contains(connectPrompt, "\"timeoutMs\":20000") {
@@ -2896,7 +2896,7 @@ func TestAgentCapabilitiesAndSkillEndpoints(t *testing.T) {
 		t.Fatalf("missing skill object: %v", skillJSON)
 	}
 	skillContent, _ := skillObj["content"].(string)
-	if !strings.Contains(skillContent, "SKILL: Statocyst Agent Control Plane") {
+	if !strings.Contains(skillContent, "SKILL: MoltenHub Agent Control Plane") {
 		t.Fatalf("expected skill header, got %q", skillContent)
 	}
 	if !strings.Contains(skillContent, "Onboarding Checklist") {
@@ -2956,7 +2956,7 @@ func TestAgentCapabilitiesAndSkillEndpoints(t *testing.T) {
 	if !strings.HasPrefix(manifestMDResp.Header().Get("Content-Type"), "text/markdown") {
 		t.Fatalf("expected markdown content type for manifest, got %q", manifestMDResp.Header().Get("Content-Type"))
 	}
-	if !strings.Contains(manifestMDResp.Body.String(), "Statocyst Agent Manifest") {
+	if !strings.Contains(manifestMDResp.Body.String(), "MoltenHub Agent Manifest") {
 		t.Fatalf("expected manifest markdown heading, got %q", manifestMDResp.Body.String())
 	}
 	if !strings.Contains(manifestMDResp.Body.String(), "Retry Guidance") {
@@ -3395,7 +3395,7 @@ func TestOpenAPIMarkdownHeaders(t *testing.T) {
 		t.Fatalf("expected text/markdown content type, got %q", contentType)
 	}
 	body := resp.Body.String()
-	if !strings.Contains(body, "Statocyst OpenAPI Companion") {
+	if !strings.Contains(body, "MoltenHub OpenAPI Companion") {
 		t.Fatalf("expected companion heading in markdown output, got %q", body)
 	}
 	if !strings.Contains(body, "```yaml") || !strings.Contains(body, "/v1/agents/me") {
@@ -3945,7 +3945,7 @@ func TestMetadataValidationRejectsNonObjectAndOversizedPayload(t *testing.T) {
 }
 
 func TestMetadataValidationHonorsConfiguredMaxBytes(t *testing.T) {
-	t.Setenv("STATOCYST_MAX_METADATA_BYTES", "1024")
+	t.Setenv("MOLTENHUB_MAX_METADATA_BYTES", "1024")
 
 	router := newTestRouter()
 	ensureHandleConfirmed(t, router, "alice", "alice@a.test")
@@ -4051,7 +4051,7 @@ func TestHumanMetadataPassthrough(t *testing.T) {
 		},
 	}, humanHeaders("alice", "alice@a.test"))
 	if passthrough.Code != http.StatusOK {
-		t.Fatalf("expected statocyst metadata passthrough 200, got %d %s", passthrough.Code, passthrough.Body.String())
+		t.Fatalf("expected moltenhub metadata passthrough 200, got %d %s", passthrough.Code, passthrough.Body.String())
 	}
 
 	payload := decodeJSONMap(t, passthrough.Body.Bytes())
@@ -4084,7 +4084,7 @@ func TestOrganizationMetadataPassthrough(t *testing.T) {
 		},
 	}, humanHeaders("alice", "alice@a.test"))
 	if passthrough.Code != http.StatusOK {
-		t.Fatalf("expected statocyst metadata passthrough 200, got %d %s", passthrough.Code, passthrough.Body.String())
+		t.Fatalf("expected moltenhub metadata passthrough 200, got %d %s", passthrough.Code, passthrough.Body.String())
 	}
 }
 

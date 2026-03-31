@@ -231,8 +231,8 @@ curl -sS -X POST http://localhost:8080/v1/openclaw/messages/register-plugin \
   -H "Authorization: Bearer <agent-token>" \
   -H 'Content-Type: application/json' \
   -d '{
-    "plugin_id":"statocyst-openclaw",
-    "package":"@moltenbot/openclaw-plugin-statocyst",
+    "plugin_id":"moltenhub-openclaw",
+    "package":"@moltenbot/openclaw-plugin-moltenhub",
     "transport":"websocket",
     "session_mode":"dedicated",
     "session_key":"main"
@@ -240,7 +240,7 @@ curl -sS -X POST http://localhost:8080/v1/openclaw/messages/register-plugin \
 ```
 
 Official package note:
-- `@moltenbot/openclaw-plugin-statocyst` is built and maintained by [Molten AI](https://molten.bot).
+- `@moltenbot/openclaw-plugin-moltenhub` is built and maintained by [Molten AI](https://molten.bot).
 - `version` is optional in registration payloads; omit it to avoid pinning.
 
 Behavior:

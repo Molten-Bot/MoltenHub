@@ -1,4 +1,4 @@
-module statocyst
+module moltenhub
 
 go 1.22
 

@@ -4,21 +4,21 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$ROOT_DIR"
 
-if [[ -n "${STATOCYST_ADDR:-}" ]]; then
-  if [[ "$STATOCYST_ADDR" =~ :([0-9]+)$ ]]; then
+if [[ -n "${MOLTENHUB_ADDR:-}" ]]; then
+  if [[ "$MOLTENHUB_ADDR" =~ :([0-9]+)$ ]]; then
     PORT="${BASH_REMATCH[1]}"
   else
-    PORT="${STATOCYST_PORT:-8080}"
+    PORT="${MOLTENHUB_PORT:-8080}"
   fi
 else
-  PORT="${STATOCYST_PORT:-8080}"
-  export STATOCYST_ADDR=":${PORT}"
+  PORT="${MOLTENHUB_PORT:-8080}"
+  export MOLTENHUB_ADDR=":${PORT}"
 fi
 
 export HUMAN_AUTH_PROVIDER="${HUMAN_AUTH_PROVIDER:-dev}"
-export STATOCYST_UI_DEV_MODE="${STATOCYST_UI_DEV_MODE:-true}"
-export STATOCYST_ENABLE_LOCAL_CORS="${STATOCYST_ENABLE_LOCAL_CORS:-true}"
-export GOCACHE="${GOCACHE:-/tmp/statocyst-gocache}"
+export MOLTENHUB_UI_DEV_MODE="${MOLTENHUB_UI_DEV_MODE:-true}"
+export MOLTENHUB_ENABLE_LOCAL_CORS="${MOLTENHUB_ENABLE_LOCAL_CORS:-true}"
+export GOCACHE="${GOCACHE:-/tmp/moltenhub-gocache}"
 
 mkdir -p "${GOCACHE}"
 
@@ -26,13 +26,13 @@ list_port_pids() {
   lsof -tiTCP:"${PORT}" -sTCP:LISTEN 2>/dev/null || true
 }
 
-stop_existing_statocyst_on_port() {
+stop_existing_moltenhub_on_port() {
   local pid cmd stopped=0
   while IFS= read -r pid; do
     [[ -z "$pid" ]] && continue
     cmd="$(ps -p "$pid" -o command= 2>/dev/null || true)"
-    if [[ "$cmd" == *statocyst* || "$cmd" == *cmd/statocystd* ]]; then
-      echo "Stopping existing statocyst process on :${PORT} (pid ${pid})"
+    if [[ "$cmd" == *moltenhub* || "$cmd" == *cmd/moltenhubd* ]]; then
+      echo "Stopping existing moltenhub process on :${PORT} (pid ${pid})"
       kill "$pid" 2>/dev/null || true
       stopped=1
     fi
@@ -52,17 +52,17 @@ ensure_port_free() {
   pids="$(list_port_pids | tr '\n' ' ' | sed 's/[[:space:]]*$//')"
   if [[ -n "$pids" ]]; then
     echo "Port :${PORT} is in use by pid(s): ${pids}."
-    echo "Stop the other process or set STATOCYST_PORT (or STATOCYST_ADDR) to another port."
+    echo "Stop the other process or set MOLTENHUB_PORT (or MOLTENHUB_ADDR) to another port."
     exit 1
   fi
 }
 
-stop_existing_statocyst_on_port
+stop_existing_moltenhub_on_port
 ensure_port_free
 
-echo "Starting statocyst (native) at http://localhost:${PORT}"
-echo "STATOCYST_ADDR=${STATOCYST_ADDR} HUMAN_AUTH_PROVIDER=${HUMAN_AUTH_PROVIDER} STATOCYST_UI_DEV_MODE=${STATOCYST_UI_DEV_MODE} STATOCYST_ENABLE_LOCAL_CORS=${STATOCYST_ENABLE_LOCAL_CORS}"
+echo "Starting moltenhub (native) at http://localhost:${PORT}"
+echo "MOLTENHUB_ADDR=${MOLTENHUB_ADDR} HUMAN_AUTH_PROVIDER=${HUMAN_AUTH_PROVIDER} MOLTENHUB_UI_DEV_MODE=${MOLTENHUB_UI_DEV_MODE} MOLTENHUB_ENABLE_LOCAL_CORS=${MOLTENHUB_ENABLE_LOCAL_CORS}"
 echo "GOCACHE=${GOCACHE}"
 echo "Press Ctrl+C to stop."
 
-exec go run ./cmd/statocystd
+exec go run ./cmd/moltenhubd

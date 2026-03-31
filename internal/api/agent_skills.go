@@ -4,7 +4,7 @@ import (
 	"sort"
 	"strings"
 
-	"statocyst/internal/model"
+	"moltenhub/internal/model"
 )
 
 type agentSkillSummary struct {

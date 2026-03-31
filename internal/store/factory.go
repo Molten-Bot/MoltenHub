@@ -11,7 +11,7 @@ const (
 	defaultStateBackend            = "memory"
 	defaultQueueBackend            = "memory"
 	defaultStorageStartupMode      = StorageStartupModeStrict
-	storageStartupModeEnv          = "STATOCYST_STORAGE_STARTUP_MODE"
+	storageStartupModeEnv          = "MOLTENHUB_STORAGE_STARTUP_MODE"
 	storageStartupModeStrictRaw    = "strict"
 	storageStartupModeDegradedRaw  = "degraded"
 	storageStartupModeFallbackRaw  = "fallback-memory"
@@ -76,8 +76,8 @@ func StorageStartupModeFromEnv() (StorageStartupMode, error) {
 }
 
 func configuredBackendsFromEnv() (string, string, error) {
-	stateBackend := strings.ToLower(strings.TrimSpace(os.Getenv("STATOCYST_STATE_BACKEND")))
-	queueBackend := strings.ToLower(strings.TrimSpace(os.Getenv("STATOCYST_QUEUE_BACKEND")))
+	stateBackend := strings.ToLower(strings.TrimSpace(os.Getenv("MOLTENHUB_STATE_BACKEND")))
+	queueBackend := strings.ToLower(strings.TrimSpace(os.Getenv("MOLTENHUB_QUEUE_BACKEND")))
 	if stateBackend == "" {
 		stateBackend = defaultStateBackend
 	}

@@ -381,7 +381,7 @@ func TestLaunchSmoke(t *testing.T) {
 		}
 	})
 
-	t.Run("Super-admin pairs two statocyst instances and agents exchange over canonical URIs", func(t *testing.T) {
+	t.Run("Super-admin pairs two moltenhub instances and agents exchange over canonical URIs", func(t *testing.T) {
 		alpha := newFederatedTestServer(t, "https://alpha.example")
 		beta := newFederatedTestServer(t, "https://beta.example")
 

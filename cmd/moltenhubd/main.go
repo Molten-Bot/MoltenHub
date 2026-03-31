@@ -11,10 +11,10 @@ import (
 	"strings"
 	"time"
 
-	"statocyst/internal/api"
-	"statocyst/internal/auth"
-	"statocyst/internal/longpoll"
-	"statocyst/internal/store"
+	"moltenhub/internal/api"
+	"moltenhub/internal/auth"
+	"moltenhub/internal/longpoll"
+	"moltenhub/internal/store"
 )
 
 func main() {
@@ -23,7 +23,7 @@ func main() {
 		log.Fatalf("%v", err)
 	}
 
-	addr := os.Getenv("STATOCYST_ADDR")
+	addr := os.Getenv("MOLTENHUB_ADDR")
 	if addr == "" {
 		addr = ":8080"
 	}
@@ -48,20 +48,20 @@ func main() {
 			superAdminReviewMode = mode
 		}
 	}
-	if raw := strings.TrimSpace(os.Getenv("STATOCYST_HEADLESS_MODE")); raw != "" {
+	if raw := strings.TrimSpace(os.Getenv("MOLTENHUB_HEADLESS_MODE")); raw != "" {
 		if mode, err := strconv.ParseBool(raw); err == nil {
 			headlessMode = mode
 		}
 	}
-	enableLocalCORS := envBool("STATOCYST_ENABLE_LOCAL_CORS", false)
-	allowedCORSOrigins, err := api.ParseCORSAllowedOrigins(os.Getenv("STATOCYST_CORS_ALLOWED_ORIGINS"))
+	enableLocalCORS := envBool("MOLTENHUB_ENABLE_LOCAL_CORS", false)
+	allowedCORSOrigins, err := api.ParseCORSAllowedOrigins(os.Getenv("MOLTENHUB_CORS_ALLOWED_ORIGINS"))
 	if err != nil {
 		log.Fatalf("CORS allowed origins configuration error: %v", err)
 	}
 	bootstrap := newBootstrapHandler(
 		storageStartupMode,
-		configuredBackendFromEnv(os.Getenv("STATOCYST_STATE_BACKEND"), "memory"),
-		configuredBackendFromEnv(os.Getenv("STATOCYST_QUEUE_BACKEND"), "memory"),
+		configuredBackendFromEnv(os.Getenv("MOLTENHUB_STATE_BACKEND"), "memory"),
+		configuredBackendFromEnv(os.Getenv("MOLTENHUB_QUEUE_BACKEND"), "memory"),
 		bootstrapOptions{
 			humanAuth:         humanAuth,
 			supabaseURL:       os.Getenv("SUPABASE_URL"),
@@ -125,17 +125,17 @@ func main() {
 			queueStore,
 			waiters,
 			humanAuth,
-			os.Getenv("STATOCYST_CANONICAL_BASE_URL"),
+			os.Getenv("MOLTENHUB_CANONICAL_BASE_URL"),
 			os.Getenv("SUPABASE_URL"),
 			os.Getenv("SUPABASE_ANON_KEY"),
-			os.Getenv("STATOCYST_ADMIN_SNAPSHOT_KEY"),
+			os.Getenv("MOLTENHUB_ADMIN_SNAPSHOT_KEY"),
 			os.Getenv("SUPER_ADMIN_EMAILS"),
 			os.Getenv("SUPER_ADMIN_DOMAINS"),
 			superAdminReviewMode,
 			bindTTL,
 			headlessMode,
 		)
-		handler.SetHeadlessModeRedirectURL(os.Getenv("STATOCYST_HEADLESS_MODE_URL"))
+		handler.SetHeadlessModeRedirectURL(os.Getenv("MOLTENHUB_HEADLESS_MODE_URL"))
 		handler.SetStorageHealth(storageHealth)
 		setStartupPhase("router_ready")
 		readyAt := time.Now().UTC()
@@ -164,10 +164,10 @@ func main() {
 			EnableLocalCORS:    enableLocalCORS,
 			AllowedCORSOrigins: allowedCORSOrigins,
 		}))
-		log.Printf("statocyst runtime ready total_ms=%d phase_durations_ms=%v", totalMS, phaseDurationsMS)
+		log.Printf("moltenhub runtime ready total_ms=%d phase_durations_ms=%v", totalMS, phaseDurationsMS)
 	}()
 
-	log.Printf("statocyst listening on %s", listener.Addr().String())
+	log.Printf("moltenhub listening on %s", listener.Addr().String())
 	log.Printf("local CORS enabled: %t", enableLocalCORS)
 	log.Printf("configured CORS origins: %d", len(allowedCORSOrigins))
 	if err := server.Serve(listener); err != nil && err != http.ErrServerClosed {

@@ -1,4 +1,4 @@
-const UI = StatocystUI;
+const UI = MoltenHubUI;
 
 let currentHumanID = "";
 let orgByID = {};

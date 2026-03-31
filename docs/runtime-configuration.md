@@ -29,45 +29,45 @@ Optional privileged UI config key:
 
 Other auth/runtime knobs:
 - `BIND_TOKEN_TTL_MINUTES=15` (default `15`)
-- `STATOCYST_MAX_METADATA_BYTES=196608` (default `192KB`)
+- `MOLTENHUB_MAX_METADATA_BYTES=196608` (default `192KB`)
 
 Browser API CORS:
-- `STATOCYST_ENABLE_LOCAL_CORS=true`: allows local testing origins (`localhost`, `127.0.0.1`, `::1`, plus `Origin: null` from `file://`).
-- `STATOCYST_CORS_ALLOWED_ORIGINS=https://app.molten.bot,https://app.molten-qa.site`: explicit allowed browser origins.
+- `MOLTENHUB_ENABLE_LOCAL_CORS=true`: allows local testing origins (`localhost`, `127.0.0.1`, `::1`, plus `Origin: null` from `file://`).
+- `MOLTENHUB_CORS_ALLOWED_ORIGINS=https://app.molten.bot,https://app.molten-qa.site`: explicit allowed browser origins.
 - Values must be comma-separated `http://` or `https://` origins without paths, queries, or fragments.
 
 Canonical URI authority:
-- `STATOCYST_CANONICAL_BASE_URL=https://hub.molten.bot`
+- `MOLTENHUB_CANONICAL_BASE_URL=https://hub.molten.bot`
 - If omitted, `uri` fields are omitted.
 
 ## State Backend
 
-- `STATOCYST_STATE_BACKEND=memory` (default): in-process volatile state.
-- `STATOCYST_STATE_BACKEND=s3`: S3-backed beta state store.
-  - Required: `STATOCYST_STATE_S3_ENDPOINT`, `STATOCYST_STATE_S3_BUCKET`
-  - Optional: `STATOCYST_STATE_S3_REGION` (default `us-east-1`), `STATOCYST_STATE_S3_PREFIX` (default `statocyst-state`), `STATOCYST_STATE_S3_PATH_STYLE=true`, `STATOCYST_STATE_S3_ACCESS_KEY_ID`, `STATOCYST_STATE_S3_SECRET_ACCESS_KEY`
+- `MOLTENHUB_STATE_BACKEND=memory` (default): in-process volatile state.
+- `MOLTENHUB_STATE_BACKEND=s3`: S3-backed beta state store.
+  - Required: `MOLTENHUB_STATE_S3_ENDPOINT`, `MOLTENHUB_STATE_S3_BUCKET`
+  - Optional: `MOLTENHUB_STATE_S3_REGION` (default `us-east-1`), `MOLTENHUB_STATE_S3_PREFIX` (default `moltenhub-state`), `MOLTENHUB_STATE_S3_PATH_STYLE=true`, `MOLTENHUB_STATE_S3_ACCESS_KEY_ID`, `MOLTENHUB_STATE_S3_SECRET_ACCESS_KEY`
   - Requests are SigV4-signed when access key + secret key are set; otherwise unsigned.
   - Current S3 mode is beta and designed for a single writer instance.
 
 Startup behavior:
-- `STATOCYST_STORAGE_STARTUP_MODE=strict` (default): startup fails if configured storage is invalid/unreachable.
-- `STATOCYST_STORAGE_STARTUP_MODE=degraded`: falls back to memory for failing backends and reports failures in `/health`.
+- `MOLTENHUB_STORAGE_STARTUP_MODE=strict` (default): startup fails if configured storage is invalid/unreachable.
+- `MOLTENHUB_STORAGE_STARTUP_MODE=degraded`: falls back to memory for failing backends and reports failures in `/health`.
 - HTTP listener starts before S3 hydration completes.
   - Early routes while booting: `/ping`, `/health`, `/openapi.yaml`, `/openapi.md`, `/v1/ui/config`, `/v1/me`.
   - `/v1/me` serves identity-only startup payload while booting; writes remain unavailable until ready.
   - Use `/ping` for liveness and `/health` for readiness/dependencies.
 
 S3 state hydration tuning:
-- `STATOCYST_S3_HYDRATION_TIMEOUT_SEC=20` (default): upper bound for strict startup hydration.
-- `STATOCYST_S3_HYDRATION_LIST_CONCURRENCY=6` (default): parallel list workers during hydration.
-- `STATOCYST_S3_HYDRATION_GET_CONCURRENCY=24` (default): parallel object fetch workers during hydration.
+- `MOLTENHUB_S3_HYDRATION_TIMEOUT_SEC=20` (default): upper bound for strict startup hydration.
+- `MOLTENHUB_S3_HYDRATION_LIST_CONCURRENCY=6` (default): parallel list workers during hydration.
+- `MOLTENHUB_S3_HYDRATION_GET_CONCURRENCY=24` (default): parallel object fetch workers during hydration.
 
 ## Queue Backend
 
-- `STATOCYST_QUEUE_BACKEND=memory` (default): in-process volatile queue.
-- `STATOCYST_QUEUE_BACKEND=s3`: object-backed queue keyed by `agent_uuid`.
-  - Required: `STATOCYST_QUEUE_S3_ENDPOINT`, `STATOCYST_QUEUE_S3_BUCKET`
-  - Optional: `STATOCYST_QUEUE_S3_REGION` (default `us-east-1`), `STATOCYST_QUEUE_S3_PREFIX` (default `statocyst-queue`), `STATOCYST_QUEUE_S3_PATH_STYLE=true`, `STATOCYST_QUEUE_S3_ACCESS_KEY_ID`, `STATOCYST_QUEUE_S3_SECRET_ACCESS_KEY`
+- `MOLTENHUB_QUEUE_BACKEND=memory` (default): in-process volatile queue.
+- `MOLTENHUB_QUEUE_BACKEND=s3`: object-backed queue keyed by `agent_uuid`.
+  - Required: `MOLTENHUB_QUEUE_S3_ENDPOINT`, `MOLTENHUB_QUEUE_S3_BUCKET`
+  - Optional: `MOLTENHUB_QUEUE_S3_REGION` (default `us-east-1`), `MOLTENHUB_QUEUE_S3_PREFIX` (default `moltenhub-queue`), `MOLTENHUB_QUEUE_S3_PATH_STYLE=true`, `MOLTENHUB_QUEUE_S3_ACCESS_KEY_ID`, `MOLTENHUB_QUEUE_S3_SECRET_ACCESS_KEY`
   - Queue S3 config is independent from state S3 config.
   - Requests are SigV4-signed when key + secret are set; otherwise unsigned.
-  - In `strict` startup mode, statocyst now preflights queue bucket reachability before reporting ready.
+  - In `strict` startup mode, moltenhub now preflights queue bucket reachability before reporting ready.

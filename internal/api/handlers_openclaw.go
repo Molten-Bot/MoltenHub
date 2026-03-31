@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	"statocyst/internal/model"
+	"moltenhub/internal/model"
 )
 
 const openClawHTTPProtocol = "openclaw.http.v1"

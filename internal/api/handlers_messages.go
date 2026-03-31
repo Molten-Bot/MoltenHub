@@ -10,8 +10,8 @@ import (
 	"strings"
 	"time"
 
-	"statocyst/internal/model"
-	"statocyst/internal/store"
+	"moltenhub/internal/model"
+	"moltenhub/internal/store"
 )
 
 var allowedContentTypes = map[string]struct{}{

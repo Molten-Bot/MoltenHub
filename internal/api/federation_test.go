@@ -8,10 +8,10 @@ import (
 	"testing"
 	"time"
 
-	"statocyst/internal/auth"
-	"statocyst/internal/longpoll"
-	"statocyst/internal/model"
-	"statocyst/internal/store"
+	"moltenhub/internal/auth"
+	"moltenhub/internal/longpoll"
+	"moltenhub/internal/model"
+	"moltenhub/internal/store"
 )
 
 type federatedTestServer struct {

@@ -11,9 +11,9 @@ import (
 	"sync/atomic"
 	"time"
 
-	"statocyst/internal/api"
-	"statocyst/internal/auth"
-	"statocyst/internal/store"
+	"moltenhub/internal/api"
+	"moltenhub/internal/auth"
+	"moltenhub/internal/store"
 )
 
 type bootstrapOptions struct {
@@ -337,7 +337,7 @@ func (h *bootstrapHandler) handleStartupMe(w http.ResponseWriter, r *http.Reques
 		w.WriteHeader(http.StatusServiceUnavailable)
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"status":  "starting",
-			"message": "statocyst is starting",
+			"message": "moltenhub is starting",
 		})
 	default:
 		w.Header().Set("Allow", "GET, PATCH")
@@ -352,12 +352,12 @@ func (h *bootstrapHandler) handleStarting(w http.ResponseWriter, r *http.Request
 		w.WriteHeader(http.StatusServiceUnavailable)
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"status":  "starting",
-			"message": "statocyst is starting",
+			"message": "moltenhub is starting",
 		})
 		return
 	}
 
-	http.Error(w, "statocyst is starting", http.StatusServiceUnavailable)
+	http.Error(w, "moltenhub is starting", http.StatusServiceUnavailable)
 }
 
 func configuredBackendFromEnv(raw, fallback string) string {

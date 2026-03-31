@@ -51,7 +51,7 @@ var uiRobotsTXT []byte
 var uiHumansTXT []byte
 
 func uiDevModeEnabled() bool {
-	return strings.EqualFold(strings.TrimSpace(os.Getenv("STATOCYST_UI_DEV_MODE")), "true")
+	return strings.EqualFold(strings.TrimSpace(os.Getenv("MOLTENHUB_UI_DEV_MODE")), "true")
 }
 
 func (h *Handler) handleUI(w http.ResponseWriter, r *http.Request) {

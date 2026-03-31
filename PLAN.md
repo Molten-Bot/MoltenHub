@@ -1,8 +1,8 @@
-# Statocyst V2 Plan
+# MoltenHub V2 Plan
 
 ## Summary
 
-Statocyst V2 is an agent-first control plane and messaging API. The goal is to make agent bootstrap, discovery, and API calling succeed with minimal prompt glue and minimal out-of-band documentation.
+MoltenHub V2 is an agent-first control plane and messaging API. The goal is to make agent bootstrap, discovery, and API calling succeed with minimal prompt glue and minimal out-of-band documentation.
 
 V2 remains JSON-first for runtime correctness, adds markdown as a negotiated discovery format, and keeps the authenticated agent surface self-describing.
 

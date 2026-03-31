@@ -12,8 +12,8 @@ import (
 )
 
 func TestNewStoresFromEnv_DefaultsToMemory(t *testing.T) {
-	t.Setenv("STATOCYST_STATE_BACKEND", "")
-	t.Setenv("STATOCYST_QUEUE_BACKEND", "")
+	t.Setenv("MOLTENHUB_STATE_BACKEND", "")
+	t.Setenv("MOLTENHUB_QUEUE_BACKEND", "")
 
 	control, queue, err := NewStoresFromEnv()
 	if err != nil {
@@ -29,15 +29,15 @@ func TestNewStoresFromEnv_DefaultsToMemory(t *testing.T) {
 }
 
 func TestNewStoresFromEnv_RejectsUnsupportedBackends(t *testing.T) {
-	t.Setenv("STATOCYST_STATE_BACKEND", "unknown-state")
-	t.Setenv("STATOCYST_QUEUE_BACKEND", "memory")
+	t.Setenv("MOLTENHUB_STATE_BACKEND", "unknown-state")
+	t.Setenv("MOLTENHUB_QUEUE_BACKEND", "memory")
 
 	if _, _, err := NewStoresFromEnv(); err == nil {
 		t.Fatalf("expected error for unsupported state backend")
 	}
 
-	t.Setenv("STATOCYST_STATE_BACKEND", "memory")
-	t.Setenv("STATOCYST_QUEUE_BACKEND", "unknown-queue")
+	t.Setenv("MOLTENHUB_STATE_BACKEND", "memory")
+	t.Setenv("MOLTENHUB_QUEUE_BACKEND", "unknown-queue")
 
 	if _, _, err := NewStoresFromEnv(); err == nil {
 		t.Fatalf("expected error for unsupported queue backend")
@@ -86,12 +86,12 @@ func TestNewStoresFromEnv_S3QueueConfigured(t *testing.T) {
 	server := newFakeS3StoreServer(t)
 	defer server.Close()
 
-	t.Setenv("STATOCYST_STATE_BACKEND", "memory")
-	t.Setenv("STATOCYST_QUEUE_BACKEND", "s3")
-	t.Setenv("STATOCYST_QUEUE_S3_ENDPOINT", server.URL)
-	t.Setenv("STATOCYST_QUEUE_S3_BUCKET", "state-bucket")
-	t.Setenv("STATOCYST_QUEUE_S3_PREFIX", "statocyst-queue")
-	t.Setenv("STATOCYST_QUEUE_S3_PATH_STYLE", "true")
+	t.Setenv("MOLTENHUB_STATE_BACKEND", "memory")
+	t.Setenv("MOLTENHUB_QUEUE_BACKEND", "s3")
+	t.Setenv("MOLTENHUB_QUEUE_S3_ENDPOINT", server.URL)
+	t.Setenv("MOLTENHUB_QUEUE_S3_BUCKET", "state-bucket")
+	t.Setenv("MOLTENHUB_QUEUE_S3_PREFIX", "moltenhub-queue")
+	t.Setenv("MOLTENHUB_QUEUE_S3_PATH_STYLE", "true")
 
 	control, queue, err := NewStoresFromEnv()
 	if err != nil {
@@ -106,10 +106,10 @@ func TestNewStoresFromEnv_S3QueueConfigured(t *testing.T) {
 }
 
 func TestNewStoresFromEnv_S3QueueRequiresBucketAndEndpoint(t *testing.T) {
-	t.Setenv("STATOCYST_STATE_BACKEND", "memory")
-	t.Setenv("STATOCYST_QUEUE_BACKEND", "s3")
-	t.Setenv("STATOCYST_QUEUE_S3_BUCKET", "")
-	t.Setenv("STATOCYST_QUEUE_S3_ENDPOINT", "")
+	t.Setenv("MOLTENHUB_STATE_BACKEND", "memory")
+	t.Setenv("MOLTENHUB_QUEUE_BACKEND", "s3")
+	t.Setenv("MOLTENHUB_QUEUE_S3_BUCKET", "")
+	t.Setenv("MOLTENHUB_QUEUE_S3_ENDPOINT", "")
 
 	if _, _, err := NewStoresFromEnv(); err == nil {
 		t.Fatalf("expected error for missing s3 queue config")
@@ -128,12 +128,12 @@ func TestNewStoresFromEnv_StrictFailsWhenS3QueueStartupCheckFails(t *testing.T) 
 	}))
 	defer server.Close()
 
-	t.Setenv("STATOCYST_STATE_BACKEND", "memory")
-	t.Setenv("STATOCYST_QUEUE_BACKEND", "s3")
-	t.Setenv("STATOCYST_QUEUE_S3_ENDPOINT", server.URL)
-	t.Setenv("STATOCYST_QUEUE_S3_BUCKET", "queue-bucket")
-	t.Setenv("STATOCYST_QUEUE_S3_PREFIX", "statocyst-queue")
-	t.Setenv("STATOCYST_QUEUE_S3_PATH_STYLE", "true")
+	t.Setenv("MOLTENHUB_STATE_BACKEND", "memory")
+	t.Setenv("MOLTENHUB_QUEUE_BACKEND", "s3")
+	t.Setenv("MOLTENHUB_QUEUE_S3_ENDPOINT", server.URL)
+	t.Setenv("MOLTENHUB_QUEUE_S3_BUCKET", "queue-bucket")
+	t.Setenv("MOLTENHUB_QUEUE_S3_PREFIX", "moltenhub-queue")
+	t.Setenv("MOLTENHUB_QUEUE_S3_PATH_STYLE", "true")
 
 	if _, _, err := NewStoresFromEnv(); err == nil {
 		t.Fatalf("expected strict startup to fail when queue startup check fails")
@@ -144,12 +144,12 @@ func TestNewStoresFromEnv_S3StateConfigured(t *testing.T) {
 	server := newFakeS3StoreServer(t)
 	defer server.Close()
 
-	t.Setenv("STATOCYST_STATE_BACKEND", "s3")
-	t.Setenv("STATOCYST_QUEUE_BACKEND", "memory")
-	t.Setenv("STATOCYST_STATE_S3_ENDPOINT", server.URL)
-	t.Setenv("STATOCYST_STATE_S3_BUCKET", "state-bucket")
-	t.Setenv("STATOCYST_STATE_S3_PREFIX", "statocyst-state")
-	t.Setenv("STATOCYST_STATE_S3_PATH_STYLE", "true")
+	t.Setenv("MOLTENHUB_STATE_BACKEND", "s3")
+	t.Setenv("MOLTENHUB_QUEUE_BACKEND", "memory")
+	t.Setenv("MOLTENHUB_STATE_S3_ENDPOINT", server.URL)
+	t.Setenv("MOLTENHUB_STATE_S3_BUCKET", "state-bucket")
+	t.Setenv("MOLTENHUB_STATE_S3_PREFIX", "moltenhub-state")
+	t.Setenv("MOLTENHUB_STATE_S3_PATH_STYLE", "true")
 
 	control, queue, err := NewStoresFromEnv()
 	if err != nil {
@@ -168,16 +168,16 @@ func TestNewStoresFromEnv_S3StateAndS3QueueUseIndependentStores(t *testing.T) {
 	server := newFakeS3StoreServer(t)
 	defer server.Close()
 
-	t.Setenv("STATOCYST_STATE_BACKEND", "s3")
-	t.Setenv("STATOCYST_QUEUE_BACKEND", "s3")
-	t.Setenv("STATOCYST_STATE_S3_ENDPOINT", server.URL)
-	t.Setenv("STATOCYST_STATE_S3_BUCKET", "state-bucket")
-	t.Setenv("STATOCYST_STATE_S3_PREFIX", "statocyst-state")
-	t.Setenv("STATOCYST_STATE_S3_PATH_STYLE", "true")
-	t.Setenv("STATOCYST_QUEUE_S3_ENDPOINT", server.URL)
-	t.Setenv("STATOCYST_QUEUE_S3_BUCKET", "state-bucket")
-	t.Setenv("STATOCYST_QUEUE_S3_PREFIX", "statocyst-queue")
-	t.Setenv("STATOCYST_QUEUE_S3_PATH_STYLE", "true")
+	t.Setenv("MOLTENHUB_STATE_BACKEND", "s3")
+	t.Setenv("MOLTENHUB_QUEUE_BACKEND", "s3")
+	t.Setenv("MOLTENHUB_STATE_S3_ENDPOINT", server.URL)
+	t.Setenv("MOLTENHUB_STATE_S3_BUCKET", "state-bucket")
+	t.Setenv("MOLTENHUB_STATE_S3_PREFIX", "moltenhub-state")
+	t.Setenv("MOLTENHUB_STATE_S3_PATH_STYLE", "true")
+	t.Setenv("MOLTENHUB_QUEUE_S3_ENDPOINT", server.URL)
+	t.Setenv("MOLTENHUB_QUEUE_S3_BUCKET", "state-bucket")
+	t.Setenv("MOLTENHUB_QUEUE_S3_PREFIX", "moltenhub-queue")
+	t.Setenv("MOLTENHUB_QUEUE_S3_PATH_STYLE", "true")
 
 	control, queue, err := NewStoresFromEnv()
 	if err != nil {
@@ -199,14 +199,14 @@ func TestNewStoresFromEnv_S3StateAndS3QueueRequiresQueueConfig(t *testing.T) {
 	server := newFakeS3StoreServer(t)
 	defer server.Close()
 
-	t.Setenv("STATOCYST_STATE_BACKEND", "s3")
-	t.Setenv("STATOCYST_QUEUE_BACKEND", "s3")
-	t.Setenv("STATOCYST_STATE_S3_ENDPOINT", server.URL)
-	t.Setenv("STATOCYST_STATE_S3_BUCKET", "state-bucket")
-	t.Setenv("STATOCYST_STATE_S3_PREFIX", "statocyst-state")
-	t.Setenv("STATOCYST_STATE_S3_PATH_STYLE", "true")
-	t.Setenv("STATOCYST_QUEUE_S3_ENDPOINT", "")
-	t.Setenv("STATOCYST_QUEUE_S3_BUCKET", "")
+	t.Setenv("MOLTENHUB_STATE_BACKEND", "s3")
+	t.Setenv("MOLTENHUB_QUEUE_BACKEND", "s3")
+	t.Setenv("MOLTENHUB_STATE_S3_ENDPOINT", server.URL)
+	t.Setenv("MOLTENHUB_STATE_S3_BUCKET", "state-bucket")
+	t.Setenv("MOLTENHUB_STATE_S3_PREFIX", "moltenhub-state")
+	t.Setenv("MOLTENHUB_STATE_S3_PATH_STYLE", "true")
+	t.Setenv("MOLTENHUB_QUEUE_S3_ENDPOINT", "")
+	t.Setenv("MOLTENHUB_QUEUE_S3_BUCKET", "")
 
 	if _, _, err := NewStoresFromEnv(); err == nil {
 		t.Fatalf("expected error when queue backend is s3 without queue endpoint/bucket config")
@@ -226,12 +226,12 @@ func TestNewStoresFromEnv_S3StateAuthRequiredEndpointFailsStartup(t *testing.T) 
 	}))
 	defer server.Close()
 
-	t.Setenv("STATOCYST_STATE_BACKEND", "s3")
-	t.Setenv("STATOCYST_QUEUE_BACKEND", "memory")
-	t.Setenv("STATOCYST_STATE_S3_ENDPOINT", server.URL)
-	t.Setenv("STATOCYST_STATE_S3_BUCKET", "state-bucket")
-	t.Setenv("STATOCYST_STATE_S3_PREFIX", "statocyst-state")
-	t.Setenv("STATOCYST_STATE_S3_PATH_STYLE", "true")
+	t.Setenv("MOLTENHUB_STATE_BACKEND", "s3")
+	t.Setenv("MOLTENHUB_QUEUE_BACKEND", "memory")
+	t.Setenv("MOLTENHUB_STATE_S3_ENDPOINT", server.URL)
+	t.Setenv("MOLTENHUB_STATE_S3_BUCKET", "state-bucket")
+	t.Setenv("MOLTENHUB_STATE_S3_PREFIX", "moltenhub-state")
+	t.Setenv("MOLTENHUB_STATE_S3_PATH_STYLE", "true")
 
 	_, _, err := NewStoresFromEnv()
 	if err == nil {
@@ -258,12 +258,12 @@ func TestNewStoresFromEnvWithMode_DegradedFallbackForS3State(t *testing.T) {
 	}))
 	defer server.Close()
 
-	t.Setenv("STATOCYST_STATE_BACKEND", "s3")
-	t.Setenv("STATOCYST_QUEUE_BACKEND", "memory")
-	t.Setenv("STATOCYST_STATE_S3_ENDPOINT", server.URL)
-	t.Setenv("STATOCYST_STATE_S3_BUCKET", "state-bucket")
-	t.Setenv("STATOCYST_STATE_S3_PREFIX", "statocyst-state")
-	t.Setenv("STATOCYST_STATE_S3_PATH_STYLE", "true")
+	t.Setenv("MOLTENHUB_STATE_BACKEND", "s3")
+	t.Setenv("MOLTENHUB_QUEUE_BACKEND", "memory")
+	t.Setenv("MOLTENHUB_STATE_S3_ENDPOINT", server.URL)
+	t.Setenv("MOLTENHUB_STATE_S3_BUCKET", "state-bucket")
+	t.Setenv("MOLTENHUB_STATE_S3_PREFIX", "moltenhub-state")
+	t.Setenv("MOLTENHUB_STATE_S3_PATH_STYLE", "true")
 
 	control, queue, health, err := NewStoresFromEnvWithMode(StorageStartupModeDegraded)
 	if err != nil {
@@ -298,10 +298,10 @@ func TestNewStoresFromEnvWithMode_DegradedFallbackForS3State(t *testing.T) {
 }
 
 func TestNewStoresFromEnvWithMode_DegradedFallbackForS3Queue(t *testing.T) {
-	t.Setenv("STATOCYST_STATE_BACKEND", "memory")
-	t.Setenv("STATOCYST_QUEUE_BACKEND", "s3")
-	t.Setenv("STATOCYST_QUEUE_S3_ENDPOINT", "")
-	t.Setenv("STATOCYST_QUEUE_S3_BUCKET", "")
+	t.Setenv("MOLTENHUB_STATE_BACKEND", "memory")
+	t.Setenv("MOLTENHUB_QUEUE_BACKEND", "s3")
+	t.Setenv("MOLTENHUB_QUEUE_S3_ENDPOINT", "")
+	t.Setenv("MOLTENHUB_QUEUE_S3_BUCKET", "")
 
 	control, queue, health, err := NewStoresFromEnvWithMode(StorageStartupModeDegraded)
 	if err != nil {

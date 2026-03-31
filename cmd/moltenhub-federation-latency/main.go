@@ -63,8 +63,8 @@ func main() {
 		verbose        bool
 	}
 
-	flag.StringVar(&cfg.naBaseURL, "na-base-url", "https://na.hive.molten-qa.site/v1", "NA Statocyst API base URL")
-	flag.StringVar(&cfg.euBaseURL, "eu-base-url", "https://eu.hive.molten-qa.site/v1", "EU Statocyst API base URL")
+	flag.StringVar(&cfg.naBaseURL, "na-base-url", "https://na.hive.molten-qa.site/v1", "NA MoltenHub API base URL")
+	flag.StringVar(&cfg.euBaseURL, "eu-base-url", "https://eu.hive.molten-qa.site/v1", "EU MoltenHub API base URL")
 	flag.StringVar(&cfg.naToken, "na-token", "", "NA agent bearer token")
 	flag.StringVar(&cfg.euToken, "eu-token", "", "EU agent bearer token")
 	flag.StringVar(&cfg.naURI, "na-uri", "", "NA agent canonical URI")

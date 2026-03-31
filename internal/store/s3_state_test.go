@@ -13,7 +13,7 @@ import (
 	"testing"
 	"time"
 
-	"statocyst/internal/model"
+	"moltenhub/internal/model"
 )
 
 type fakeS3State struct {
@@ -161,7 +161,7 @@ func TestS3StateStore_ProfileAndPermissionsRoundTrip(t *testing.T) {
 		endpoint:    server.URL,
 		bucket:      "state-bucket",
 		region:      "us-east-1",
-		prefix:      "statocyst-state",
+		prefix:      "moltenhub-state",
 		pathStyle:   true,
 	}
 
@@ -238,7 +238,7 @@ func TestS3StateStore_ProfileAndPermissionsRoundTrip(t *testing.T) {
 		endpoint:    server.URL,
 		bucket:      "state-bucket",
 		region:      "us-east-1",
-		prefix:      "statocyst-state",
+		prefix:      "moltenhub-state",
 		pathStyle:   true,
 	}
 	if err := reloaded.loadFromS3(context.Background()); err != nil {
@@ -287,7 +287,7 @@ func TestS3StateStore_PersistsSecondaryIndexes(t *testing.T) {
 		endpoint:    server.URL,
 		bucket:      "state-bucket",
 		region:      "us-east-1",
-		prefix:      "statocyst-state",
+		prefix:      "moltenhub-state",
 		pathStyle:   true,
 	}
 	if err := store.loadFromS3(context.Background()); err != nil {
@@ -315,12 +315,12 @@ func TestS3StateStore_PersistsSecondaryIndexes(t *testing.T) {
 	}
 
 	requiredPrefixes := []string{
-		"statocyst-state/idx/humans/by_auth/",
-		"statocyst-state/idx/humans/by_handle/",
-		"statocyst-state/idx/orgs/by_handle/",
-		"statocyst-state/idx/memberships/by_org_human/",
-		"statocyst-state/idx/agents/by_token_hash/",
-		"statocyst-state/idx/agents/by_uri/",
+		"moltenhub-state/idx/humans/by_auth/",
+		"moltenhub-state/idx/humans/by_handle/",
+		"moltenhub-state/idx/orgs/by_handle/",
+		"moltenhub-state/idx/memberships/by_org_human/",
+		"moltenhub-state/idx/agents/by_token_hash/",
+		"moltenhub-state/idx/agents/by_uri/",
 	}
 	for _, prefix := range requiredPrefixes {
 		if !fake.hasKey(prefix) {
@@ -340,7 +340,7 @@ func TestS3StateStore_ReloadRebuildsIndexesFromPrimaryState(t *testing.T) {
 		endpoint:    server.URL,
 		bucket:      "state-bucket",
 		region:      "us-east-1",
-		prefix:      "statocyst-state",
+		prefix:      "moltenhub-state",
 		pathStyle:   true,
 	}
 	if err := store.loadFromS3(context.Background()); err != nil {
@@ -355,7 +355,7 @@ func TestS3StateStore_ReloadRebuildsIndexesFromPrimaryState(t *testing.T) {
 	}
 
 	// Simulate a stale/missing index object. Reload should rebuild from primaries.
-	for _, key := range fake.keysWithPrefix("statocyst-state/idx/humans/by_auth/") {
+	for _, key := range fake.keysWithPrefix("moltenhub-state/idx/humans/by_auth/") {
 		fake.deleteKey(key)
 	}
 
@@ -365,7 +365,7 @@ func TestS3StateStore_ReloadRebuildsIndexesFromPrimaryState(t *testing.T) {
 		endpoint:    server.URL,
 		bucket:      "state-bucket",
 		region:      "us-east-1",
-		prefix:      "statocyst-state",
+		prefix:      "moltenhub-state",
 		pathStyle:   true,
 	}
 	if err := reloaded.loadFromS3(context.Background()); err != nil {
@@ -392,7 +392,7 @@ func TestS3StateStore_PersistsQueueRoundTripAndDeletePurge(t *testing.T) {
 		endpoint:    server.URL,
 		bucket:      "state-bucket",
 		region:      "us-east-1",
-		prefix:      "statocyst-state",
+		prefix:      "moltenhub-state",
 		pathStyle:   true,
 	}
 	if err := store.loadFromS3(context.Background()); err != nil {
@@ -462,7 +462,7 @@ func TestS3StateStore_PersistsQueueRoundTripAndDeletePurge(t *testing.T) {
 		t.Fatalf("Enqueue(msg2) failed: %v", err)
 	}
 
-	queueKeys := fake.keysWithPrefix("statocyst-state/state/queues/")
+	queueKeys := fake.keysWithPrefix("moltenhub-state/state/queues/")
 	if len(queueKeys) != 2 {
 		t.Fatalf("expected 2 persisted queue objects, got %d", len(queueKeys))
 	}
@@ -473,7 +473,7 @@ func TestS3StateStore_PersistsQueueRoundTripAndDeletePurge(t *testing.T) {
 		endpoint:    server.URL,
 		bucket:      "state-bucket",
 		region:      "us-east-1",
-		prefix:      "statocyst-state",
+		prefix:      "moltenhub-state",
 		pathStyle:   true,
 	}
 	if err := reloaded.loadFromS3(context.Background()); err != nil {
@@ -501,7 +501,7 @@ func TestS3StateStore_PersistsQueueRoundTripAndDeletePurge(t *testing.T) {
 		endpoint:    server.URL,
 		bucket:      "state-bucket",
 		region:      "us-east-1",
-		prefix:      "statocyst-state",
+		prefix:      "moltenhub-state",
 		pathStyle:   true,
 	}
 	if err := reloadedAgain.loadFromS3(context.Background()); err != nil {
@@ -514,7 +514,7 @@ func TestS3StateStore_PersistsQueueRoundTripAndDeletePurge(t *testing.T) {
 	if queue := reloadedAgain.MemoryStore.queues[agentB.AgentUUID]; len(queue) != 0 {
 		t.Fatalf("expected messages referencing deleted agent purged, got %d messages", len(queue))
 	}
-	if keys := fake.keysWithPrefix("statocyst-state/state/queues/"); len(keys) != 0 {
+	if keys := fake.keysWithPrefix("moltenhub-state/state/queues/"); len(keys) != 0 {
 		t.Fatalf("expected queue objects removed after delete, got %d", len(keys))
 	}
 }
@@ -530,7 +530,7 @@ func TestS3StateStore_PersistsMessageRecordsAndLeases(t *testing.T) {
 		endpoint:    server.URL,
 		bucket:      "state-bucket",
 		region:      "us-east-1",
-		prefix:      "statocyst-state",
+		prefix:      "moltenhub-state",
 		pathStyle:   true,
 	}
 	if err := store.loadFromS3(context.Background()); err != nil {
@@ -616,13 +616,13 @@ func TestS3StateStore_PersistsMessageRecordsAndLeases(t *testing.T) {
 		t.Fatalf("expected leased status, got %q", leasedRecord.Status)
 	}
 
-	if !fake.hasKey("statocyst-state/state/messages/") {
+	if !fake.hasKey("moltenhub-state/state/messages/") {
 		t.Fatalf("expected persisted message record objects")
 	}
-	if !fake.hasKey("statocyst-state/state/message_leases/") {
+	if !fake.hasKey("moltenhub-state/state/message_leases/") {
 		t.Fatalf("expected persisted message lease objects")
 	}
-	if !fake.hasKey("statocyst-state/idx/messages/by_client/") {
+	if !fake.hasKey("moltenhub-state/idx/messages/by_client/") {
 		t.Fatalf("expected persisted client message index objects")
 	}
 
@@ -632,7 +632,7 @@ func TestS3StateStore_PersistsMessageRecordsAndLeases(t *testing.T) {
 		endpoint:    server.URL,
 		bucket:      "state-bucket",
 		region:      "us-east-1",
-		prefix:      "statocyst-state",
+		prefix:      "moltenhub-state",
 		pathStyle:   true,
 	}
 	if err := reloaded.loadFromS3(context.Background()); err != nil {
@@ -688,7 +688,7 @@ func TestS3StateStore_IncrementalPersistAvoidsFullResync(t *testing.T) {
 		endpoint:    server.URL,
 		bucket:      "state-bucket",
 		region:      "us-east-1",
-		prefix:      "statocyst-state",
+		prefix:      "moltenhub-state",
 		pathStyle:   true,
 	}
 	if err := store.loadFromS3(context.Background()); err != nil {
@@ -753,7 +753,7 @@ func TestS3StateStore_PersistAllAppliesDeadlineWhenContextHasNone(t *testing.T) 
 		endpoint:       server.URL,
 		bucket:         "state-bucket",
 		region:         "us-east-1",
-		prefix:         "statocyst-state",
+		prefix:         "moltenhub-state",
 		pathStyle:      true,
 		persistTimeout: 50 * time.Millisecond,
 	}
@@ -804,7 +804,7 @@ func TestS3StateStore_BestEffortPersistUsesShortTimeout(t *testing.T) {
 		endpoint:                 server.URL,
 		bucket:                   "state-bucket",
 		region:                   "us-east-1",
-		prefix:                   "statocyst-state",
+		prefix:                   "moltenhub-state",
 		pathStyle:                true,
 		bestEffortPersistTimeout: 50 * time.Millisecond,
 		persistTimeout:           5 * time.Second,

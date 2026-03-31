@@ -1,8 +1,8 @@
 const $ = (id) => document.getElementById(id);
 
-const TOKEN_KEY = "statocyst_access_token";
-const DEV_ID_KEY = "statocyst_dev_human_id";
-const DEV_EMAIL_KEY = "statocyst_dev_human_email";
+const TOKEN_KEY = "moltenhub_access_token";
+const DEV_ID_KEY = "moltenhub_dev_human_id";
+const DEV_EMAIL_KEY = "moltenhub_dev_human_email";
 
 function readStorage(key) {
   return localStorage.getItem(key) || "";

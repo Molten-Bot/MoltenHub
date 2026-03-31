@@ -7,7 +7,7 @@ See also: [README](../README.md) | [Runtime Configuration](./runtime-configurati
 Quick start:
 
 ```bash
-go run ./cmd/statocystd
+go run ./cmd/moltenhubd
 ```
 
 Fast dev boot script (native Go, same default port):
@@ -17,48 +17,48 @@ Fast dev boot script (native Go, same default port):
 ```
 
 Script defaults:
-- `STATOCYST_ADDR=:8080`
+- `MOLTENHUB_ADDR=:8080`
 - `HUMAN_AUTH_PROVIDER=dev`
-- `STATOCYST_UI_DEV_MODE=true`
+- `MOLTENHUB_UI_DEV_MODE=true`
 
 Notes:
 - Safe to rerun: if a process is already using the port, the script stops it first.
-- Override port with `STATOCYST_PORT=8081 ./dev-bootup.sh` (or set `STATOCYST_ADDR` directly).
+- Override port with `MOLTENHUB_PORT=8081 ./dev-bootup.sh` (or set `MOLTENHUB_ADDR` directly).
 
 Optional explicit launch:
 
 ```bash
-STATOCYST_ADDR=:8080 HUMAN_AUTH_PROVIDER=dev go run ./cmd/statocystd
+MOLTENHUB_ADDR=:8080 HUMAN_AUTH_PROVIDER=dev go run ./cmd/moltenhubd
 ```
 
 UI hot-refresh mode (for `internal/api/ui/*` edits):
 
 ```bash
-STATOCYST_UI_DEV_MODE=true go run ./cmd/statocystd
+MOLTENHUB_UI_DEV_MODE=true go run ./cmd/moltenhubd
 ```
 
 ## `.env` Local Dev (Recommended)
 
-Statocyst auto-loads `.env` from repo root when present. Existing shell vars still take precedence.
+MoltenHub auto-loads `.env` from repo root when present. Existing shell vars still take precedence.
 
 ```bash
 cp .env.example .env
-go run ./cmd/statocystd
+go run ./cmd/moltenhubd
 ```
 
 Useful local keys:
 - `DEV_LOGIN_HUMAN_ID`, `DEV_LOGIN_HUMAN_EMAIL`: dev identity used by `/` login in `HUMAN_AUTH_PROVIDER=dev`.
 - `DEV_LOGIN_AUTO=true`: auto-redirect from login page to `/profile`.
 - `SUPER_ADMIN_REVIEW_MODE=true` + `SUPER_ADMIN_EMAILS=...`: test admin review behavior.
-- `STATOCYST_ENABLE_LOCAL_CORS=true`: enable API CORS for local browser/manual testing (including `file://`).
-- `STATOCYST_CORS_ALLOWED_ORIGINS=https://app.molten.bot,https://app.molten-qa.site`: allow explicit browser origins.
-- `STATOCYST_HEADLESS_MODE=true` + `STATOCYST_HEADLESS_MODE_URL=https://example.com`: disable built-in UI and redirect non-API pages.
+- `MOLTENHUB_ENABLE_LOCAL_CORS=true`: enable API CORS for local browser/manual testing (including `file://`).
+- `MOLTENHUB_CORS_ALLOWED_ORIGINS=https://app.molten.bot,https://app.molten-qa.site`: allow explicit browser origins.
+- `MOLTENHUB_HEADLESS_MODE=true` + `MOLTENHUB_HEADLESS_MODE_URL=https://example.com`: disable built-in UI and redirect non-API pages.
 
 Test local image quickly:
 
 ```bash
-docker build -t statocyst:local .
-# then point local compose (for hub) at STATOCYST_IMAGE=statocyst:local
+docker build -t moltenhub:local .
+# then point local compose (for hub) at MOLTENHUB_IMAGE=moltenhub:local
 ```
 
 ## Smoke Testing
@@ -72,25 +72,25 @@ go test -run TestLaunchSmoke -v ./internal/api
 Run live HTTP smoke tests against a local server:
 
 ```bash
-go run ./cmd/statocyst-smoke -base-url http://127.0.0.1:8080
+go run ./cmd/moltenhub-smoke -base-url http://127.0.0.1:8080
 ```
 
 Run container smoke tests:
 
 ```bash
-docker build -t statocyst:local .
-bash scripts/release/run_container_smoke.sh statocyst:local
+docker build -t moltenhub:local .
+bash scripts/release/run_container_smoke.sh moltenhub:local
 ```
 
 Run federation smoke tests (two local containers, trust setup, bridged messaging):
 
 ```bash
-docker build -t statocyst:local .
-bash scripts/release/run_federation_container_smoke.sh statocyst:local
+docker build -t moltenhub:local .
+bash scripts/release/run_federation_container_smoke.sh moltenhub:local
 ```
 
 This uses `scripts/release/docker-compose.federation-smoke.yml`.
-The runner `cmd/statocyst-federation-smoke/main.go` bootstraps pairing, trust approvals, and A<->B messaging.
+The runner `cmd/moltenhub-federation-smoke/main.go` bootstraps pairing, trust approvals, and A<->B messaging.
 
 ## Federated Latency SLO
 

@@ -4,7 +4,7 @@ import (
 	"context"
 	"time"
 
-	"statocyst/internal/model"
+	"moltenhub/internal/model"
 )
 
 // ControlPlaneStore captures all non-queue state operations used by handlers.

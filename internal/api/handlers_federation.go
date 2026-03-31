@@ -15,14 +15,14 @@ import (
 	"strings"
 	"time"
 
-	"statocyst/internal/model"
-	"statocyst/internal/store"
+	"moltenhub/internal/model"
+	"moltenhub/internal/store"
 )
 
 const (
-	peerAuthHeaderID        = "X-Statocyst-Peer-Id"
-	peerAuthHeaderTS        = "X-Statocyst-Timestamp"
-	peerAuthHeaderSignature = "X-Statocyst-Signature"
+	peerAuthHeaderID        = "X-MoltenHub-Peer-Id"
+	peerAuthHeaderTS        = "X-MoltenHub-Timestamp"
+	peerAuthHeaderSignature = "X-MoltenHub-Signature"
 	peerAuthSkew            = 5 * time.Minute
 )
 
@@ -56,7 +56,7 @@ func (h *Handler) requireSuperAdmin(w http.ResponseWriter, r *http.Request) (hum
 		return humanActor{}, false
 	}
 	if !actor.IsSuperAdmin {
-		writeError(w, http.StatusForbidden, "forbidden", "statocyst admin required")
+		writeError(w, http.StatusForbidden, "forbidden", "moltenhub admin required")
 		return humanActor{}, false
 	}
 	return actor, true
@@ -299,7 +299,7 @@ func (h *Handler) handleAdminRemoteAgentTrusts(w http.ResponseWriter, r *http.Re
 		}
 		if !actor.IsSuperAdmin {
 			if localAgent.OwnerHumanID == nil || strings.TrimSpace(*localAgent.OwnerHumanID) != actor.Human.HumanID {
-				writeError(w, http.StatusForbidden, "forbidden", "owner or statocyst admin required")
+				writeError(w, http.StatusForbidden, "forbidden", "owner or moltenhub admin required")
 				return
 			}
 		}
@@ -380,7 +380,7 @@ func (h *Handler) handleAdminRemoteAgentTrustByID(w http.ResponseWriter, r *http
 			break
 		}
 		if found && !owned {
-			writeError(w, http.StatusForbidden, "forbidden", "owner or statocyst admin required")
+			writeError(w, http.StatusForbidden, "forbidden", "owner or moltenhub admin required")
 			return
 		}
 	}
@@ -510,7 +510,7 @@ func (h *Handler) handlePeerInboundMessage(w http.ResponseWriter, r *http.Reques
 	}
 	targetBase, _, err := splitCanonicalAgentURI(msg.ToAgentURI)
 	if err != nil || targetBase != normalizeCanonicalBaseURL(h.canonicalBaseURL) {
-		writeError(w, http.StatusBadRequest, "invalid_to_agent_uri", "to_agent_uri must target this statocyst instance")
+		writeError(w, http.StatusBadRequest, "invalid_to_agent_uri", "to_agent_uri must target this moltenhub instance")
 		return
 	}
 	receiverAgentUUID, err := h.control.ResolveAgentUUIDByURI(msg.ToAgentURI)

@@ -1,5 +1,5 @@
-const UI = StatocystUI;
-const PENDING_INVITE_CODE_KEY = "statocyst_pending_invite_code";
+const UI = MoltenHubUI;
+const PENDING_INVITE_CODE_KEY = "moltenhub_pending_invite_code";
 
 function setStatus(message, warn = false) {
   const el = UI.$("profileStatus");

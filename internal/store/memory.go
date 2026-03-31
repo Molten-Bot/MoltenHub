@@ -12,8 +12,8 @@ import (
 	"sync"
 	"time"
 
-	"statocyst/internal/handles"
-	"statocyst/internal/model"
+	"moltenhub/internal/handles"
+	"moltenhub/internal/model"
 )
 
 var (

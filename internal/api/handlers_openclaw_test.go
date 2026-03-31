@@ -140,8 +140,8 @@ func TestOpenClawRegisterPluginUpdatesMetadataAndActivityLog(t *testing.T) {
 	_, _, tokenA, _, _, _, _, _ := setupTrustedAgents(t, router)
 
 	resp := doJSONRequest(t, router, http.MethodPost, "/v1/openclaw/messages/register-plugin", map[string]any{
-		"plugin_id":    "statocyst-openclaw",
-		"package":      "@moltenbot/openclaw-plugin-statocyst",
+		"plugin_id":    "moltenhub-openclaw",
+		"package":      "@moltenbot/openclaw-plugin-moltenhub",
 		"version":      "0.1.0-test",
 		"transport":    "websocket",
 		"session_key":  "dedicated-main",
@@ -155,8 +155,8 @@ func TestOpenClawRegisterPluginUpdatesMetadataAndActivityLog(t *testing.T) {
 	result := requireAgentRuntimeSuccessEnvelope(t, payload)
 
 	plugin, _ := result["plugin"].(map[string]any)
-	if got := readStringPath(plugin, "id"); got != "statocyst-openclaw" {
-		t.Fatalf("expected plugin.id=statocyst-openclaw, got %q payload=%v", got, payload)
+	if got := readStringPath(plugin, "id"); got != "moltenhub-openclaw" {
+		t.Fatalf("expected plugin.id=moltenhub-openclaw, got %q payload=%v", got, payload)
 	}
 	if got := readStringPath(plugin, "transport"); got != "websocket" {
 		t.Fatalf("expected plugin.transport=websocket, got %q payload=%v", got, payload)
@@ -168,13 +168,13 @@ func TestOpenClawRegisterPluginUpdatesMetadataAndActivityLog(t *testing.T) {
 		t.Fatalf("expected metadata.agent_type=openclaw, got %q payload=%v", got, payload)
 	}
 	plugins, _ := metadata["plugins"].(map[string]any)
-	statocystPlugin, _ := plugins["statocyst-openclaw"].(map[string]any)
-	if got := readStringPath(statocystPlugin, "session_mode"); got != "dedicated" {
+	moltenhubPlugin, _ := plugins["moltenhub-openclaw"].(map[string]any)
+	if got := readStringPath(moltenhubPlugin, "session_mode"); got != "dedicated" {
 		t.Fatalf("expected session_mode=dedicated, got %q payload=%v", got, payload)
 	}
 
 	activityLog, _ := agent["activity_log"].([]any)
-	if !hasActivityText(activityLog, "registered OpenClaw plugin statocyst-openclaw") {
+	if !hasActivityText(activityLog, "registered OpenClaw plugin moltenhub-openclaw") {
 		t.Fatalf("expected activity_log to include plugin registration, got %v", activityLog)
 	}
 }

@@ -15,13 +15,13 @@ import (
 
 	"github.com/gorilla/websocket"
 
-	"statocyst/internal/model"
-	"statocyst/internal/store"
+	"moltenhub/internal/model"
+	"moltenhub/internal/store"
 )
 
 const (
 	openClawWebSocketPullTimeoutDefault = 20 * time.Second
-	openClawPluginDefaultID             = "statocyst-openclaw"
+	openClawPluginDefaultID             = "moltenhub-openclaw"
 )
 
 var (
@@ -462,7 +462,7 @@ func openClawPluginMetadataKey(pluginID string) string {
 	key = openClawPluginMetadataKeyPattern.ReplaceAllString(key, "_")
 	key = strings.Trim(key, "_")
 	if key == "" {
-		return "statocyst_openclaw"
+		return "moltenhub_openclaw"
 	}
 	return key
 }

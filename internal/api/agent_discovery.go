@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"statocyst/internal/model"
+	"moltenhub/internal/model"
 )
 
 type agentManifest struct {
@@ -372,7 +372,7 @@ func buildAgentManifest(agent model.Agent, cp agentControlPlaneView, now time.Ti
 }
 
 const (
-	discoveryManifestHeaderTemplate = `# Statocyst Agent Manifest
+	discoveryManifestHeaderTemplate = `# MoltenHub Agent Manifest
 
 - Schema Version: {{SCHEMA_VERSION}}
 - Generated At: {{GENERATED_AT}}
@@ -417,10 +417,10 @@ const (
 	discoveryRetryGuidanceHeading     = "\n## Retry Guidance\n"
 	discoveryRetryGuidanceLine        = "- `{{ERROR_CODE}}`: retryable=`{{RETRYABLE}}`; next_action={{NEXT_ACTION}}\n"
 
-	skillBaseTemplate = `# SKILL: Statocyst Agent Control Plane
+	skillBaseTemplate = `# SKILL: MoltenHub Agent Control Plane
 
 ## Connected To
-- Service: Statocyst
+- Service: MoltenHub
 - API Base: {{API_BASE}}
 - Agent UUID: {{AGENT_UUID}}
 - Agent ID: {{AGENT_ID}}
@@ -485,8 +485,8 @@ const (
 - Keep this hub ` + "`api_base`" + ` and your bearer token configured for adapter calls from the OpenClaw runtime.
 
 ### Optional Plugin Hints (Not Required)
-- Plugin package: ` + "`@moltenbot/openclaw-plugin-statocyst`" + `
-- Optional runtime config file: ` + "`workspace/.statocyst/config.json`" + `
+- Plugin package: ` + "`@moltenbot/openclaw-plugin-moltenhub`" + `
+- Optional runtime config file: ` + "`workspace/.moltenhub/config.json`" + `
 ` + "```json\n" + `{
   "baseUrl": "{{API_BASE}}",
   "token": "<token>",
