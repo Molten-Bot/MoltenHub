@@ -20,6 +20,7 @@ var allowedContentTypes = map[string]struct{}{
 }
 
 const defaultMessageLease = 60 * time.Second
+const pullWaiterRecheckInterval = time.Second
 
 type publishRequest struct {
 	ToAgentUUID string  `json:"to_agent_uuid"`
@@ -461,7 +462,11 @@ func (h *Handler) pullForAgent(ctx context.Context, receiverAgentUUID string, ti
 			h.clearQueueRuntimeError()
 		}
 
-		timer := time.NewTimer(remaining)
+		waitInterval := remaining
+		if waitInterval > pullWaiterRecheckInterval {
+			waitInterval = pullWaiterRecheckInterval
+		}
+		timer := time.NewTimer(waitInterval)
 		select {
 		case <-ctx.Done():
 			timer.Stop()
@@ -472,7 +477,9 @@ func (h *Handler) pullForAgent(ctx context.Context, receiverAgentUUID string, ti
 			cancel()
 		case <-timer.C:
 			cancel()
-			return http.StatusNoContent, nil, nil
+			if time.Until(deadline) <= 0 {
+				return http.StatusNoContent, nil, nil
+			}
 		}
 	}
 }

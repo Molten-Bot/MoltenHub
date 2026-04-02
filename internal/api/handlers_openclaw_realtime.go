@@ -286,7 +286,10 @@ func (h *Handler) handleOpenClawWSCommand(
 		if len(req.Message) == 0 {
 			return writeEvent(openClawWSError(requestID, http.StatusBadRequest, "invalid_request", "message is required"))
 		}
-		envelope := normalizeOpenClawEnvelope(req.Message, h.now().UTC())
+		envelope, err := normalizeOpenClawEnvelope(req.Message, h.now().UTC())
+		if err != nil {
+			return writeEvent(openClawWSError(requestID, http.StatusBadRequest, "invalid_request", err.Error()))
+		}
 		payload, err := json.Marshal(envelope)
 		if err != nil {
 			return writeEvent(openClawWSError(requestID, http.StatusBadRequest, "invalid_request", "message must be a JSON object"))

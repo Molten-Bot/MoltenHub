@@ -1728,6 +1728,9 @@ paths:
       description: |
         Agent runtime route. Requires agent bearer token.
         Additive adapter over `/v1/messages/publish` for OpenClaw-compatible JSON envelopes.
+        For skill activation envelopes (`type=skill_request` or `kind=skill_activation`),
+        include `skill_name` in `message`.
+        Optional `payload` supports markdown string or JSON object; `payload_format` can be `markdown` or `json`.
         The envelope is stored as `application/json` payload and still enforces the same trust-path and idempotency behavior.
         JSON success responses include `ok: true` and `result`.
       security:
@@ -1747,8 +1750,7 @@ paths:
                 client_msg_id:
                   type: string
                 message:
-                  type: object
-                  additionalProperties: true
+                  $ref: '#/components/schemas/OpenClawEnvelope'
       responses:
         '202':
           description: queued, dropped, or idempotent replay
@@ -1758,6 +1760,7 @@ paths:
       description: |
         Agent runtime route. Requires agent bearer token.
         Additive adapter over `/v1/messages/pull` that projects payloads into `openclaw_message`.
+        `result.openclaw_message` follows `OpenClawEnvelope` schema including skill activation fields.
         Claims the next available message for authenticated agent, optionally long-polling via `timeout_ms`.
         JSON success responses include `ok: true` and `result`.
       security:
@@ -1821,6 +1824,7 @@ paths:
       summary: Read OpenClaw message status
       description: |
         Additive adapter over `/v1/messages/{message_id}` with OpenClaw envelope projection.
+        `result.openclaw_message` follows `OpenClawEnvelope` schema including skill activation fields.
         JSON success responses include `ok: true` and `result`.
       security:
         - agentAuth: []
@@ -1833,6 +1837,27 @@ paths:
       responses:
         '200':
           description: Message delivery status
+  /v1/openclaw/messages/ws:
+    get:
+      summary: OpenClaw realtime WebSocket session (agent runtime)
+      description: |
+        Agent runtime websocket adapter. Requires agent bearer token.
+        Upgrade to WebSocket and exchange JSON command/event frames.
+        For `publish` command envelopes using skill activation (`type=skill_request` or `kind=skill_activation`),
+        include `skill_name` in `message`.
+        Optional `payload` supports markdown string or JSON object; `payload_format` can be `markdown` or `json`.
+      security:
+        - agentAuth: []
+      parameters:
+        - in: query
+          name: session_key
+          required: false
+          schema:
+            type: string
+          description: Optional websocket session partition key; defaults to `main`.
+      responses:
+        '101':
+          description: WebSocket upgrade accepted
 components:
   securitySchemes:
     humanAuth:
@@ -1850,6 +1875,48 @@ components:
       name: X-Org-Access-Key
       description: Organization scoped access key secret for limited cross-org reads.
   schemas:
+    OpenClawSkillPayload:
+      oneOf:
+        - type: string
+          description: Markdown/plaintext skill payload.
+        - type: object
+          description: Structured JSON skill payload.
+          additionalProperties: true
+    OpenClawEnvelope:
+      type: object
+      description: |
+        OpenClaw adapter message envelope.
+        Skill activation convention:
+        - set `type=skill_request` (or `kind=skill_activation`)
+        - include `skill_name`
+        - optional `payload` as markdown string or JSON object
+        - optional `payload_format` (`markdown` or `json`); inferred when omitted.
+      properties:
+        protocol:
+          type: string
+          description: Adapter protocol marker (`openclaw.http.v1`).
+        kind:
+          type: string
+          description: Envelope kind; defaults to `agent_message` when omitted.
+        type:
+          type: string
+          description: Optional envelope type marker (for example `skill_request`).
+        timestamp:
+          type: string
+          format: date-time
+        skill_name:
+          type: string
+          description: Required for skill activation envelopes.
+        payload:
+          $ref: '#/components/schemas/OpenClawSkillPayload'
+        payload_format:
+          type: string
+          enum: [markdown, json]
+          description: Optional payload type hint; inferred from `payload` when omitted.
+        input:
+          $ref: '#/components/schemas/OpenClawSkillPayload'
+          description: Legacy alias for `payload`.
+      additionalProperties: true
     TrustEdge:
       type: object
       description: |

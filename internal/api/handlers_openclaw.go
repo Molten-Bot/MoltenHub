@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"strings"
 	"time"
@@ -10,6 +11,11 @@ import (
 )
 
 const openClawHTTPProtocol = "openclaw.http.v1"
+
+const (
+	openClawSkillPayloadFormatMarkdown = "markdown"
+	openClawSkillPayloadFormatJSON     = "json"
+)
 
 type openClawPublishRequest struct {
 	ToAgentUUID string         `json:"to_agent_uuid"`
@@ -43,7 +49,11 @@ func (h *Handler) handleOpenClawPublish(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	envelope := normalizeOpenClawEnvelope(req.Message, h.now().UTC())
+	envelope, err := normalizeOpenClawEnvelope(req.Message, h.now().UTC())
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_request", err.Error())
+		return
+	}
 	payload, err := json.Marshal(envelope)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "invalid_request", "message must be a JSON object")
@@ -247,7 +257,7 @@ func (h *Handler) handleOpenClawMessageStatus(w http.ResponseWriter, r *http.Req
 	writeAgentRuntimeSuccess(w, http.StatusOK, result)
 }
 
-func normalizeOpenClawEnvelope(in map[string]any, now time.Time) map[string]any {
+func normalizeOpenClawEnvelope(in map[string]any, now time.Time) (map[string]any, error) {
 	out := cloneStringAnyMap(in)
 	if out == nil {
 		out = map[string]any{}
@@ -261,7 +271,10 @@ func normalizeOpenClawEnvelope(in map[string]any, now time.Time) map[string]any 
 	if strings.TrimSpace(asStringAny(out["timestamp"])) == "" {
 		out["timestamp"] = now.UTC().Format(time.RFC3339Nano)
 	}
-	return out
+	if err := normalizeOpenClawSkillActivationEnvelope(out); err != nil {
+		return nil, err
+	}
+	return out, nil
 }
 
 func withOpenClawProjection(result map[string]any) map[string]any {
@@ -302,6 +315,7 @@ func parseOpenClawEnvelopeFromMessage(message model.Message) map[string]any {
 			if strings.TrimSpace(asStringAny(out["kind"])) == "" {
 				out["kind"] = "agent_message"
 			}
+			_ = normalizeOpenClawSkillActivationEnvelope(out)
 			return out
 		}
 		return map[string]any{
@@ -352,4 +366,62 @@ func asStringAny(value any) string {
 		return s
 	}
 	return ""
+}
+
+func normalizeOpenClawSkillActivationEnvelope(envelope map[string]any) error {
+	if envelope == nil {
+		return nil
+	}
+	envelopeType := strings.ToLower(strings.TrimSpace(asStringAny(envelope["type"])))
+	envelopeKind := strings.ToLower(strings.TrimSpace(asStringAny(envelope["kind"])))
+	if envelopeType != "skill_request" && envelopeType != "skill_activation" &&
+		envelopeKind != "skill_request" && envelopeKind != "skill_activation" {
+		return nil
+	}
+
+	skillName := strings.TrimSpace(asStringAny(envelope["skill_name"]))
+	if skillName == "" {
+		return errors.New("skill_name is required when type/kind is skill_request or skill_activation")
+	}
+
+	payloadFormat := strings.ToLower(strings.TrimSpace(asStringAny(envelope["payload_format"])))
+	if payloadFormat != "" && payloadFormat != openClawSkillPayloadFormatMarkdown && payloadFormat != openClawSkillPayloadFormatJSON {
+		return errors.New("payload_format must be one of: markdown, json")
+	}
+
+	payload, hasPayload := envelope["payload"]
+	if !hasPayload {
+		payload, hasPayload = envelope["input"]
+	}
+	if !hasPayload {
+		if payloadFormat != "" {
+			return errors.New("payload_format requires payload")
+		}
+		envelope["skill_name"] = skillName
+		return nil
+	}
+
+	switch payload.(type) {
+	case string:
+		if payloadFormat == "" {
+			payloadFormat = openClawSkillPayloadFormatMarkdown
+		}
+		if payloadFormat != openClawSkillPayloadFormatMarkdown {
+			return errors.New("payload must be a JSON object when payload_format is json")
+		}
+	case map[string]any:
+		if payloadFormat == "" {
+			payloadFormat = openClawSkillPayloadFormatJSON
+		}
+		if payloadFormat != openClawSkillPayloadFormatJSON {
+			return errors.New("payload must be a markdown string when payload_format is markdown")
+		}
+	default:
+		return errors.New("payload must be either a markdown string or a JSON object")
+	}
+
+	envelope["skill_name"] = skillName
+	envelope["payload"] = payload
+	envelope["payload_format"] = payloadFormat
+	return nil
 }

@@ -135,6 +135,59 @@ func TestOpenClawPublishRequiresMessageObject(t *testing.T) {
 	}
 }
 
+func TestOpenClawPublishSkillActivationAllowsMissingPayload(t *testing.T) {
+	router := newTestRouter()
+	_, _, tokenA, tokenB, _, _, _, agentUUIDB := setupTrustedAgents(t, router)
+
+	publishResp := doJSONRequest(t, router, http.MethodPost, "/v1/openclaw/messages/publish", map[string]any{
+		"to_agent_uuid": agentUUIDB,
+		"message": map[string]any{
+			"type":           "skill_request",
+			"request_id":     "req-skill-no-payload",
+			"skill_name":     "weather_lookup",
+			"reply_required": false,
+		},
+	}, map[string]string{"Authorization": "Bearer " + tokenA})
+	if publishResp.Code != http.StatusAccepted {
+		t.Fatalf("expected openclaw skill_request publish 202, got %d %s", publishResp.Code, publishResp.Body.String())
+	}
+
+	pullResp := doJSONRequest(t, router, http.MethodGet, "/v1/openclaw/messages/pull?timeout_ms=1000", nil, map[string]string{"Authorization": "Bearer " + tokenB})
+	if pullResp.Code != http.StatusOK {
+		t.Fatalf("expected openclaw pull 200, got %d %s", pullResp.Code, pullResp.Body.String())
+	}
+	pullPayload := decodeJSONMap(t, pullResp.Body.Bytes())
+	pullResult := requireAgentRuntimeSuccessEnvelope(t, pullPayload)
+	if got := readStringPath(pullResult, "openclaw_message", "skill_name"); got != "weather_lookup" {
+		t.Fatalf("expected pull openclaw_message.skill_name=weather_lookup, got %q payload=%v", got, pullPayload)
+	}
+	openClawMessage, _ := pullResult["openclaw_message"].(map[string]any)
+	if _, ok := openClawMessage["payload"]; ok {
+		t.Fatalf("expected payload to be omitted when not provided, got payload=%v", openClawMessage["payload"])
+	}
+}
+
+func TestOpenClawPublishSkillActivationRejectsInvalidPayloadType(t *testing.T) {
+	router := newTestRouter()
+	_, _, tokenA, _, _, _, _, agentUUIDB := setupTrustedAgents(t, router)
+
+	resp := doJSONRequest(t, router, http.MethodPost, "/v1/openclaw/messages/publish", map[string]any{
+		"to_agent_uuid": agentUUIDB,
+		"message": map[string]any{
+			"type":       "skill_request",
+			"skill_name": "weather_lookup",
+			"payload":    123,
+		},
+	}, map[string]string{"Authorization": "Bearer " + tokenA})
+	if resp.Code != http.StatusBadRequest {
+		t.Fatalf("expected openclaw publish invalid payload type to return 400, got %d %s", resp.Code, resp.Body.String())
+	}
+	payload := decodeJSONMap(t, resp.Body.Bytes())
+	if got, _ := payload["error"].(string); got != "invalid_request" {
+		t.Fatalf("expected invalid_request, got %q payload=%v", got, payload)
+	}
+}
+
 func TestOpenClawRegisterPluginUpdatesMetadataAndActivityLog(t *testing.T) {
 	router := newTestRouter()
 	_, _, tokenA, _, _, _, _, _ := setupTrustedAgents(t, router)
@@ -262,6 +315,107 @@ func TestOpenClawWebSocketUpgradeWithGzipAcceptEncoding(t *testing.T) {
 	ready := readWSMessage(t, conn, 5*time.Second)
 	if got := readStringPath(ready, "type"); got != "session_ready" {
 		t.Fatalf("expected initial ws message type=session_ready, got %q payload=%v", got, ready)
+	}
+}
+
+func TestOpenClawWebSocketSkillActivationPublishAllowsMissingPayload(t *testing.T) {
+	router := newTestRouter()
+	_, _, tokenA, tokenB, _, _, _, agentUUIDB := setupTrustedAgents(t, router)
+
+	server := httptest.NewServer(router)
+	defer server.Close()
+
+	wsURL := strings.Replace(server.URL, "http://", "ws://", 1) + "/v1/openclaw/messages/ws?session_key=skill-activation"
+	headers := http.Header{}
+	headers.Set("Authorization", "Bearer "+tokenA)
+
+	conn, _, err := websocket.DefaultDialer.Dial(wsURL, headers)
+	if err != nil {
+		t.Fatalf("expected websocket dial to succeed, got err=%v", err)
+	}
+	defer conn.Close()
+
+	ready := readWSMessage(t, conn, 5*time.Second)
+	if got := readStringPath(ready, "type"); got != "session_ready" {
+		t.Fatalf("expected initial ws message type=session_ready, got %q payload=%v", got, ready)
+	}
+
+	if err := conn.WriteJSON(map[string]any{
+		"type":          "publish",
+		"request_id":    "skill-no-payload",
+		"to_agent_uuid": agentUUIDB,
+		"message": map[string]any{
+			"type":       "skill_request",
+			"skill_name": "weather_lookup",
+		},
+	}); err != nil {
+		t.Fatalf("expected websocket publish write to succeed, got err=%v", err)
+	}
+
+	publishResp := waitForWSResponseRequestID(t, conn, "skill-no-payload", 5*time.Second)
+	if ok, _ := publishResp["ok"].(bool); !ok {
+		t.Fatalf("expected ws publish response ok=true, got payload=%v", publishResp)
+	}
+	if got, _ := publishResp["status"].(float64); got != float64(http.StatusAccepted) {
+		t.Fatalf("expected ws publish response status=202, got %v payload=%v", got, publishResp)
+	}
+
+	pullResp := doJSONRequest(t, router, http.MethodGet, "/v1/openclaw/messages/pull?timeout_ms=1000", nil, map[string]string{"Authorization": "Bearer " + tokenB})
+	if pullResp.Code != http.StatusOK {
+		t.Fatalf("expected openclaw pull 200, got %d %s", pullResp.Code, pullResp.Body.String())
+	}
+	pullPayload := decodeJSONMap(t, pullResp.Body.Bytes())
+	pullResult := requireAgentRuntimeSuccessEnvelope(t, pullPayload)
+	if got := readStringPath(pullResult, "openclaw_message", "skill_name"); got != "weather_lookup" {
+		t.Fatalf("expected pull openclaw_message.skill_name=weather_lookup, got %q payload=%v", got, pullPayload)
+	}
+	openClawMessage, _ := pullResult["openclaw_message"].(map[string]any)
+	if _, ok := openClawMessage["payload"]; ok {
+		t.Fatalf("expected payload to be omitted when not provided, got payload=%v", openClawMessage["payload"])
+	}
+}
+
+func TestOpenClawWebSocketSkillActivationRejectsInvalidPayloadType(t *testing.T) {
+	router := newTestRouter()
+	_, _, tokenA, _, _, _, _, agentUUIDB := setupTrustedAgents(t, router)
+
+	server := httptest.NewServer(router)
+	defer server.Close()
+
+	wsURL := strings.Replace(server.URL, "http://", "ws://", 1) + "/v1/openclaw/messages/ws?session_key=skill-invalid"
+	headers := http.Header{}
+	headers.Set("Authorization", "Bearer "+tokenA)
+
+	conn, _, err := websocket.DefaultDialer.Dial(wsURL, headers)
+	if err != nil {
+		t.Fatalf("expected websocket dial to succeed, got err=%v", err)
+	}
+	defer conn.Close()
+
+	ready := readWSMessage(t, conn, 5*time.Second)
+	if got := readStringPath(ready, "type"); got != "session_ready" {
+		t.Fatalf("expected initial ws message type=session_ready, got %q payload=%v", got, ready)
+	}
+
+	if err := conn.WriteJSON(map[string]any{
+		"type":          "publish",
+		"request_id":    "skill-invalid-payload",
+		"to_agent_uuid": agentUUIDB,
+		"message": map[string]any{
+			"type":       "skill_request",
+			"skill_name": "weather_lookup",
+			"payload":    99,
+		},
+	}); err != nil {
+		t.Fatalf("expected websocket publish write to succeed, got err=%v", err)
+	}
+
+	resp := waitForWSResponseRequestID(t, conn, "skill-invalid-payload", 5*time.Second)
+	if ok, _ := resp["ok"].(bool); ok {
+		t.Fatalf("expected ws publish response ok=false, got payload=%v", resp)
+	}
+	if got, _ := resp["status"].(float64); got != float64(http.StatusBadRequest) {
+		t.Fatalf("expected ws publish response status=400, got %v payload=%v", got, resp)
 	}
 }
 
