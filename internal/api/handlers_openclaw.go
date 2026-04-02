@@ -143,6 +143,9 @@ func (h *Handler) handleOpenClawMessageSubroutes(w http.ResponseWriter, r *http.
 	case "ws":
 		h.handleOpenClawWebSocket(w, r)
 		return
+	case "offline":
+		h.handleOpenClawOffline(w, r)
+		return
 	case "register-plugin":
 		h.handleOpenClawRegisterPlugin(w, r)
 		return

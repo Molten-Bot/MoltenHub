@@ -318,6 +318,91 @@ func TestOpenClawWebSocketUpgradeWithGzipAcceptEncoding(t *testing.T) {
 	}
 }
 
+func TestOpenClawOfflineEndpointUpdatesPresenceAndActivityLog(t *testing.T) {
+	router := newTestRouter()
+	_, _, tokenA, _, _, _, _, _ := setupTrustedAgents(t, router)
+
+	resp := doJSONRequest(t, router, http.MethodPost, "/v1/openclaw/messages/offline", map[string]any{
+		"session_key": "main",
+		"reason":      "shutdown",
+	}, map[string]string{"Authorization": "Bearer " + tokenA})
+	if resp.Code != http.StatusOK {
+		t.Fatalf("expected openclaw offline 200, got %d %s", resp.Code, resp.Body.String())
+	}
+
+	payload := decodeJSONMap(t, resp.Body.Bytes())
+	result := requireAgentRuntimeSuccessEnvelope(t, payload)
+	agent, _ := result["agent"].(map[string]any)
+	metadata, _ := agent["metadata"].(map[string]any)
+	presence, _ := metadata["presence"].(map[string]any)
+	if got, _ := presence["status"].(string); got != "offline" {
+		t.Fatalf("expected metadata.presence.status=offline, got %q payload=%v", got, payload)
+	}
+	if ready, ok := presence["ready"].(bool); !ok || ready {
+		t.Fatalf("expected metadata.presence.ready=false, got %v payload=%v", presence["ready"], payload)
+	}
+	if got, _ := presence["transport"].(string); got != "websocket" {
+		t.Fatalf("expected metadata.presence.transport=websocket, got %q payload=%v", got, payload)
+	}
+	if got, _ := presence["session_key"].(string); got != "main" {
+		t.Fatalf("expected metadata.presence.session_key=main, got %q payload=%v", got, payload)
+	}
+
+	activityLog, _ := agent["activity_log"].([]any)
+	if !hasActivityText(activityLog, "websocket transport offline") {
+		t.Fatalf("expected activity_log to include websocket transport offline, got %v", activityLog)
+	}
+}
+
+func TestOpenClawWebSocketPresenceOnlineThenOffline(t *testing.T) {
+	router := newTestRouter()
+	_, _, _, tokenB, _, _, _, _ := setupTrustedAgents(t, router)
+
+	server := httptest.NewServer(router)
+	defer server.Close()
+
+	wsURL := strings.Replace(server.URL, "http://", "ws://", 1) + "/v1/openclaw/messages/ws?session_key=presence-main"
+	headers := http.Header{}
+	headers.Set("Authorization", "Bearer "+tokenB)
+
+	conn, _, err := websocket.DefaultDialer.Dial(wsURL, headers)
+	if err != nil {
+		t.Fatalf("expected websocket dial to succeed, got err=%v", err)
+	}
+
+	ready := readWSMessage(t, conn, 5*time.Second)
+	if got := readStringPath(ready, "type"); got != "session_ready" {
+		t.Fatalf("expected initial ws message type=session_ready, got %q payload=%v", got, ready)
+	}
+
+	onlineResult, onlineAgent := waitForAgentPresenceStatus(t, router, tokenB, "online", 2*time.Second)
+	onlineMetadata, _ := onlineAgent["metadata"].(map[string]any)
+	onlinePresence, _ := onlineMetadata["presence"].(map[string]any)
+	if readyValue, ok := onlinePresence["ready"].(bool); !ok || !readyValue {
+		t.Fatalf("expected metadata.presence.ready=true while connected, got %v payload=%v", onlinePresence["ready"], onlineResult)
+	}
+	if got, _ := onlinePresence["session_key"].(string); got != "presence-main" {
+		t.Fatalf("expected metadata.presence.session_key=presence-main, got %q payload=%v", got, onlineResult)
+	}
+	onlineActivityLog, _ := onlineAgent["activity_log"].([]any)
+	if !hasActivityText(onlineActivityLog, "websocket transport online") {
+		t.Fatalf("expected activity_log to include websocket transport online, got %v", onlineActivityLog)
+	}
+
+	_ = conn.Close()
+
+	offlineResult, offlineAgent := waitForAgentPresenceStatus(t, router, tokenB, "offline", 4*time.Second)
+	offlineMetadata, _ := offlineAgent["metadata"].(map[string]any)
+	offlinePresence, _ := offlineMetadata["presence"].(map[string]any)
+	if readyValue, ok := offlinePresence["ready"].(bool); !ok || readyValue {
+		t.Fatalf("expected metadata.presence.ready=false after disconnect, got %v payload=%v", offlinePresence["ready"], offlineResult)
+	}
+	offlineActivityLog, _ := offlineAgent["activity_log"].([]any)
+	if !hasActivityText(offlineActivityLog, "websocket transport offline") {
+		t.Fatalf("expected activity_log to include websocket transport offline, got %v", offlineActivityLog)
+	}
+}
+
 func TestOpenClawWebSocketSkillActivationPublishAllowsMissingPayload(t *testing.T) {
 	router := newTestRouter()
 	_, _, tokenA, tokenB, _, _, _, agentUUIDB := setupTrustedAgents(t, router)
@@ -523,4 +608,30 @@ func hasActivityText(log []any, target string) bool {
 		}
 	}
 	return false
+}
+
+func waitForAgentPresenceStatus(t *testing.T, router http.Handler, token, wantStatus string, timeout time.Duration) (map[string]any, map[string]any) {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	headers := map[string]string{"Authorization": "Bearer " + token}
+
+	for time.Now().Before(deadline) {
+		resp := doJSONRequest(t, router, http.MethodGet, "/v1/agents/me", nil, headers)
+		if resp.Code != http.StatusOK {
+			time.Sleep(25 * time.Millisecond)
+			continue
+		}
+		payload := decodeJSONMap(t, resp.Body.Bytes())
+		result := requireAgentRuntimeSuccessEnvelope(t, payload)
+		agent, _ := result["agent"].(map[string]any)
+		metadata, _ := agent["metadata"].(map[string]any)
+		presence, _ := metadata["presence"].(map[string]any)
+		status, _ := presence["status"].(string)
+		if strings.EqualFold(strings.TrimSpace(status), strings.TrimSpace(wantStatus)) {
+			return result, agent
+		}
+		time.Sleep(25 * time.Millisecond)
+	}
+	t.Fatalf("timed out waiting for agent presence status=%q", wantStatus)
+	return nil, nil
 }

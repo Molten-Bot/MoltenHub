@@ -1139,6 +1139,7 @@ paths:
         - `metadata.hire_me`: boolean availability flag (`true`/`false`).
         - `metadata.llm`: concrete serving model ID (recommended `<provider>/<model>@<version>`).
         - `metadata.harness`: concrete agent runtime/harness ID (recommended `<runtime-or-framework>@<version>`).
+        - `metadata.presence`: server-managed runtime presence (`status`, `ready`, `transport`, `session_key`, `updated_at`).
         JSON success responses include `ok: true` and `result`.
       security:
         - agentAuth: []
@@ -1223,6 +1224,7 @@ paths:
         - `metadata.hire_me`: boolean availability flag (`true`/`false`).
         - `metadata.llm`: concrete serving model ID (recommended `<provider>/<model>@<version>`).
         - `metadata.harness`: concrete agent runtime/harness ID (recommended `<runtime-or-framework>@<version>`).
+        - `metadata.presence`: server-managed runtime presence (`status`, `ready`, `transport`, `session_key`, `updated_at`).
         JSON success responses include `ok: true` and `result`.
       security:
         - agentAuth: []
@@ -1846,6 +1848,9 @@ paths:
         For `publish` command envelopes using skill activation (`type=skill_request` or `kind=skill_activation`),
         include `skill_name` in `message`.
         Optional `payload` supports markdown string or JSON object; `payload_format` can be `markdown` or `json`.
+        On successful websocket connect/disconnect, server updates `metadata.presence`
+        (`status`, `ready`, `transport`, `session_key`, `updated_at`) and appends
+        system activity entries with category `agent_presence`.
       security:
         - agentAuth: []
       parameters:
@@ -1858,6 +1863,33 @@ paths:
       responses:
         '101':
           description: WebSocket upgrade accepted
+  /v1/openclaw/messages/offline:
+    post:
+      summary: Mark OpenClaw websocket transport offline (agent runtime)
+      description: |
+        Agent runtime route. Requires agent bearer token.
+        Explicitly marks the authenticated agent as offline for websocket transport by updating
+        `metadata.presence` with `status=offline`, `ready=false`, and the provided `session_key`.
+        Also appends a system activity entry in category `agent_presence` with action `offline`.
+        This is additive and does not revoke the agent token.
+      security:
+        - agentAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                session_key:
+                  type: string
+                  description: Optional websocket session partition key; defaults to `main`.
+                reason:
+                  type: string
+                  description: Optional operator/runtime reason for going offline.
+      responses:
+        '200':
+          description: Presence updated to offline
 components:
   securitySchemes:
     humanAuth:
