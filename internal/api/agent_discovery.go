@@ -64,6 +64,7 @@ func buildAgentManifest(agent model.Agent, cp agentControlPlaneView, now time.Ti
 		"ack":          cp.APIBase + "/messages/ack",
 		"nack":         cp.APIBase + "/messages/nack",
 		"status":       cp.APIBase + "/messages/{message_id}",
+		"offline":      cp.APIBase + "/openclaw/messages/offline",
 	}
 	protocolAdapters := protocolAdaptersPayload(cp.APIBase)
 
@@ -285,6 +286,19 @@ func buildAgentManifest(agent model.Agent, cp agentControlPlaneView, now time.Ti
 			TrustStateGated:      false,
 			Description:          "OpenClaw JSON envelope status adapter (additive to /v1/messages/{message_id}).",
 		},
+		{
+			ID:                   "agent.messages.openclaw.offline",
+			Method:               "POST",
+			Path:                 "/v1/openclaw/messages/offline",
+			Auth:                 "bearer_agent",
+			RequestContentTypes:  []string{"application/json"},
+			ResponseContentTypes: []string{"application/json"},
+			ReadOnly:             false,
+			Mutating:             true,
+			Retryable:            true,
+			TrustStateGated:      false,
+			Description:          "Mark websocket transport offline and update profile presence metadata.",
+		},
 	}
 
 	capabilities := []agentCapabilityContract{
@@ -323,6 +337,7 @@ func buildAgentManifest(agent model.Agent, cp agentControlPlaneView, now time.Ti
 				"agent.messages.openclaw.ack",
 				"agent.messages.openclaw.nack",
 				"agent.messages.openclaw.status",
+				"agent.messages.openclaw.offline",
 			},
 			Mutating:        true,
 			Retryable:       true,
@@ -477,6 +492,7 @@ const (
 - Ack: ` + "`POST {{OPENCLAW_ACK_URL}}`" + `
 - Nack: ` + "`POST {{OPENCLAW_NACK_URL}}`" + `
 - Status: ` + "`GET {{OPENCLAW_STATUS_URL}}`" + `
+- Offline: ` + "`POST {{OPENCLAW_OFFLINE_URL}}`" + `
 
 ### OpenClaw CLI Pairing Hints
 - Pair nodes: ` + "`openclaw devices list`" + ` then ` + "`openclaw devices approve <requestId>`" + `
@@ -634,7 +650,7 @@ func buildAgentDiscoveryMarkdown(manifest agentManifest) string {
 	markdown = append(markdown, discoveryEndpointsHeading)
 
 	endpointLines := make([]string, 0, len(manifest.Endpoints))
-	endpointKeys := []string{"manifest", "capabilities", "skill", "profile", "publish", "pull", "ack", "nack", "status"}
+	endpointKeys := []string{"manifest", "capabilities", "skill", "profile", "publish", "pull", "ack", "nack", "status", "offline"}
 	for _, key := range endpointKeys {
 		if endpoint, ok := manifest.Endpoints[key]; ok && endpoint != "" {
 			endpointLines = append(endpointLines, renderMarkdownTemplate(discoveryEndpointLine, "{{ENDPOINT_KEY}}", key, "{{ENDPOINT_VALUE}}", endpoint))
@@ -811,6 +827,7 @@ func renderOpenClawSkillBlock(agent model.Agent, manifest agentManifest) string 
 		"{{OPENCLAW_ACK_URL}}", endpoints["ack"],
 		"{{OPENCLAW_NACK_URL}}", endpoints["nack"],
 		"{{OPENCLAW_STATUS_URL}}", endpoints["status"],
+		"{{OPENCLAW_OFFLINE_URL}}", endpoints["offline"],
 	)
 }
 

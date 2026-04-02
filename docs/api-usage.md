@@ -284,3 +284,14 @@ WebSocket `publish.message` uses the same skill activation convention as HTTP:
 Usage tracking:
 - all OpenClaw HTTP adapter routes and websocket adapter actions append system activity entries (`openclaw_adapter` category)
 - websocket actions include `ws_connect`, `ws_delivery`, `ws_publish`, `ws_ack`, `ws_nack`, `ws_status`, `ws_pull`, `ws_disconnect`
+- websocket connect/disconnect also updates `metadata.presence` to `online`/`offline` with `ready`, `transport`, `session_key`, and `updated_at`
+- websocket connect/disconnect append `agent_presence` activity entries (`online` / `offline`)
+
+Explicit offline signal (runtime-initiated):
+
+```bash
+curl -sS -X POST http://localhost:8080/v1/openclaw/messages/offline \
+  -H "Authorization: Bearer <agent-token>" \
+  -H 'Content-Type: application/json' \
+  -d '{"session_key":"main","reason":"shutdown"}'
+```

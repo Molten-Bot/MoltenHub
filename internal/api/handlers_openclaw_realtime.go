@@ -22,6 +22,8 @@ import (
 const (
 	openClawWebSocketPullTimeoutDefault = 20 * time.Second
 	openClawPluginDefaultID             = "moltenhub-openclaw"
+	openClawPresenceStatusOnline        = "online"
+	openClawPresenceStatusOffline       = "offline"
 )
 
 var (
@@ -42,6 +44,11 @@ type openClawPluginRegisterRequest struct {
 	Transport   string `json:"transport,omitempty"`
 	SessionKey  string `json:"session_key,omitempty"`
 	SessionMode string `json:"session_mode,omitempty"`
+}
+
+type openClawOfflineRequest struct {
+	SessionKey string `json:"session_key,omitempty"`
+	Reason     string `json:"reason,omitempty"`
 }
 
 type openClawWSRequest struct {
@@ -159,6 +166,56 @@ func (h *Handler) handleOpenClawRegisterPlugin(w http.ResponseWriter, r *http.Re
 	})
 }
 
+func (h *Handler) handleOpenClawOffline(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeMethodNotAllowed(w)
+		return
+	}
+	if !requireJSONRequestContentType(w, r) {
+		return
+	}
+
+	agentUUID, err := h.authenticateAgent(r)
+	if err != nil {
+		writeError(w, http.StatusUnauthorized, "unauthorized", "missing or invalid bearer token")
+		return
+	}
+
+	var req openClawOfflineRequest
+	if err := decodeJSON(r, &req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_request", "invalid JSON request")
+		return
+	}
+
+	sessionKey := normalizeOpenClawSessionKey(req.SessionKey)
+	agent, err := h.setOpenClawWebSocketPresence(agentUUID, sessionKey, openClawPresenceStatusOffline, req.Reason)
+	if err != nil {
+		switch {
+		case errors.Is(err, store.ErrAgentNotFound):
+			writeError(w, http.StatusNotFound, "unknown_agent", "agent_uuid is not registered")
+		case errors.Is(err, store.ErrInvalidAgentType):
+			writeError(w, http.StatusBadRequest, "invalid_agent_type", "metadata.agent_type must be 2-64 chars: a-z, 0-9, ., _, -")
+		default:
+			writeError(w, http.StatusInternalServerError, "store_error", "failed to update agent presence")
+		}
+		return
+	}
+
+	details := map[string]any{"session_key": sessionKey}
+	if reason := strings.TrimSpace(req.Reason); reason != "" {
+		details["reason"] = reason
+	}
+	h.recordOpenClawAdapterUsage(agentUUID, "ws_offline", details)
+
+	out := map[string]any{
+		"agent": h.agentResponsePayload(agent),
+	}
+	if presence := openClawPresenceFromMetadata(agent.Metadata); presence != nil {
+		out["presence"] = presence
+	}
+	writeAgentRuntimeSuccess(w, http.StatusOK, out)
+}
+
 func (h *Handler) handleOpenClawWebSocket(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		writeMethodNotAllowed(w)
@@ -178,6 +235,17 @@ func (h *Handler) handleOpenClawWebSocket(w http.ResponseWriter, r *http.Request
 	defer conn.Close()
 
 	sessionKey := normalizeOpenClawSessionKey(r.URL.Query().Get("session_key"))
+	presenceOnline := false
+	if _, err := h.setOpenClawWebSocketPresence(agentUUID, sessionKey, openClawPresenceStatusOnline, ""); err == nil {
+		presenceOnline = true
+	}
+	defer func() {
+		if presenceOnline {
+			_, _ = h.setOpenClawWebSocketPresence(agentUUID, sessionKey, openClawPresenceStatusOffline, "")
+		}
+		h.recordOpenClawAdapterUsage(agentUUID, "ws_disconnect", map[string]any{"session_key": sessionKey})
+	}()
+
 	ctx, cancel := context.WithCancel(r.Context())
 	defer cancel()
 
@@ -264,7 +332,6 @@ func (h *Handler) handleOpenClawWebSocket(w http.ResponseWriter, r *http.Request
 
 	cancel()
 	<-deliveryDone
-	h.recordOpenClawAdapterUsage(agentUUID, "ws_disconnect", map[string]any{"session_key": sessionKey})
 }
 
 func (h *Handler) handleOpenClawWSCommand(
@@ -510,4 +577,95 @@ func (h *Handler) recordOpenClawAdapterUsage(agentUUID, action string, details m
 		entry[k] = v
 	}
 	_, _ = h.control.RecordAgentSystemActivity(agentUUID, entry, h.now().UTC())
+}
+
+func (h *Handler) setOpenClawWebSocketPresence(agentUUID, sessionKey, status, reason string) (model.Agent, error) {
+	now := h.now().UTC()
+	agentUUID = strings.TrimSpace(agentUUID)
+	if agentUUID == "" {
+		return model.Agent{}, store.ErrAgentNotFound
+	}
+	status = strings.ToLower(strings.TrimSpace(status))
+	if status != openClawPresenceStatusOnline && status != openClawPresenceStatusOffline {
+		status = openClawPresenceStatusOffline
+	}
+	sessionKey = normalizeOpenClawSessionKey(sessionKey)
+
+	patch := map[string]any{
+		model.AgentMetadataKeyPresence: map[string]any{
+			"status":      status,
+			"ready":       status == openClawPresenceStatusOnline,
+			"transport":   "websocket",
+			"session_key": sessionKey,
+			"updated_at":  now.Format(time.RFC3339),
+		},
+	}
+	agent, err := h.control.UpdateAgentMetadataSelf(agentUUID, patch, now)
+	if err != nil {
+		return model.Agent{}, err
+	}
+
+	activityText := "websocket transport " + status
+	entry := map[string]any{
+		"activity":   activityText,
+		"category":   "agent_presence",
+		"action":     status,
+		"subject_id": sessionKey,
+		"event_id":   "agent-presence:" + status + ":" + sessionKey + ":" + strconv.FormatInt(now.UnixNano(), 10),
+	}
+	if trimmedReason := strings.TrimSpace(reason); trimmedReason != "" {
+		entry["reason"] = trimmedReason
+	}
+	agent, err = h.control.RecordAgentSystemActivity(agentUUID, entry, now)
+	if err != nil {
+		return model.Agent{}, err
+	}
+	return agent, nil
+}
+
+func openClawPresenceFromMetadata(metadata map[string]any) map[string]any {
+	if len(metadata) == 0 {
+		return nil
+	}
+	raw, ok := metadata[model.AgentMetadataKeyPresence]
+	if !ok {
+		return nil
+	}
+	presence, ok := raw.(map[string]any)
+	if !ok || len(presence) == 0 {
+		return nil
+	}
+
+	status := strings.ToLower(strings.TrimSpace(asStringAny(presence["status"])))
+	if status != openClawPresenceStatusOnline && status != openClawPresenceStatusOffline {
+		status = ""
+	}
+	transport := strings.TrimSpace(asStringAny(presence["transport"]))
+	sessionKey := normalizeOpenClawSessionKey(asStringAny(presence["session_key"]))
+	updatedAt := strings.TrimSpace(asStringAny(presence["updated_at"]))
+	ready, readyOK := presence["ready"].(bool)
+	if status == "" && !readyOK && transport == "" && updatedAt == "" {
+		return nil
+	}
+
+	out := map[string]any{}
+	if status != "" {
+		out["status"] = status
+	}
+	if readyOK {
+		out["ready"] = ready
+	}
+	if transport != "" {
+		out["transport"] = transport
+	}
+	if sessionKey != "" {
+		out["session_key"] = sessionKey
+	}
+	if updatedAt != "" {
+		out["updated_at"] = updatedAt
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
 }

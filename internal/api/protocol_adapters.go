@@ -19,5 +19,6 @@ func openClawAdapterEndpoints(apiBase string) map[string]string {
 		"ack":     apiBase + "/openclaw/messages/ack",
 		"nack":    apiBase + "/openclaw/messages/nack",
 		"status":  apiBase + "/openclaw/messages/{message_id}",
+		"offline": apiBase + "/openclaw/messages/offline",
 	}
 }

@@ -40,6 +40,9 @@ func TestBuildAgentDiscoveryMarkdownRendersTemplateTokens(t *testing.T) {
 	if !strings.Contains(markdown, "- manifest: `https://hub.example/v1/agents/me/manifest`") {
 		t.Fatalf("expected manifest endpoint in markdown, got markdown=%q", markdown)
 	}
+	if !strings.Contains(markdown, "- offline: `https://hub.example/v1/openclaw/messages/offline`") {
+		t.Fatalf("expected offline endpoint in markdown, got markdown=%q", markdown)
+	}
 	if !strings.Contains(markdown, "### POST /v1/messages/publish") {
 		t.Fatalf("expected publish route contract in markdown, got markdown=%q", markdown)
 	}
@@ -190,6 +193,9 @@ func TestBuildAgentSkillMarkdownOpenClawSection(t *testing.T) {
 	}
 	if endpoints["publish"] != "https://hub.example/v1/openclaw/messages/publish" {
 		t.Fatalf("expected openclaw publish endpoint, got %+v", endpoints)
+	}
+	if endpoints["offline"] != "https://hub.example/v1/openclaw/messages/offline" {
+		t.Fatalf("expected openclaw offline endpoint, got %+v", endpoints)
 	}
 
 	markdown := buildAgentSkillMarkdown(agent, manifest)
