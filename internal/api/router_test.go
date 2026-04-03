@@ -197,6 +197,24 @@ func TestParseCORSAllowedOrigins(t *testing.T) {
 	}
 }
 
+func TestParseCORSAllowedOrigins_AcceptsHostShorthand(t *testing.T) {
+	origins, err := ParseCORSAllowedOrigins(" x.site.com,y.site.com:8443 ")
+	if err != nil {
+		t.Fatalf("ParseCORSAllowedOrigins returned error: %v", err)
+	}
+
+	for _, origin := range []string{
+		"https://x.site.com",
+		"http://x.site.com",
+		"https://y.site.com:8443",
+		"http://y.site.com:8443",
+	} {
+		if _, ok := origins[origin]; !ok {
+			t.Fatalf("expected shorthand origin %q in parsed set, got %v", origin, origins)
+		}
+	}
+}
+
 func TestAPICORSAllowsExplicitOrigin(t *testing.T) {
 	mem := store.NewMemoryStore()
 	waiters := longpoll.NewWaiters()
@@ -238,6 +256,28 @@ func TestAPICORSRejectsUnknownOrigin(t *testing.T) {
 
 	if got := resp.Header().Get("Access-Control-Allow-Origin"); got != "" {
 		t.Fatalf("expected unknown origin to be blocked, got %q", got)
+	}
+}
+
+func TestAPICORSAllowsHostShorthandOrigin(t *testing.T) {
+	mem := store.NewMemoryStore()
+	waiters := longpoll.NewWaiters()
+	h := NewHandler(mem, mem, waiters, auth.NewDevHumanAuthProvider(), "https://hub.example.com", "", "", "", "", "example.com", true, 15*time.Minute, false)
+	allowedOrigins, err := ParseCORSAllowedOrigins("x.site.com,y.site.com")
+	if err != nil {
+		t.Fatalf("ParseCORSAllowedOrigins returned error: %v", err)
+	}
+	router := NewRouterWithOptions(h, RouterOptions{
+		AllowedCORSOrigins: allowedOrigins,
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/health", nil)
+	req.Header.Set("Origin", "https://y.site.com")
+	resp := httptest.NewRecorder()
+	router.ServeHTTP(resp, req)
+
+	if got := resp.Header().Get("Access-Control-Allow-Origin"); got != "https://y.site.com" {
+		t.Fatalf("expected host shorthand origin to be allowed, got %q", got)
 	}
 }
 

@@ -51,7 +51,7 @@ Useful local keys:
 - `DEV_LOGIN_AUTO=true`: auto-redirect from login page to `/profile`.
 - `SUPER_ADMIN_REVIEW_MODE=true` + `SUPER_ADMIN_EMAILS=...`: test admin review behavior.
 - `MOLTENHUB_ENABLE_LOCAL_CORS=true`: enable API CORS for local browser/manual testing (including `file://`).
-- `MOLTENHUB_CORS_ALLOWED_ORIGINS=https://app.example.com,https://app.qa.example.com`: allow explicit browser origins.
+- `MOLTENHUB_CORS_ALLOWED_ORIGINS=app.example.com,app.qa.example.com`: allow explicit browser origins via host shorthand (host entries allow both `http://` and `https://`; full origins are also accepted).
 - `MOLTENHUB_HEADLESS_MODE=true` + `MOLTENHUB_HEADLESS_MODE_URL=https://example.com`: disable built-in UI and redirect non-API pages.
 
 Test local image quickly:

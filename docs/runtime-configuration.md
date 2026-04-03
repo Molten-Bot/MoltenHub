@@ -33,8 +33,8 @@ Other auth/runtime knobs:
 
 Browser API CORS:
 - `MOLTENHUB_ENABLE_LOCAL_CORS=true`: allows local testing origins (`localhost`, `127.0.0.1`, `::1`, plus `Origin: null` from `file://`).
-- `MOLTENHUB_CORS_ALLOWED_ORIGINS=https://app.example.com,https://app.qa.example.com`: explicit allowed browser origins.
-- Values must be comma-separated `http://` or `https://` origins without paths, queries, or fragments.
+- `MOLTENHUB_CORS_ALLOWED_ORIGINS=app.example.com,app.qa.example.com`: explicit allowed browser origins via host shorthand.
+- Host shorthand entries allow both `http://` and `https://` for that host. You can also provide full `http://` or `https://` origins; values must be comma-separated and must not include paths, queries, or fragments.
 
 Canonical URI authority:
 - `MOLTENHUB_CANONICAL_BASE_URL=https://hub.example.com`
