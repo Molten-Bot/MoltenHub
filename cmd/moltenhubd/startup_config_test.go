@@ -115,7 +115,7 @@ func TestCollectLaunchDiagnostics_FailsWhenS3SigningPairIsIncomplete(t *testing.
 
 func TestCollectLaunchDiagnostics_FailsWhenCORSAllowedOriginsIsInvalid(t *testing.T) {
 	diagnostics, err := collectLaunchDiagnostics(mapLookup(map[string]string{
-		"MOLTENHUB_CORS_ALLOWED_ORIGINS": "app.molten.bot",
+		"MOLTENHUB_CORS_ALLOWED_ORIGINS": "app.example.com",
 	}))
 	if err == nil {
 		t.Fatal("expected error for invalid CORS allowed origins")

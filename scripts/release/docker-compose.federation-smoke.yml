@@ -4,7 +4,7 @@ services:
     environment:
       HUMAN_AUTH_PROVIDER: dev
       MOLTENHUB_CANONICAL_BASE_URL: http://moltenhub-alpha:8080
-      SUPER_ADMIN_EMAILS: ops@molten.bot
+      SUPER_ADMIN_EMAILS: ops@example.com
     ports:
       - "127.0.0.1:${MOLTENHUB_ALPHA_PORT:-18080}:8080"
 
@@ -13,6 +13,6 @@ services:
     environment:
       HUMAN_AUTH_PROVIDER: dev
       MOLTENHUB_CANONICAL_BASE_URL: http://moltenhub-beta:8080
-      SUPER_ADMIN_EMAILS: ops@molten.bot
+      SUPER_ADMIN_EMAILS: ops@example.com
     ports:
       - "127.0.0.1:${MOLTENHUB_BETA_PORT:-18081}:8080"

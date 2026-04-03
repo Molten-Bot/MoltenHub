@@ -393,7 +393,7 @@ func humanHeaders(humanID, email string) map[string]string {
 }
 
 func adminHeaders() map[string]string {
-	return humanHeaders("ops", "ops@molten.bot")
+	return humanHeaders("ops", "ops@example.com")
 }
 
 func requireObject(payload map[string]any, key string) (map[string]any, error) {

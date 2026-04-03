@@ -6,8 +6,8 @@ if ! command -v jq >/dev/null 2>&1; then
   exit 1
 fi
 
-NA_BASE_URL="${NA_BASE_URL:-https://na.hive.molten-qa.site/v1}"
-EU_BASE_URL="${EU_BASE_URL:-https://eu.hive.molten-qa.site/v1}"
+NA_BASE_URL="${NA_BASE_URL:-https://na.hive.example.com/v1}"
+EU_BASE_URL="${EU_BASE_URL:-https://eu.hive.example.com/v1}"
 
 ITERATIONS="${ITERATIONS:-10}"
 PULL_TIMEOUT_MS="${PULL_TIMEOUT_MS:-5000}"

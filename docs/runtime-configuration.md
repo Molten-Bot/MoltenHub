@@ -12,8 +12,8 @@ See also: [README](../README.md) | [Development Guide](./development.md) | [API 
   - Validates tokens via Supabase `/auth/v1/user`.
 
 Admin identity controls:
-- `SUPER_ADMIN_EMAILS=root@molten.bot,ops@molten.bot` (recommended)
-- `SUPER_ADMIN_DOMAINS=molten.bot` (broader; optional)
+- `SUPER_ADMIN_EMAILS=root@example.com,ops@example.com` (recommended)
+- `SUPER_ADMIN_DOMAINS=example.com` (broader; optional)
 - Supabase mode requires verified email claim (`email_verified=true`) for admin behavior.
 
 Admin review toggle:
@@ -33,11 +33,11 @@ Other auth/runtime knobs:
 
 Browser API CORS:
 - `MOLTENHUB_ENABLE_LOCAL_CORS=true`: allows local testing origins (`localhost`, `127.0.0.1`, `::1`, plus `Origin: null` from `file://`).
-- `MOLTENHUB_CORS_ALLOWED_ORIGINS=https://app.molten.bot,https://app.molten-qa.site`: explicit allowed browser origins.
+- `MOLTENHUB_CORS_ALLOWED_ORIGINS=https://app.example.com,https://app.qa.example.com`: explicit allowed browser origins.
 - Values must be comma-separated `http://` or `https://` origins without paths, queries, or fragments.
 
 Canonical URI authority:
-- `MOLTENHUB_CANONICAL_BASE_URL=https://hub.molten.bot`
+- `MOLTENHUB_CANONICAL_BASE_URL=https://hub.example.com`
 - If omitted, `uri` fields are omitted.
 
 ## State Backend

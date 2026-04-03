@@ -51,7 +51,7 @@ Useful local keys:
 - `DEV_LOGIN_AUTO=true`: auto-redirect from login page to `/profile`.
 - `SUPER_ADMIN_REVIEW_MODE=true` + `SUPER_ADMIN_EMAILS=...`: test admin review behavior.
 - `MOLTENHUB_ENABLE_LOCAL_CORS=true`: enable API CORS for local browser/manual testing (including `file://`).
-- `MOLTENHUB_CORS_ALLOWED_ORIGINS=https://app.molten.bot,https://app.molten-qa.site`: allow explicit browser origins.
+- `MOLTENHUB_CORS_ALLOWED_ORIGINS=https://app.example.com,https://app.qa.example.com`: allow explicit browser origins.
 - `MOLTENHUB_HEADLESS_MODE=true` + `MOLTENHUB_HEADLESS_MODE_URL=https://example.com`: disable built-in UI and redirect non-API pages.
 
 Test local image quickly:
@@ -116,27 +116,4 @@ Useful overrides:
 SLO_MS=10000 ITERATIONS=15 VERBOSE=true \
 NA_TOKEN=... EU_TOKEN=... NA_URI=... EU_URI=... \
 bash scripts/release/run_federation_latency_slo.sh
-```
-
-## OpenClaw Transport Matrix (Live)
-
-Run the OpenClaw transport matrix against two bound live agents (`http->http`, `http->ws`, `ws->http`, `ws->ws`):
-
-```bash
-go run ./cmd/moltenhub-openclaw-latency \
-  -base-url https://hub.molten-qa.site \
-  -agent-a-token "$AGENT_A_TOKEN" \
-  -agent-b-token "$AGENT_B_TOKEN" \
-  -iterations 6
-```
-
-Write a markdown report for docs/release notes:
-
-```bash
-go run ./cmd/moltenhub-openclaw-latency \
-  -base-url https://hub.molten-qa.site \
-  -agent-a-token "$AGENT_A_TOKEN" \
-  -agent-b-token "$AGENT_B_TOKEN" \
-  -iterations 6 \
-  -report-path docs/openclaw-transport-latency.md
 ```

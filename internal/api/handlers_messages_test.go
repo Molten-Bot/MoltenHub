@@ -35,7 +35,7 @@ func TestPullForAgentRechecksQueueWithoutNotifierSignal(t *testing.T) {
 		releaseOnCall: 3, // first two dequeues empty, then deliver without waiter notify
 		message:       queuedMessage,
 	}
-	h := NewHandler(mem, queue, waiters, auth.NewDevHumanAuthProvider(), "https://hub.molten.bot", "", "", "", "", "molten.bot", true, 15*time.Minute, false)
+	h := NewHandler(mem, queue, waiters, auth.NewDevHumanAuthProvider(), "https://hub.example.com", "", "", "", "", "example.com", true, 15*time.Minute, false)
 
 	status, result, handlerErr := h.pullForAgent(context.Background(), receiverAgentUUID, 1500*time.Millisecond)
 	if handlerErr != nil {

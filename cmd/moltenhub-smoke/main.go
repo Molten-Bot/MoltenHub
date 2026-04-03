@@ -66,6 +66,7 @@ func main() {
 		{name: "Alice creates a bind token and the agent changes profile metadata", run: (*runner).stepAgentChangesMetadata},
 		{name: "Alice creates a bind token and the agent clears profile metadata", run: (*runner).stepAgentClearsMetadata},
 		{name: "Alice invites two agents by bind token, binds both agents, and sees both in her list", run: (*runner).stepAliceSeesBothAgents},
+		{name: "Alice creates trust between both bound agents", run: (*runner).stepAliceCreatesAgentTrust},
 		{name: "OpenClaw plugin registration succeeds for both agents", run: (*runner).stepOpenClawRegisterPlugin},
 		{name: "OpenClaw HTTP publish/pull/ack succeeds between bound agents", run: (*runner).stepOpenClawHTTPDelivery},
 		{name: "OpenClaw websocket delivery and ack succeeds", run: (*runner).stepOpenClawWebSocketDelivery},
@@ -413,6 +414,47 @@ func (r *runner) stepAliceSeesBothAgents() error {
 	}
 	if err := requireAgentStatus(agents, r.agentUUIDB, "active"); err != nil {
 		return err
+	}
+	return nil
+}
+
+func (r *runner) stepAliceCreatesAgentTrust() error {
+	status, payload, err := r.requestJSON(http.MethodPost, "/v1/agent-trusts", humanHeaders("alice", "alice@a.test"), map[string]any{
+		"org_id":          r.agentsOrgID,
+		"agent_uuid":      r.agentUUIDA,
+		"peer_agent_uuid": r.agentUUIDB,
+	})
+	if err != nil {
+		return err
+	}
+	if status != http.StatusCreated && status != http.StatusOK {
+		return fmt.Errorf("expected agent trust create 201/200, got %d payload=%v", status, payload)
+	}
+	trust, ok := payload["trust"].(map[string]any)
+	if !ok {
+		return fmt.Errorf("expected trust object payload=%v", payload)
+	}
+	edgeID := asString(trust, "edge_id")
+	if edgeID == "" {
+		return fmt.Errorf("expected trust.edge_id payload=%v", payload)
+	}
+	if asString(trust, "state") == "active" {
+		return nil
+	}
+
+	status, payload, err = r.requestJSON(http.MethodPost, "/v1/agent-trusts/"+edgeID+"/approve", humanHeaders("alice", "alice@a.test"), nil)
+	if err != nil {
+		return err
+	}
+	if status != http.StatusOK {
+		return fmt.Errorf("expected agent trust approve 200, got %d payload=%v", status, payload)
+	}
+	trust, ok = payload["trust"].(map[string]any)
+	if !ok {
+		return fmt.Errorf("expected trust object after approve payload=%v", payload)
+	}
+	if state := asString(trust, "state"); state != "active" {
+		return fmt.Errorf("expected trust state active after approve, got %q payload=%v", state, payload)
 	}
 	return nil
 }

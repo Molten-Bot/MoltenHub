@@ -25,7 +25,7 @@ import (
 func newTestRouter() http.Handler {
 	st := store.NewMemoryStore()
 	waiters := longpoll.NewWaiters()
-	h := NewHandler(st, st, waiters, auth.NewDevHumanAuthProvider(), "https://hub.molten.bot", "", "", "", "", "molten.bot", true, 15*time.Minute, false)
+	h := NewHandler(st, st, waiters, auth.NewDevHumanAuthProvider(), "https://hub.example.com", "", "", "", "", "example.com", true, 15*time.Minute, false)
 	return NewRouter(h)
 }
 
@@ -34,7 +34,7 @@ func TestHandlerWiringWithInterfaceStores(t *testing.T) {
 	var control store.ControlPlaneStore = mem
 	var queue store.MessageQueueStore = mem
 	waiters := longpoll.NewWaiters()
-	h := NewHandler(control, queue, waiters, auth.NewDevHumanAuthProvider(), "https://hub.molten.bot", "", "", "", "", "molten.bot", true, 15*time.Minute, false)
+	h := NewHandler(control, queue, waiters, auth.NewDevHumanAuthProvider(), "https://hub.example.com", "", "", "", "", "example.com", true, 15*time.Minute, false)
 	router := NewRouter(h)
 
 	health := doJSONRequest(t, router, http.MethodGet, "/health", nil, nil)
@@ -77,7 +77,7 @@ func TestPingReturnsNoContent(t *testing.T) {
 func TestHealthReportsDegradedStorageStatus(t *testing.T) {
 	mem := store.NewMemoryStore()
 	waiters := longpoll.NewWaiters()
-	h := NewHandler(mem, mem, waiters, auth.NewDevHumanAuthProvider(), "https://hub.molten.bot", "", "", "", "", "molten.bot", true, 15*time.Minute, false)
+	h := NewHandler(mem, mem, waiters, auth.NewDevHumanAuthProvider(), "https://hub.example.com", "", "", "", "", "example.com", true, 15*time.Minute, false)
 	h.SetStorageHealth(store.StorageHealthStatus{
 		StartupMode: store.StorageStartupModeDegraded,
 		State: store.StorageBackendHealth{
@@ -122,7 +122,7 @@ func TestHealthReportsDegradedStorageStatus(t *testing.T) {
 func TestHealthIncludesStartupSummaryWhenProvided(t *testing.T) {
 	mem := store.NewMemoryStore()
 	waiters := longpoll.NewWaiters()
-	h := NewHandler(mem, mem, waiters, auth.NewDevHumanAuthProvider(), "https://hub.molten.bot", "", "", "", "", "molten.bot", true, 15*time.Minute, false)
+	h := NewHandler(mem, mem, waiters, auth.NewDevHumanAuthProvider(), "https://hub.example.com", "", "", "", "", "example.com", true, 15*time.Minute, false)
 	h.SetStartupSummary(map[string]any{
 		"boot_status": "ready",
 		"startup": map[string]any{
@@ -148,7 +148,7 @@ func TestHealthIncludesStartupSummaryWhenProvided(t *testing.T) {
 func TestHealthSanitizesBackendErrorDetails(t *testing.T) {
 	mem := store.NewMemoryStore()
 	waiters := longpoll.NewWaiters()
-	h := NewHandler(mem, mem, waiters, auth.NewDevHumanAuthProvider(), "https://hub.molten.bot", "", "", "", "", "molten.bot", true, 15*time.Minute, false)
+	h := NewHandler(mem, mem, waiters, auth.NewDevHumanAuthProvider(), "https://hub.example.com", "", "", "", "", "example.com", true, 15*time.Minute, false)
 	h.SetStorageHealth(store.StorageHealthStatus{
 		StartupMode: store.StorageStartupModeDegraded,
 		State: store.StorageBackendHealth{
@@ -181,14 +181,14 @@ func TestHealthSanitizesBackendErrorDetails(t *testing.T) {
 }
 
 func TestParseCORSAllowedOrigins(t *testing.T) {
-	origins, err := ParseCORSAllowedOrigins(" https://app.molten.bot,https://app.molten-qa.site/\nhttp://localhost:3000 ")
+	origins, err := ParseCORSAllowedOrigins(" https://app.example.com,https://app.qa.example.com/\nhttp://localhost:3000 ")
 	if err != nil {
 		t.Fatalf("ParseCORSAllowedOrigins returned error: %v", err)
 	}
 
 	for _, origin := range []string{
-		"https://app.molten.bot",
-		"https://app.molten-qa.site",
+		"https://app.example.com",
+		"https://app.qa.example.com",
 		"http://localhost:3000",
 	} {
 		if _, ok := origins[origin]; !ok {
@@ -200,15 +200,15 @@ func TestParseCORSAllowedOrigins(t *testing.T) {
 func TestAPICORSAllowsExplicitOrigin(t *testing.T) {
 	mem := store.NewMemoryStore()
 	waiters := longpoll.NewWaiters()
-	h := NewHandler(mem, mem, waiters, auth.NewDevHumanAuthProvider(), "https://hub.molten.bot", "", "", "", "", "molten.bot", true, 15*time.Minute, false)
+	h := NewHandler(mem, mem, waiters, auth.NewDevHumanAuthProvider(), "https://hub.example.com", "", "", "", "", "example.com", true, 15*time.Minute, false)
 	router := NewRouterWithOptions(h, RouterOptions{
 		AllowedCORSOrigins: map[string]struct{}{
-			"https://app.molten.bot": {},
+			"https://app.example.com": {},
 		},
 	})
 
 	req := httptest.NewRequest(http.MethodOptions, "/health", nil)
-	req.Header.Set("Origin", "https://app.molten.bot")
+	req.Header.Set("Origin", "https://app.example.com")
 	req.Header.Set("Access-Control-Request-Headers", "Authorization, Content-Type")
 	resp := httptest.NewRecorder()
 	router.ServeHTTP(resp, req)
@@ -216,7 +216,7 @@ func TestAPICORSAllowsExplicitOrigin(t *testing.T) {
 	if resp.Code != http.StatusNoContent {
 		t.Fatalf("expected OPTIONS /health 204, got %d %s", resp.Code, resp.Body.String())
 	}
-	if got := resp.Header().Get("Access-Control-Allow-Origin"); got != "https://app.molten.bot" {
+	if got := resp.Header().Get("Access-Control-Allow-Origin"); got != "https://app.example.com" {
 		t.Fatalf("expected explicit CORS origin to be allowed, got %q", got)
 	}
 }
@@ -224,10 +224,10 @@ func TestAPICORSAllowsExplicitOrigin(t *testing.T) {
 func TestAPICORSRejectsUnknownOrigin(t *testing.T) {
 	mem := store.NewMemoryStore()
 	waiters := longpoll.NewWaiters()
-	h := NewHandler(mem, mem, waiters, auth.NewDevHumanAuthProvider(), "https://hub.molten.bot", "", "", "", "", "molten.bot", true, 15*time.Minute, false)
+	h := NewHandler(mem, mem, waiters, auth.NewDevHumanAuthProvider(), "https://hub.example.com", "", "", "", "", "example.com", true, 15*time.Minute, false)
 	router := NewRouterWithOptions(h, RouterOptions{
 		AllowedCORSOrigins: map[string]struct{}{
-			"https://app.molten.bot": {},
+			"https://app.example.com": {},
 		},
 	})
 
@@ -381,7 +381,7 @@ func TestPeerOutboxProcessingCoalescesConcurrentKicks(t *testing.T) {
 		listDelay:   150 * time.Millisecond,
 	}
 	waiters := longpoll.NewWaiters()
-	h := NewHandler(st, st, waiters, auth.NewDevHumanAuthProvider(), "https://hub.molten.bot", "", "", "", "", "molten.bot", true, 15*time.Minute, false)
+	h := NewHandler(st, st, waiters, auth.NewDevHumanAuthProvider(), "https://hub.example.com", "", "", "", "", "example.com", true, 15*time.Minute, false)
 	h.peerOutboxTimeout = 2 * time.Second
 
 	var wg sync.WaitGroup
@@ -417,7 +417,7 @@ func TestHealthReportsRuntimeQueueFailureAndRecovery(t *testing.T) {
 		base:            mem,
 		failNextEnqueue: true,
 	}
-	h := NewHandler(mem, queue, waiters, auth.NewDevHumanAuthProvider(), "https://hub.molten.bot", "", "", "", "", "molten.bot", true, 15*time.Minute, false)
+	h := NewHandler(mem, queue, waiters, auth.NewDevHumanAuthProvider(), "https://hub.example.com", "", "", "", "", "example.com", true, 15*time.Minute, false)
 	h.SetStorageHealth(store.StorageHealthStatus{
 		StartupMode: store.StorageStartupModeDegraded,
 		State: store.StorageBackendHealth{
@@ -489,7 +489,7 @@ func TestHealthReportsRuntimeDequeueFailureAndRecovery(t *testing.T) {
 		base:            mem,
 		failNextDequeue: true,
 	}
-	h := NewHandler(mem, queue, waiters, auth.NewDevHumanAuthProvider(), "https://hub.molten.bot", "", "", "", "", "molten.bot", true, 15*time.Minute, false)
+	h := NewHandler(mem, queue, waiters, auth.NewDevHumanAuthProvider(), "https://hub.example.com", "", "", "", "", "example.com", true, 15*time.Minute, false)
 	h.SetStorageHealth(store.StorageHealthStatus{
 		StartupMode: store.StorageStartupModeDegraded,
 		State: store.StorageBackendHealth{
@@ -565,7 +565,7 @@ func TestAgentMetadataPatchUsesBestEffortFallbackWhenStateWriteFails(t *testing.
 		failMetadataWriteLeft: 1,
 	}
 	waiters := longpoll.NewWaiters()
-	h := NewHandler(stateStore, stateStore, waiters, auth.NewDevHumanAuthProvider(), "https://hub.molten.bot", "", "", "", "", "molten.bot", true, 15*time.Minute, false)
+	h := NewHandler(stateStore, stateStore, waiters, auth.NewDevHumanAuthProvider(), "https://hub.example.com", "", "", "", "", "example.com", true, 15*time.Minute, false)
 	h.SetStorageHealth(store.StorageHealthStatus{
 		StartupMode: store.StorageStartupModeDegraded,
 		State: store.StorageBackendHealth{
@@ -649,7 +649,7 @@ func TestOpenClawRegisterPluginUsesBestEffortFallbackWhenStateWriteFails(t *test
 		failMetadataWriteLeft: 1,
 	}
 	waiters := longpoll.NewWaiters()
-	h := NewHandler(stateStore, stateStore, waiters, auth.NewDevHumanAuthProvider(), "https://hub.molten.bot", "", "", "", "", "molten.bot", true, 15*time.Minute, false)
+	h := NewHandler(stateStore, stateStore, waiters, auth.NewDevHumanAuthProvider(), "https://hub.example.com", "", "", "", "", "example.com", true, 15*time.Minute, false)
 	h.SetStorageHealth(store.StorageHealthStatus{
 		StartupMode: store.StorageStartupModeDegraded,
 		State: store.StorageBackendHealth{
@@ -740,12 +740,12 @@ func TestUIConfigExposesAuthAndRedactsPrivilegedFields(t *testing.T) {
 		mem,
 		waiters,
 		auth.NewDevHumanAuthProvider(),
-		"https://hub.molten.bot",
+		"https://hub.example.com",
 		"https://example.supabase.co",
 		"should-not-leak",
 		"",
-		"admin1@molten.bot,admin2@molten.bot",
-		"molten.bot",
+		"admin1@example.com,admin2@example.com",
+		"example.com",
 		true,
 		15*time.Minute,
 		false,
@@ -784,7 +784,7 @@ func TestUIConfigExposesAuthAndRedactsPrivilegedFields(t *testing.T) {
 		t.Fatalf("expected admin.emails redacted/omitted, got payload=%v", payload)
 	}
 	domains, ok := adminObj["domains"].([]any)
-	if !ok || len(domains) != 1 || domains[0] != "molten.bot" {
+	if !ok || len(domains) != 1 || domains[0] != "example.com" {
 		t.Fatalf("expected admin.domains preserved, got %v payload=%v", adminObj["domains"], payload)
 	}
 }
@@ -801,12 +801,12 @@ func TestUIConfigReturnsSensitiveFieldsWithPrivilegedKey(t *testing.T) {
 		mem,
 		waiters,
 		auth.NewDevHumanAuthProvider(),
-		"https://hub.molten.bot",
+		"https://hub.example.com",
 		"https://example.supabase.co",
 		"should-leak-only-to-privileged-caller",
 		"",
-		"admin1@molten.bot,admin2@molten.bot",
-		"molten.bot",
+		"admin1@example.com,admin2@example.com",
+		"example.com",
 		true,
 		15*time.Minute,
 		false,
@@ -834,7 +834,7 @@ func TestUIConfigReturnsSensitiveFieldsWithPrivilegedKey(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected admin.emails array for privileged caller, got %T payload=%v", adminObj["emails"], payload)
 	}
-	if len(adminEmails) != 2 || adminEmails[0] != "admin1@molten.bot" || adminEmails[1] != "admin2@molten.bot" {
+	if len(adminEmails) != 2 || adminEmails[0] != "admin1@example.com" || adminEmails[1] != "admin2@example.com" {
 		t.Fatalf("expected admin.emails for privileged caller, got %v", adminEmails)
 	}
 }
@@ -850,12 +850,12 @@ func TestUIConfigKeepsPrivilegedFieldsRedactedWithWrongPrivilegedKey(t *testing.
 		mem,
 		waiters,
 		auth.NewDevHumanAuthProvider(),
-		"https://hub.molten.bot",
+		"https://hub.example.com",
 		"https://example.supabase.co",
 		"should-not-leak",
 		"",
-		"admin1@molten.bot,admin2@molten.bot",
-		"molten.bot",
+		"admin1@example.com,admin2@example.com",
+		"example.com",
 		true,
 		15*time.Minute,
 		false,
@@ -887,7 +887,7 @@ func TestUIConfigSupabaseOmitsSecretKey(t *testing.T) {
 		mem,
 		waiters,
 		auth.NewSupabaseAuthProvider("https://example.supabase.co", "sb_secret_should_not_leak"),
-		"https://hub.molten.bot",
+		"https://hub.example.com",
 		"https://example.supabase.co",
 		"sb_secret_should_not_leak",
 		"",
@@ -923,7 +923,7 @@ func TestUIConfigSupabaseIncludesBrowserSafeKey(t *testing.T) {
 		mem,
 		waiters,
 		auth.NewSupabaseAuthProvider("https://example.supabase.co", "sb_publishable_safe"),
-		"https://hub.molten.bot",
+		"https://hub.example.com",
 		"https://example.supabase.co",
 		"sb_publishable_safe",
 		"",
@@ -1124,7 +1124,7 @@ func bindAgentWithUUIDForOwner(t *testing.T, router http.Handler, humanID, email
 		t.Fatalf("agent me missing agent_uuid")
 	}
 	gotAgentID, _ := agent["agent_id"].(string)
-	expectedURI := "https://hub.molten.bot/" + strings.ReplaceAll(url.PathEscape(gotAgentID), "%2F", "/")
+	expectedURI := "https://hub.example.com/" + strings.ReplaceAll(url.PathEscape(gotAgentID), "%2F", "/")
 	if gotURI, _ := agent["uri"].(string); gotURI != expectedURI {
 		t.Fatalf("expected canonical agent uri, got %q payload=%v", gotURI, agent)
 	}
@@ -1869,7 +1869,7 @@ func TestMyAgentBindTokenRedeemUsesRequestedHandle(t *testing.T) {
 	}
 
 	redeemResp := doJSONRequest(t, router, http.MethodPost, "/v1/agents/bind", map[string]string{
-		"hub_url":    "https://hub.molten-qa.site",
+		"hub_url":    "https://hub.qa.example.com",
 		"bind_token": bindToken,
 		"handle":     "alice-agent-picked-name",
 	}, nil)
@@ -1907,7 +1907,7 @@ func TestMyAgentBindTokenRedeemUsesRequestedHandle(t *testing.T) {
 		t.Fatalf("expected bind redeem to use requested handle, got %q", initialAgentID)
 	}
 	initialURI, _ := capsAgent["uri"].(string)
-	if initialURI != "https://hub.molten.bot/human/alice/agent/alice-agent-picked-name" {
+	if initialURI != "https://hub.example.com/human/alice/agent/alice-agent-picked-name" {
 		t.Fatalf("expected fully qualified canonical agent uri, got %q", initialURI)
 	}
 
@@ -2069,7 +2069,7 @@ func TestMyAgentBindTokenCreateRetriesTransientStoreError(t *testing.T) {
 		failCreateBindLeft: 1,
 	}
 	waiters := longpoll.NewWaiters()
-	h := NewHandler(mem, mem, waiters, auth.NewDevHumanAuthProvider(), "https://hub.molten.bot", "", "", "", "", "molten.bot", true, 15*time.Minute, false)
+	h := NewHandler(mem, mem, waiters, auth.NewDevHumanAuthProvider(), "https://hub.example.com", "", "", "", "", "example.com", true, 15*time.Minute, false)
 	router := NewRouter(h)
 	ensureHandleConfirmed(t, router, "alice", "alice@a.test")
 
@@ -2089,7 +2089,7 @@ func TestMyAgentBindTokenCreateReturns503AfterRepeatedTransientStoreError(t *tes
 		failCreateBindLeft: 2,
 	}
 	waiters := longpoll.NewWaiters()
-	h := NewHandler(mem, mem, waiters, auth.NewDevHumanAuthProvider(), "https://hub.molten.bot", "", "", "", "", "molten.bot", true, 15*time.Minute, false)
+	h := NewHandler(mem, mem, waiters, auth.NewDevHumanAuthProvider(), "https://hub.example.com", "", "", "", "", "example.com", true, 15*time.Minute, false)
 	router := NewRouter(h)
 	ensureHandleConfirmed(t, router, "alice", "alice@a.test")
 
@@ -2112,7 +2112,7 @@ func TestMyAgentBindTokenCreateUsesForwardedHostInConnectPrompt(t *testing.T) {
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-Human-Id", "alice")
 	req.Header.Set("X-Human-Email", "alice@a.test")
-	req.Header.Set("X-Forwarded-Host", "hub.molten-qa.site")
+	req.Header.Set("X-Forwarded-Host", "hub.qa.example.com")
 	req.Header.Set("X-Forwarded-Proto", "https")
 
 	resp := httptest.NewRecorder()
@@ -2122,10 +2122,10 @@ func TestMyAgentBindTokenCreateUsesForwardedHostInConnectPrompt(t *testing.T) {
 	}
 
 	connectPrompt, _ := decodeJSONMap(t, resp.Body.Bytes())["connect_prompt"].(string)
-	if !strings.Contains(connectPrompt, "https://hub.molten-qa.site/v1/agents/bind") {
+	if !strings.Contains(connectPrompt, "https://hub.qa.example.com/v1/agents/bind") {
 		t.Fatalf("expected forwarded bind api url in connect prompt, got %q", connectPrompt)
 	}
-	if !strings.Contains(connectPrompt, "https://hub.molten-qa.site/v1/agents/me/skill") {
+	if !strings.Contains(connectPrompt, "https://hub.qa.example.com/v1/agents/me/skill") {
 		t.Fatalf("expected forwarded skill url in connect prompt, got %q", connectPrompt)
 	}
 	if strings.Contains(connectPrompt, "127.0.0.1:8081") {
@@ -2150,7 +2150,7 @@ func TestMyAgentBindTokenCreateFallsBackToCanonicalBaseWhenHostIsLoopback(t *tes
 	}
 
 	connectPrompt, _ := decodeJSONMap(t, resp.Body.Bytes())["connect_prompt"].(string)
-	if !strings.Contains(connectPrompt, "https://hub.molten.bot/v1/agents/bind") {
+	if !strings.Contains(connectPrompt, "https://hub.example.com/v1/agents/bind") {
 		t.Fatalf("expected canonical bind api url in connect prompt, got %q", connectPrompt)
 	}
 	if strings.Contains(connectPrompt, "127.0.0.1:8081") {
@@ -2175,7 +2175,7 @@ func TestRedeemBindTokenUsesForwardedHostInAPIBase(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/v1/agents/bind", reqBody)
 	req.Host = "127.0.0.1:8081"
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("X-Forwarded-Host", "hub.molten-qa.site")
+	req.Header.Set("X-Forwarded-Host", "hub.qa.example.com")
 	req.Header.Set("X-Forwarded-Proto", "https")
 
 	resp := httptest.NewRecorder()
@@ -2186,11 +2186,11 @@ func TestRedeemBindTokenUsesForwardedHostInAPIBase(t *testing.T) {
 
 	payload := decodeJSONMap(t, resp.Body.Bytes())
 	apiBase, _ := payload["api_base"].(string)
-	if apiBase != "https://hub.molten-qa.site/v1" {
+	if apiBase != "https://hub.qa.example.com/v1" {
 		t.Fatalf("expected forwarded api_base, got %q", apiBase)
 	}
 	endpoints, _ := payload["endpoints"].(map[string]any)
-	if got, _ := endpoints["skill"].(string); got != "https://hub.molten-qa.site/v1/agents/me/skill" {
+	if got, _ := endpoints["skill"].(string); got != "https://hub.qa.example.com/v1/agents/me/skill" {
 		t.Fatalf("expected forwarded skill endpoint, got %q", got)
 	}
 }
@@ -2655,7 +2655,7 @@ func TestNackRequeuesMessageWithNewAttempt(t *testing.T) {
 func TestExpiredLeaseRequeuesOnNextPull(t *testing.T) {
 	mem := store.NewMemoryStore()
 	waiters := longpoll.NewWaiters()
-	h := NewHandler(mem, mem, waiters, auth.NewDevHumanAuthProvider(), "https://hub.molten.bot", "", "", "", "", "molten.bot", true, 15*time.Minute, false)
+	h := NewHandler(mem, mem, waiters, auth.NewDevHumanAuthProvider(), "https://hub.example.com", "", "", "", "", "example.com", true, 15*time.Minute, false)
 	now := time.Date(2026, 3, 10, 12, 0, 0, 0, time.UTC)
 	h.now = func() time.Time { return now }
 	router := NewRouter(h)
@@ -2709,7 +2709,7 @@ func TestBindTokenRedeemSingleUse(t *testing.T) {
 	}
 
 	redeemResp := doJSONRequest(t, router, http.MethodPost, "/v1/agents/bind", map[string]string{
-		"hub_url":    "https://hub.molten-qa.site",
+		"hub_url":    "https://hub.qa.example.com",
 		"bind_token": bindToken,
 	}, nil)
 	if redeemResp.Code != http.StatusCreated {
@@ -2737,7 +2737,7 @@ func TestBindTokenRedeemSingleUse(t *testing.T) {
 	}
 
 	redeemAgain := doJSONRequest(t, router, http.MethodPost, "/v1/agents/bind", map[string]string{
-		"hub_url":    "https://hub.molten-qa.site",
+		"hub_url":    "https://hub.qa.example.com",
 		"bind_token": bindToken,
 	}, nil)
 	if redeemAgain.Code != http.StatusConflict {
@@ -2748,17 +2748,17 @@ func TestBindTokenRedeemSingleUse(t *testing.T) {
 func TestSuperAdminReadOnly(t *testing.T) {
 	router := newTestRouter()
 	_ = createOrg(t, router, "alice", "alice@a.test", "Org A")
-	ensureHandleConfirmed(t, router, "root", "root@molten.bot")
+	ensureHandleConfirmed(t, router, "root", "root@example.com")
 
 	readonlyCreate := doJSONRequest(t, router, http.MethodPost, "/v1/orgs", map[string]string{
 		"handle":       "root-org",
 		"display_name": "Root Org",
-	}, humanHeaders("root", "root@molten.bot"))
+	}, humanHeaders("root", "root@example.com"))
 	if readonlyCreate.Code != http.StatusCreated {
 		t.Fatalf("expected super admin write allow 201, got %d %s", readonlyCreate.Code, readonlyCreate.Body.String())
 	}
 
-	snap := doJSONRequest(t, router, http.MethodGet, "/v1/admin/snapshot", nil, humanHeaders("root", "root@molten.bot"))
+	snap := doJSONRequest(t, router, http.MethodGet, "/v1/admin/snapshot", nil, humanHeaders("root", "root@example.com"))
 	if snap.Code != http.StatusOK {
 		t.Fatalf("expected super admin snapshot 200, got %d %s", snap.Code, snap.Body.String())
 	}
@@ -2949,7 +2949,7 @@ func TestOrgBoundAgentNameUniqueWithinOrg(t *testing.T) {
 func TestBindTokenExpires(t *testing.T) {
 	st := store.NewMemoryStore()
 	waiters := longpoll.NewWaiters()
-	h := NewHandler(st, st, waiters, auth.NewDevHumanAuthProvider(), "https://hub.molten.bot", "", "", "", "", "molten.bot", true, 15*time.Minute, false)
+	h := NewHandler(st, st, waiters, auth.NewDevHumanAuthProvider(), "https://hub.example.com", "", "", "", "", "example.com", true, 15*time.Minute, false)
 	now := time.Date(2026, 3, 3, 10, 0, 0, 0, time.UTC)
 	h.now = func() time.Time { return now }
 	router := NewRouter(h)
@@ -2969,7 +2969,7 @@ func TestBindTokenExpires(t *testing.T) {
 
 	now = now.Add(16 * time.Minute)
 	redeemResp := doJSONRequest(t, router, http.MethodPost, "/v1/agents/bind", map[string]string{
-		"hub_url":    "https://hub.molten-qa.site",
+		"hub_url":    "https://hub.qa.example.com",
 		"bind_token": bindToken,
 	}, nil)
 	if redeemResp.Code != http.StatusBadRequest {
@@ -3736,7 +3736,7 @@ func TestAdminSnapshotDoesNotLeakMessagePayloads(t *testing.T) {
 		t.Fatalf("publish failed: %d %s", pub.Code, pub.Body.String())
 	}
 
-	snap := doJSONRequest(t, router, http.MethodGet, "/v1/admin/snapshot", nil, humanHeaders("root", "root@molten.bot"))
+	snap := doJSONRequest(t, router, http.MethodGet, "/v1/admin/snapshot", nil, humanHeaders("root", "root@example.com"))
 	if snap.Code != http.StatusOK {
 		t.Fatalf("snapshot failed: %d %s", snap.Code, snap.Body.String())
 	}
@@ -3750,12 +3750,12 @@ func TestAdminSnapshotDoesNotLeakHumanEmails(t *testing.T) {
 	router := newTestRouter()
 	_ = currentHumanID(t, router, "alice", "alice+private@a.test")
 
-	snap := doJSONRequest(t, router, http.MethodGet, "/v1/admin/snapshot", nil, humanHeaders("root", "root@molten.bot"))
+	snap := doJSONRequest(t, router, http.MethodGet, "/v1/admin/snapshot", nil, humanHeaders("root", "root@example.com"))
 	if snap.Code != http.StatusOK {
 		t.Fatalf("snapshot failed: %d %s", snap.Code, snap.Body.String())
 	}
 	bodyText := snap.Body.String()
-	if strings.Contains(bodyText, "alice+private@a.test") || strings.Contains(bodyText, "root@molten.bot") {
+	if strings.Contains(bodyText, "alice+private@a.test") || strings.Contains(bodyText, "root@example.com") {
 		t.Fatalf("snapshot should not include human email addresses: %s", bodyText)
 	}
 
@@ -3810,7 +3810,7 @@ func TestAdminSnapshotIncludesMessageRollups(t *testing.T) {
 		t.Fatalf("pull failed: %d %s", pullResp.Code, pullResp.Body.String())
 	}
 
-	snap := doJSONRequest(t, router, http.MethodGet, "/v1/admin/snapshot", nil, humanHeaders("root", "root@molten.bot"))
+	snap := doJSONRequest(t, router, http.MethodGet, "/v1/admin/snapshot", nil, humanHeaders("root", "root@example.com"))
 	if snap.Code != http.StatusOK {
 		t.Fatalf("snapshot failed: %d %s", snap.Code, snap.Body.String())
 	}
@@ -3950,7 +3950,7 @@ func TestAgentMetadataLLMHarnessOptionalAndIncludedInAdminSnapshot(t *testing.T)
 		t.Fatalf("expected metadata patch with llm/harness 200, got %d %s", withFingerprint.Code, withFingerprint.Body.String())
 	}
 
-	snap := doJSONRequest(t, router, http.MethodGet, "/v1/admin/snapshot", nil, humanHeaders("root", "root@molten.bot"))
+	snap := doJSONRequest(t, router, http.MethodGet, "/v1/admin/snapshot", nil, humanHeaders("root", "root@example.com"))
 	if snap.Code != http.StatusOK {
 		t.Fatalf("snapshot failed: %d %s", snap.Code, snap.Body.String())
 	}
@@ -4038,7 +4038,7 @@ func TestAdminSnapshotIncludesActivityFeedForMessageLifecycle(t *testing.T) {
 		t.Fatalf("ack failed: %d %s", ackResp.Code, ackResp.Body.String())
 	}
 
-	snap := doJSONRequest(t, router, http.MethodGet, "/v1/admin/snapshot", nil, humanHeaders("root", "root@molten.bot"))
+	snap := doJSONRequest(t, router, http.MethodGet, "/v1/admin/snapshot", nil, humanHeaders("root", "root@example.com"))
 	if snap.Code != http.StatusOK {
 		t.Fatalf("snapshot failed: %d %s", snap.Code, snap.Body.String())
 	}
@@ -4078,7 +4078,7 @@ func TestAdminSnapshotIncludesActivityFeedForMessageLifecycle(t *testing.T) {
 func TestAdminSnapshotHeaderKeyAccess(t *testing.T) {
 	st := store.NewMemoryStore()
 	waiters := longpoll.NewWaiters()
-	h := NewHandler(st, st, waiters, auth.NewDevHumanAuthProvider(), "https://hub.molten.bot", "", "", "snapshot-secret", "", "molten.bot", true, 15*time.Minute, false)
+	h := NewHandler(st, st, waiters, auth.NewDevHumanAuthProvider(), "https://hub.example.com", "", "", "snapshot-secret", "", "example.com", true, 15*time.Minute, false)
 	router := NewRouter(h)
 
 	unauth := doJSONRequest(t, router, http.MethodGet, "/v1/admin/snapshot", nil, nil)
@@ -4100,7 +4100,7 @@ func TestAdminSnapshotHeaderKeyAccess(t *testing.T) {
 		t.Fatalf("expected admin snapshot with key to return 200, got %d %s", withKey.Code, withKey.Body.String())
 	}
 
-	superAdmin := doJSONRequest(t, router, http.MethodGet, "/v1/admin/snapshot", nil, humanHeaders("root", "root@molten.bot"))
+	superAdmin := doJSONRequest(t, router, http.MethodGet, "/v1/admin/snapshot", nil, humanHeaders("root", "root@example.com"))
 	if superAdmin.Code != http.StatusOK {
 		t.Fatalf("expected super-admin snapshot without key to return 200, got %d %s", superAdmin.Code, superAdmin.Body.String())
 	}
@@ -4525,7 +4525,7 @@ func TestUIRoutes_JavascriptAssets(t *testing.T) {
 func TestHeadlessModeDisablesUIRoutes(t *testing.T) {
 	st := store.NewMemoryStore()
 	waiters := longpoll.NewWaiters()
-	h := NewHandler(st, st, waiters, auth.NewDevHumanAuthProvider(), "https://hub.molten.bot", "", "", "", "", "molten.bot", true, 15*time.Minute, true)
+	h := NewHandler(st, st, waiters, auth.NewDevHumanAuthProvider(), "https://hub.example.com", "", "", "", "", "example.com", true, 15*time.Minute, true)
 	router := NewRouter(h)
 
 	me := doJSONRequest(t, router, http.MethodGet, "/v1/me", nil, humanHeaders("alice", "alice@a.test"))
@@ -4547,7 +4547,7 @@ func TestHeadlessModeDisablesUIRoutes(t *testing.T) {
 func TestHeadlessModeRedirectsUIRoutesWhenConfigured(t *testing.T) {
 	st := store.NewMemoryStore()
 	waiters := longpoll.NewWaiters()
-	h := NewHandler(st, st, waiters, auth.NewDevHumanAuthProvider(), "https://hub.molten.bot", "", "", "", "", "molten.bot", true, 15*time.Minute, true)
+	h := NewHandler(st, st, waiters, auth.NewDevHumanAuthProvider(), "https://hub.example.com", "", "", "", "", "example.com", true, 15*time.Minute, true)
 	h.SetHeadlessModeRedirectURL("https://example.com/headless")
 	router := NewRouter(h)
 
@@ -4578,7 +4578,7 @@ func TestHeadlessModeRedirectsUIRoutesWhenConfigured(t *testing.T) {
 func TestHeadlessModeKeepsPingAvailableWhenRedirectConfigured(t *testing.T) {
 	st := store.NewMemoryStore()
 	waiters := longpoll.NewWaiters()
-	h := NewHandler(st, st, waiters, auth.NewDevHumanAuthProvider(), "https://hub.molten.bot", "", "", "", "", "molten.bot", true, 15*time.Minute, true)
+	h := NewHandler(st, st, waiters, auth.NewDevHumanAuthProvider(), "https://hub.example.com", "", "", "", "", "example.com", true, 15*time.Minute, true)
 	h.SetHeadlessModeRedirectURL("https://example.com/headless")
 	router := NewRouter(h)
 
@@ -4597,7 +4597,7 @@ func TestHeadlessModeKeepsPingAvailableWhenRedirectConfigured(t *testing.T) {
 func TestHeadlessModeServesRobotsAndHumansWhenRedirectConfigured(t *testing.T) {
 	st := store.NewMemoryStore()
 	waiters := longpoll.NewWaiters()
-	h := NewHandler(st, st, waiters, auth.NewDevHumanAuthProvider(), "https://hub.molten.bot", "", "", "", "", "molten.bot", true, 15*time.Minute, true)
+	h := NewHandler(st, st, waiters, auth.NewDevHumanAuthProvider(), "https://hub.example.com", "", "", "", "", "example.com", true, 15*time.Minute, true)
 	h.SetHeadlessModeRedirectURL("https://example.com/headless")
 	router := NewRouter(h)
 
@@ -4655,7 +4655,7 @@ func TestOnboardingBlocksWritesUntilHandleConfirmed(t *testing.T) {
 func TestAgentLimitAndSuperAdminBypass(t *testing.T) {
 	router := newTestRouter()
 	ensureHandleConfirmed(t, router, "alice", "alice@a.test")
-	ensureHandleConfirmed(t, router, "root", "root@molten.bot")
+	ensureHandleConfirmed(t, router, "root", "root@example.com")
 
 	_, _, _ = registerMyAgent(t, router, "alice", "alice@a.test", "", "alice-agent-1")
 	_, _, _ = registerMyAgent(t, router, "alice", "alice@a.test", "", "alice-agent-2")
@@ -4670,10 +4670,10 @@ func TestAgentLimitAndSuperAdminBypass(t *testing.T) {
 		t.Fatalf("expected agent_limit_reached error, got %v", thirdPayload["error"])
 	}
 
-	rootOrg := createOrg(t, router, "root", "root@molten.bot", "Root Ops")
-	_, _, _ = registerMyAgent(t, router, "root", "root@molten.bot", rootOrg, "root-agent-1")
-	_, _, _ = registerMyAgent(t, router, "root", "root@molten.bot", rootOrg, "root-agent-2")
-	_, _, _ = registerMyAgent(t, router, "root", "root@molten.bot", rootOrg, "root-agent-3")
+	rootOrg := createOrg(t, router, "root", "root@example.com", "Root Ops")
+	_, _, _ = registerMyAgent(t, router, "root", "root@example.com", rootOrg, "root-agent-1")
+	_, _, _ = registerMyAgent(t, router, "root", "root@example.com", rootOrg, "root-agent-2")
+	_, _, _ = registerMyAgent(t, router, "root", "root@example.com", rootOrg, "root-agent-3")
 }
 
 func TestErrorPayloadIncludesRequestCorrelationMetadata(t *testing.T) {

@@ -246,7 +246,7 @@ curl -sS -X POST http://localhost:8080/v1/openclaw/messages/register-plugin \
 ```
 
 Official package note:
-- `@moltenbot/openclaw-plugin-moltenhub` is built and maintained by [Molten AI](https://molten.bot).
+- `@moltenbot/openclaw-plugin-moltenhub` is built and maintained by [Molten AI](https://example.com).
 - `version` is optional in registration payloads; omit it to avoid pinning.
 
 Behavior:

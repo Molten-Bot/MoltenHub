@@ -24,7 +24,7 @@ func newFederatedTestServer(t *testing.T, canonicalBase string) *federatedTestSe
 	t.Helper()
 	mem := store.NewMemoryStore()
 	waiters := longpoll.NewWaiters()
-	h := NewHandler(mem, mem, waiters, auth.NewDevHumanAuthProvider(), canonicalBase, "", "", "", "", "molten.bot", true, 15*time.Minute, false)
+	h := NewHandler(mem, mem, waiters, auth.NewDevHumanAuthProvider(), canonicalBase, "", "", "", "", "example.com", true, 15*time.Minute, false)
 	router := NewRouter(h)
 	server := httptest.NewServer(router)
 	t.Cleanup(server.Close)
@@ -36,7 +36,7 @@ func newFederatedTestServer(t *testing.T, canonicalBase string) *federatedTestSe
 }
 
 func adminHeaders() map[string]string {
-	return humanHeaders("ops", "ops@molten.bot")
+	return humanHeaders("ops", "ops@example.com")
 }
 
 func createPeer(t *testing.T, router http.Handler, peerID, canonicalBaseURL, deliveryBaseURL, secret string) {
