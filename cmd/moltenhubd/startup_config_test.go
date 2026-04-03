@@ -115,7 +115,7 @@ func TestCollectLaunchDiagnostics_FailsWhenS3SigningPairIsIncomplete(t *testing.
 
 func TestCollectLaunchDiagnostics_FailsWhenCORSAllowedOriginsIsInvalid(t *testing.T) {
 	diagnostics, err := collectLaunchDiagnostics(mapLookup(map[string]string{
-		"MOLTENHUB_CORS_ALLOWED_ORIGINS": "app.example.com",
+		"MOLTENHUB_CORS_ALLOWED_ORIGINS": "app.example.com/path",
 	}))
 	if err == nil {
 		t.Fatal("expected error for invalid CORS allowed origins")
@@ -124,7 +124,21 @@ func TestCollectLaunchDiagnostics_FailsWhenCORSAllowedOriginsIsInvalid(t *testin
 		t.Fatalf("expected MOLTENHUB_CORS_ALLOWED_ORIGINS in error, got %v", err)
 	}
 
-	assertDiagnosticContains(t, diagnostics, "ERROR", "MOLTENHUB_CORS_ALLOWED_ORIGINS", "scheme must be http or https")
+	assertDiagnosticContains(t, diagnostics, "ERROR", "MOLTENHUB_CORS_ALLOWED_ORIGINS", "path is not allowed")
+}
+
+func TestCollectLaunchDiagnostics_AcceptsHostShorthandCORSAllowedOrigins(t *testing.T) {
+	diagnostics, err := collectLaunchDiagnostics(mapLookup(map[string]string{
+		"MOLTENHUB_CORS_ALLOWED_ORIGINS": "x.site.com,y.site.com",
+	}))
+	if err != nil {
+		t.Fatalf("expected no startup error for host shorthand CORS allowed origins, got %v", err)
+	}
+	for _, diagnostic := range diagnostics {
+		if diagnostic.level == "ERROR" && diagnostic.name == "MOLTENHUB_CORS_ALLOWED_ORIGINS" {
+			t.Fatalf("did not expect MOLTENHUB_CORS_ALLOWED_ORIGINS error diagnostic, got %+v", diagnostic)
+		}
+	}
 }
 
 func TestDiagnosticLogValueRedactsSensitiveValues(t *testing.T) {

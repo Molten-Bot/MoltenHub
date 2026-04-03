@@ -257,16 +257,45 @@ func ParseCORSAllowedOrigins(raw string) (map[string]struct{}, error) {
 	for _, part := range strings.FieldsFunc(raw, func(r rune) bool {
 		return r == ',' || r == '\n'
 	}) {
-		normalized, err := normalizeAllowedOrigin(part)
+		normalizedEntries, err := normalizeAllowedOriginEntry(part)
+		if err != nil {
+			return nil, err
+		}
+		for _, normalized := range normalizedEntries {
+			if normalized == "" {
+				continue
+			}
+			origins[normalized] = struct{}{}
+		}
+	}
+	return origins, nil
+}
+
+func normalizeAllowedOriginEntry(raw string) ([]string, error) {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		return nil, nil
+	}
+	if strings.Contains(trimmed, "://") {
+		normalized, err := normalizeAllowedOrigin(trimmed)
 		if err != nil {
 			return nil, err
 		}
 		if normalized == "" {
-			continue
+			return nil, nil
 		}
-		origins[normalized] = struct{}{}
+		return []string{normalized}, nil
 	}
-	return origins, nil
+
+	normalizedHTTPS, err := normalizeAllowedOrigin("https://" + trimmed)
+	if err != nil {
+		return nil, err
+	}
+	host := strings.TrimPrefix(normalizedHTTPS, "https://")
+	return []string{
+		"https://" + host,
+		"http://" + host,
+	}, nil
 }
 
 func allowsCORSOrigin(origin string, enableLocalCORS bool, allowedOrigins map[string]struct{}) bool {
