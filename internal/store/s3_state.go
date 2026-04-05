@@ -54,10 +54,6 @@ type s3StateStore struct {
 	hydrationPrefetch map[string]map[string][]byte
 }
 
-type s3IndexValue struct {
-	Value string `json:"value"`
-}
-
 type s3PersonalOrgValue struct {
 	OrgID string `json:"org_id"`
 }
@@ -974,78 +970,6 @@ func (s *s3StateStore) buildDesiredObjects() map[string]map[string][]byte {
 		add(pPeerOutbounds, s.objectKey(pPeerOutbounds, escapeKeySegment(outboundID)+".json"), outbound)
 	}
 
-	pIdxHumanAuth := s.prefixed("idx/humans/by_auth")
-	pIdxHumanHandle := s.prefixed("idx/humans/by_handle")
-	pIdxOrgHandle := s.prefixed("idx/orgs/by_handle")
-	pIdxMembership := s.prefixed("idx/memberships/by_org_human")
-	pIdxInviteSecret := s.prefixed("idx/invites/by_secret_hash")
-	pIdxAccessToken := s.prefixed("idx/org_access_keys/by_token_hash")
-	pIdxAgentToken := s.prefixed("idx/agents/by_token_hash")
-	pIdxAgentURI := s.prefixed("idx/agents/by_uri")
-	pIdxOrgTrustPair := s.prefixed("idx/org_trusts/by_pair")
-	pIdxAgentTrustPair := s.prefixed("idx/agent_trusts/by_pair")
-	pIdxMessageClient := s.prefixed("idx/messages/by_client")
-	pIdxPeerCanonical := s.prefixed("idx/peers/by_canonical_base")
-	pIdxRemoteOrgTrust := s.prefixed("idx/remote_org_trusts/by_key")
-	pIdxRemoteAgentTrust := s.prefixed("idx/remote_agent_trusts/by_key")
-
-	for key, humanID := range s.MemoryStore.humanByAuthKey {
-		parts := strings.SplitN(key, "\x00", 2)
-		if len(parts) != 2 {
-			continue
-		}
-		add(pIdxHumanAuth, s.objectKey(pIdxHumanAuth, escapeKeySegment(parts[0]), escapeKeySegment(parts[1])+".json"), s3IndexValue{Value: humanID})
-	}
-	for handle, humanID := range s.MemoryStore.humanByHandle {
-		add(pIdxHumanHandle, s.objectKey(pIdxHumanHandle, escapeKeySegment(handle)+".json"), s3IndexValue{Value: humanID})
-	}
-	for handle, orgID := range s.MemoryStore.orgByHandle {
-		add(pIdxOrgHandle, s.objectKey(pIdxOrgHandle, escapeKeySegment(handle)+".json"), s3IndexValue{Value: orgID})
-	}
-	for key, membershipID := range s.MemoryStore.membershipByOrgUser {
-		parts := strings.SplitN(key, "\x00", 2)
-		if len(parts) != 2 {
-			continue
-		}
-		add(pIdxMembership, s.objectKey(pIdxMembership, escapeKeySegment(parts[0]), escapeKeySegment(parts[1])+".json"), s3IndexValue{Value: membershipID})
-	}
-	for secretHash, inviteID := range s.MemoryStore.inviteBySecretHash {
-		add(pIdxInviteSecret, s.objectKey(pIdxInviteSecret, escapeKeySegment(secretHash)+".json"), s3IndexValue{Value: inviteID})
-	}
-	for tokenHash, keyID := range s.MemoryStore.orgAccessKeyByHash {
-		add(pIdxAccessToken, s.objectKey(pIdxAccessToken, escapeKeySegment(tokenHash)+".json"), s3IndexValue{Value: keyID})
-	}
-	for tokenHash, agentUUID := range s.MemoryStore.agentTokenIdx {
-		add(pIdxAgentToken, s.objectKey(pIdxAgentToken, escapeKeySegment(tokenHash)+".json"), s3IndexValue{Value: agentUUID})
-	}
-	for agentURI, agentUUID := range s.MemoryStore.agentByURI {
-		add(pIdxAgentURI, s.objectKey(pIdxAgentURI, hashKey(agentURI)+".json"), s3IndexValue{Value: agentUUID})
-	}
-	for key, edgeID := range s.MemoryStore.orgTrustByPair {
-		left, right := decodePairIndexKey(key)
-		add(pIdxOrgTrustPair, s.objectKey(pIdxOrgTrustPair, escapeKeySegment(left)+"_"+escapeKeySegment(right)+".json"), s3IndexValue{Value: edgeID})
-	}
-	for key, edgeID := range s.MemoryStore.agentTrustByPair {
-		left, right := decodePairIndexKey(key)
-		add(pIdxAgentTrustPair, s.objectKey(pIdxAgentTrustPair, escapeKeySegment(left)+"_"+escapeKeySegment(right)+".json"), s3IndexValue{Value: edgeID})
-	}
-	for key, messageID := range s.MemoryStore.messageByClientMsg {
-		parts := strings.SplitN(key, "\x00", 2)
-		if len(parts) != 2 {
-			continue
-		}
-		add(pIdxMessageClient, s.objectKey(pIdxMessageClient, escapeKeySegment(parts[0]), escapeKeySegment(parts[1])+".json"), s3IndexValue{Value: messageID})
-	}
-	for canonicalBase, peerID := range s.MemoryStore.peerByCanonicalBase {
-		add(pIdxPeerCanonical, s.objectKey(pIdxPeerCanonical, hashKey(canonicalBase)+".json"), s3IndexValue{Value: peerID})
-	}
-	for key, trustID := range s.MemoryStore.remoteOrgTrustByKey {
-		add(pIdxRemoteOrgTrust, s.objectKey(pIdxRemoteOrgTrust, hashKey(key)+".json"), s3IndexValue{Value: trustID})
-	}
-	for key, trustID := range s.MemoryStore.remoteAgentTrustByKey {
-		add(pIdxRemoteAgentTrust, s.objectKey(pIdxRemoteAgentTrust, hashKey(key)+".json"), s3IndexValue{Value: trustID})
-	}
-
 	return desired
 }
 
@@ -1071,20 +995,6 @@ func (s *s3StateStore) persistedPrefixes() []s3KeyDescriptor {
 		{Prefix: s.prefixed("state/remote_org_trusts")},
 		{Prefix: s.prefixed("state/remote_agent_trusts")},
 		{Prefix: s.prefixed("state/peer_outbounds")},
-		{Prefix: s.prefixed("idx/humans/by_auth")},
-		{Prefix: s.prefixed("idx/humans/by_handle")},
-		{Prefix: s.prefixed("idx/orgs/by_handle")},
-		{Prefix: s.prefixed("idx/memberships/by_org_human")},
-		{Prefix: s.prefixed("idx/invites/by_secret_hash")},
-		{Prefix: s.prefixed("idx/org_access_keys/by_token_hash")},
-		{Prefix: s.prefixed("idx/agents/by_token_hash")},
-		{Prefix: s.prefixed("idx/agents/by_uri")},
-		{Prefix: s.prefixed("idx/org_trusts/by_pair")},
-		{Prefix: s.prefixed("idx/agent_trusts/by_pair")},
-		{Prefix: s.prefixed("idx/messages/by_client")},
-		{Prefix: s.prefixed("idx/peers/by_canonical_base")},
-		{Prefix: s.prefixed("idx/remote_org_trusts/by_key")},
-		{Prefix: s.prefixed("idx/remote_agent_trusts/by_key")},
 	}
 }
 
@@ -2097,14 +2007,6 @@ func escapeKeySegment(value string) string {
 func hashKey(value string) string {
 	sum := sha256.Sum256([]byte(value))
 	return hex.EncodeToString(sum[:])
-}
-
-func decodePairIndexKey(pair string) (string, string) {
-	parts := strings.SplitN(pair, "\x00", 2)
-	if len(parts) != 2 {
-		return pair, ""
-	}
-	return parts[0], parts[1]
 }
 
 func persistInvite(v model.Invite) s3PersistInvite {
