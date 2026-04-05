@@ -397,9 +397,24 @@ func TestOpenClawWebSocketPresenceOnlineThenOffline(t *testing.T) {
 	if readyValue, ok := offlinePresence["ready"].(bool); !ok || readyValue {
 		t.Fatalf("expected metadata.presence.ready=false after disconnect, got %v payload=%v", offlinePresence["ready"], offlineResult)
 	}
-	offlineActivityLog, _ := offlineAgent["activity_log"].([]any)
-	if !hasActivityText(offlineActivityLog, "websocket transport offline") {
-		t.Fatalf("expected activity_log to include websocket transport offline, got %v", offlineActivityLog)
+
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		offlineActivityLog, _ := offlineAgent["activity_log"].([]any)
+		if hasActivityText(offlineActivityLog, "websocket transport offline") {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("expected activity_log to include websocket transport offline, got %v", offlineActivityLog)
+		}
+		time.Sleep(25 * time.Millisecond)
+		resp := doJSONRequest(t, router, http.MethodGet, "/v1/agents/me", nil, map[string]string{"Authorization": "Bearer " + tokenB})
+		if resp.Code != http.StatusOK {
+			continue
+		}
+		payload := decodeJSONMap(t, resp.Body.Bytes())
+		offlineResult = requireAgentRuntimeSuccessEnvelope(t, payload)
+		offlineAgent, _ = offlineResult["agent"].(map[string]any)
 	}
 }
 

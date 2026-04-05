@@ -260,7 +260,7 @@ func TestS3StateStore_ProfileAndPermissionsRoundTrip(t *testing.T) {
 	}
 }
 
-func TestS3StateStore_PersistsSecondaryIndexes(t *testing.T) {
+func TestS3StateStore_DoesNotPersistSecondaryIndexes(t *testing.T) {
 	fake := newFakeS3State()
 	server := fake.server("state-bucket")
 	defer server.Close()
@@ -290,18 +290,8 @@ func TestS3StateStore_PersistsSecondaryIndexes(t *testing.T) {
 		t.Fatalf("RegisterAgent failed: %v", err)
 	}
 
-	requiredPrefixes := []string{
-		"moltenhub-state/idx/humans/by_auth/",
-		"moltenhub-state/idx/humans/by_handle/",
-		"moltenhub-state/idx/orgs/by_handle/",
-		"moltenhub-state/idx/memberships/by_org_human/",
-		"moltenhub-state/idx/agents/by_token_hash/",
-		"moltenhub-state/idx/agents/by_uri/",
-	}
-	for _, prefix := range requiredPrefixes {
-		if !fake.hasKey(prefix) {
-			t.Fatalf("expected index prefix persisted: %s", prefix)
-		}
+	if keys := fake.keysWithPrefix("moltenhub-state/idx/"); len(keys) != 0 {
+		t.Fatalf("expected no persisted secondary index objects, got %v", keys)
 	}
 }
 
@@ -322,9 +312,8 @@ func TestS3StateStore_ReloadRebuildsIndexesFromPrimaryState(t *testing.T) {
 		t.Fatalf("UpsertHuman initial failed: %v", err)
 	}
 
-	// Simulate a stale/missing index object. Reload should rebuild from primaries.
-	for _, key := range fake.keysWithPrefix("moltenhub-state/idx/humans/by_auth/") {
-		fake.deleteKey(key)
+	if keys := fake.keysWithPrefix("moltenhub-state/idx/"); len(keys) != 0 {
+		t.Fatalf("expected no persisted secondary index objects before reload, got %v", keys)
 	}
 
 	reloaded := newTestS3StateStore(t, server.Client(), server.URL, "state-bucket", "moltenhub-state")
@@ -334,7 +323,7 @@ func TestS3StateStore_ReloadRebuildsIndexesFromPrimaryState(t *testing.T) {
 
 	got, err := reloaded.UpsertHuman("dev", "same-subject", "same@a.test", true, now, id.Next)
 	if err != nil {
-		t.Fatalf("UpsertHuman after index drop failed: %v", err)
+		t.Fatalf("UpsertHuman after reload failed: %v", err)
 	}
 	if got.HumanID != human.HumanID {
 		t.Fatalf("expected human id %q after reload rebuild, got %q", human.HumanID, got.HumanID)
@@ -550,8 +539,8 @@ func TestS3StateStore_PersistsMessageRecordsAndLeases(t *testing.T) {
 	if !fake.hasKey("moltenhub-state/state/message_leases/") {
 		t.Fatalf("expected persisted message lease objects")
 	}
-	if !fake.hasKey("moltenhub-state/idx/messages/by_client/") {
-		t.Fatalf("expected persisted client message index objects")
+	if keys := fake.keysWithPrefix("moltenhub-state/idx/"); len(keys) != 0 {
+		t.Fatalf("expected no persisted secondary index objects, got %v", keys)
 	}
 
 	reloaded := newTestS3StateStore(t, server.Client(), server.URL, "state-bucket", "moltenhub-state")
@@ -698,7 +687,7 @@ func TestS3StateStore_PersistAllUsesPerOperationDeadlineWhenContextHasNone(t *te
 		if strings.HasPrefix(path, "state-bucket/") && r.Method == http.MethodPut {
 			_, _ = io.Copy(io.Discard, r.Body)
 			_ = r.Body.Close()
-			time.Sleep(150 * time.Millisecond)
+			time.Sleep(180 * time.Millisecond)
 			mu.Lock()
 			putCount++
 			mu.Unlock()
@@ -714,13 +703,21 @@ func TestS3StateStore_PersistAllUsesPerOperationDeadlineWhenContextHasNone(t *te
 
 	now := time.Date(2026, 3, 6, 9, 0, 0, 0, time.UTC)
 	id := &idGen{}
+	human, err := store.UpsertHuman("dev", "slow-multi", "slow-multi@a.test", true, now, id.Next)
+	if err != nil {
+		t.Fatalf("seed UpsertHuman failed: %v", err)
+	}
+	mu.Lock()
+	putCount = 0
+	mu.Unlock()
+
 	start := time.Now()
-	_, err := store.UpsertHuman("dev", "slow-multi", "slow-multi@a.test", true, now, id.Next)
+	_, _, err = store.CreateOrg("slow-org", "Slow Org", human.HumanID, id.MustID(t), now)
 	elapsed := time.Since(start)
 	if err != nil {
-		t.Fatalf("expected UpsertHuman to succeed with per-operation timeout, got: %v", err)
+		t.Fatalf("expected CreateOrg to succeed with per-operation timeout, got: %v", err)
 	}
-	if elapsed < 350*time.Millisecond {
+	if elapsed < 320*time.Millisecond {
 		t.Fatalf("expected multi-object persist to exceed a single timeout window, took %s", elapsed)
 	}
 	mu.Lock()
