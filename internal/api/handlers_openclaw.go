@@ -222,7 +222,7 @@ func (h *Handler) handleOpenClawNackDelivery(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	record, handlerErr := h.nackDeliveryForAgent(r.Context(), receiverAgentUUID, req.DeliveryID)
+	record, handlerErr := h.nackDeliveryForAgent(r.Context(), receiverAgentUUID, req)
 	if handlerErr != nil {
 		writeRuntimeHandlerError(w, handlerErr)
 		return

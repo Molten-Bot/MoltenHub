@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"crypto/rand"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
@@ -31,7 +32,10 @@ type publishRequest struct {
 }
 
 type deliveryActionRequest struct {
-	DeliveryID string `json:"delivery_id"`
+	DeliveryID  string   `json:"delivery_id"`
+	Reason      string   `json:"reason,omitempty"`
+	ErrorDetail string   `json:"error_detail,omitempty"`
+	LogPaths    []string `json:"log_paths,omitempty"`
 }
 
 type runtimeHandlerError struct {
@@ -587,7 +591,7 @@ func (h *Handler) handleNackDelivery(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid_delivery_id", "delivery_id is required")
 		return
 	}
-	record, handlerErr := h.nackDeliveryForAgent(r.Context(), receiverAgentUUID, req.DeliveryID)
+	record, handlerErr := h.nackDeliveryForAgent(r.Context(), receiverAgentUUID, req)
 	if handlerErr != nil {
 		writeRuntimeHandlerError(w, handlerErr)
 		return
@@ -640,8 +644,34 @@ func (h *Handler) ackDeliveryForAgent(receiverAgentUUID, deliveryID string) (mod
 	return record, nil
 }
 
-func (h *Handler) nackDeliveryForAgent(ctx context.Context, receiverAgentUUID, deliveryID string) (model.MessageRecord, *runtimeHandlerError) {
-	message, record, err := h.control.ReleaseMessageDelivery(receiverAgentUUID, deliveryID, h.now().UTC(), "receiver_nack")
+func normalizeFailureReason(req deliveryActionRequest) string {
+	if reason := strings.TrimSpace(req.Reason); reason != "" {
+		return reason
+	}
+	return "receiver_nack"
+}
+
+func normalizeLogPaths(paths []string) []string {
+	out := make([]string, 0, len(paths))
+	seen := make(map[string]struct{}, len(paths))
+	for _, raw := range paths {
+		path := strings.TrimSpace(raw)
+		if path == "" {
+			continue
+		}
+		if _, ok := seen[path]; ok {
+			continue
+		}
+		seen[path] = struct{}{}
+		out = append(out, path)
+	}
+	return out
+}
+
+func (h *Handler) nackDeliveryForAgent(ctx context.Context, receiverAgentUUID string, req deliveryActionRequest) (model.MessageRecord, *runtimeHandlerError) {
+	deliveryID := strings.TrimSpace(req.DeliveryID)
+	now := h.now().UTC()
+	message, record, err := h.control.ReleaseMessageDelivery(receiverAgentUUID, deliveryID, now, normalizeFailureReason(req))
 	if err != nil {
 		switch {
 		case errors.Is(err, store.ErrMessageDeliveryNotFound):
@@ -673,8 +703,120 @@ func (h *Handler) nackDeliveryForAgent(ctx context.Context, receiverAgentUUID, d
 		}
 	}
 	h.clearQueueRuntimeError()
+	if err := h.enqueueTaskFailureMessages(ctx, message, deliveryID, strings.TrimSpace(req.ErrorDetail), normalizeLogPaths(req.LogPaths), now); err != nil {
+		summary := queueRuntimeFailureSummary("failure follow-up", err)
+		h.setQueueRuntimeError(summary)
+		log.Printf("enqueue task failure messages failed: message_id=%s err_summary=%q", message.MessageID, summary)
+		return model.MessageRecord{}, &runtimeHandlerError{
+			status:  http.StatusInternalServerError,
+			code:    "store_error",
+			message: "failed to queue failure follow-up messages",
+		}
+	}
 	h.waiters.Notify(receiverAgentUUID)
 	return record, nil
+}
+
+func (h *Handler) enqueueTaskFailureMessages(ctx context.Context, failedMessage model.Message, deliveryID, errorDetail string, logPaths []string, now time.Time) error {
+	failurePayload := map[string]any{
+		"protocol":          openClawHTTPProtocol,
+		"kind":              "task_result",
+		"status":            "failed",
+		"timestamp":         now.Format(time.RFC3339Nano),
+		"text":              h.failureResponseText(failedMessage, errorDetail, logPaths),
+		"error_detail":      strings.TrimSpace(errorDetail),
+		"log_paths":         logPaths,
+		"failed_message_id": failedMessage.MessageID,
+		"delivery_id":       deliveryID,
+		"from_agent_uuid":   failedMessage.FromAgentUUID,
+		"to_agent_uuid":     failedMessage.ToAgentUUID,
+	}
+	if failurePayload["error_detail"] == "" {
+		delete(failurePayload, "error_detail")
+	}
+	if len(logPaths) == 0 {
+		delete(failurePayload, "log_paths")
+	}
+	if err := h.enqueueSystemJSONMessage(ctx, failedMessage.ToAgentUUID, failedMessage.FromAgentUUID, failedMessage.ReceiverOrgID, failedMessage.SenderOrgID, failurePayload, now); err != nil {
+		return err
+	}
+
+	followUpRunConfig := map[string]any{
+		"repos":         []string{"git@github.com:jefking/moltenhub-code.git"},
+		"base_branch":   "main",
+		"target_subdir": ".",
+		"prompt":        h.buildFailureFollowUpPrompt(failedMessage, errorDetail, logPaths),
+	}
+	return h.enqueueSystemJSONMessage(ctx, failedMessage.ToAgentUUID, failedMessage.FromAgentUUID, failedMessage.ReceiverOrgID, failedMessage.SenderOrgID, followUpRunConfig, now)
+}
+
+func (h *Handler) failureResponseText(failedMessage model.Message, errorDetail string, logPaths []string) string {
+	text := "Task failed."
+	if detail := strings.TrimSpace(errorDetail); detail != "" {
+		text += " Error details: " + detail
+	}
+	if len(logPaths) > 0 {
+		text += " Relevant logs: " + strings.Join(logPaths, ", ")
+	}
+	text += " Original message_id: " + failedMessage.MessageID
+	return text
+}
+
+func (h *Handler) buildFailureFollowUpPrompt(failedMessage model.Message, errorDetail string, logPaths []string) string {
+	logScope := "No explicit failing log paths were provided. Inspect the failing code path and nearby runtime logs."
+	if len(logPaths) > 0 {
+		logScope = "Review these failing log paths first: " + strings.Join(logPaths, ", ") + "."
+	}
+	prompt := "A task execution in moltenhub-code failed for message_id " + failedMessage.MessageID + ". " + logScope + " Identify every underlying issue in this codebase that contributed to the failure, implement production-ready fixes, add or update tests, and verify the failure response sent back to the calling agent clearly reports failure and includes the error details."
+	if detail := strings.TrimSpace(errorDetail); detail != "" {
+		prompt += " Reported error details: " + detail + "."
+	}
+	prompt += " Do not stop at the first symptom; fix root causes and any closely related breakage you uncover."
+	return prompt
+}
+
+func (h *Handler) enqueueSystemJSONMessage(ctx context.Context, fromAgentUUID, toAgentUUID, senderOrgID, receiverOrgID string, payload map[string]any, now time.Time) error {
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return fmt.Errorf("marshal system payload: %w", err)
+	}
+	messageID, err := newUUIDv7()
+	if err != nil {
+		return fmt.Errorf("create message_id: %w", err)
+	}
+	fromAgent, err := h.control.GetAgentByUUID(fromAgentUUID)
+	if err != nil {
+		return fmt.Errorf("load sender agent: %w", err)
+	}
+	toAgent, err := h.control.GetAgentByUUID(toAgentUUID)
+	if err != nil {
+		return fmt.Errorf("load receiver agent: %w", err)
+	}
+	message := model.Message{
+		MessageID:     messageID,
+		FromAgentUUID: fromAgentUUID,
+		ToAgentUUID:   toAgentUUID,
+		FromAgentID:   fromAgent.AgentID,
+		ToAgentID:     toAgent.AgentID,
+		FromAgentURI:  h.agentURI(fromAgent),
+		ToAgentURI:    h.agentURI(toAgent),
+		SenderOrgID:   senderOrgID,
+		ReceiverOrgID: receiverOrgID,
+		ContentType:   "application/json",
+		Payload:       string(body),
+		CreatedAt:     now,
+	}
+	record, _, err := h.control.CreateOrGetMessageRecord(message, now)
+	if err != nil {
+		return fmt.Errorf("register system message: %w", err)
+	}
+	if err := h.queue.Enqueue(ctx, message); err != nil {
+		_ = h.control.AbortMessageRecord(record.Message.MessageID)
+		return fmt.Errorf("enqueue system message: %w", err)
+	}
+	h.control.RecordMessageQueued(senderOrgID)
+	h.waiters.Notify(toAgentUUID)
+	return nil
 }
 
 func (h *Handler) messageStatusForAgent(agentUUID, messageID string) (model.MessageRecord, *runtimeHandlerError) {

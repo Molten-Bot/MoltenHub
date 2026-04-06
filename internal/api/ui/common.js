@@ -99,6 +99,54 @@ const MoltenHubUI = (() => {
           node.style.display = "none";
         }
       });
+
+    populateAgentIdentityBadge().catch(() => {
+      setAgentIdentityBadge(null);
+    });
+  }
+
+  function metadataFrom(raw) {
+    if (!raw || typeof raw !== "object" || Array.isArray(raw)) return {};
+    return { ...raw };
+  }
+
+  function setAgentIdentityBadge(agent) {
+    const root = $("agentIdentity");
+    const emojiEl = $("agentIdentityEmoji");
+    const nameEl = $("agentIdentityName");
+    const uuidEl = $("agentIdentityUUID");
+    if (!root || !emojiEl || !nameEl || !uuidEl) return;
+
+    if (!agent) {
+      root.hidden = true;
+      return;
+    }
+
+    const metadata = metadataFrom(agent.metadata);
+    const displayName = String(metadata.display_name || agent.handle || agent.agent_id || "Agent").trim();
+    const emoji = String(metadata.emoji || "🤖").trim() || "🤖";
+    const uuid = String(agent.agent_uuid || "").trim();
+
+    emojiEl.textContent = emoji;
+    nameEl.textContent = displayName;
+    uuidEl.textContent = uuid || "uuid unavailable";
+    root.hidden = false;
+  }
+
+  async function populateAgentIdentityBadge() {
+    const agentsRes = await req("/v1/me/agents");
+    if (agentsRes.status !== 200 || !Array.isArray(agentsRes?.data?.agents) || agentsRes.data.agents.length === 0) {
+      setAgentIdentityBadge(null);
+      return;
+    }
+
+    const agents = agentsRes.data.agents.slice().sort((left, right) => {
+      const leftActive = String(left?.status || "").toLowerCase() === "active" ? 0 : 1;
+      const rightActive = String(right?.status || "").toLowerCase() === "active" ? 0 : 1;
+      if (leftActive !== rightActive) return leftActive - rightActive;
+      return String(left?.created_at || "").localeCompare(String(right?.created_at || ""));
+    });
+    setAgentIdentityBadge(agents[0]);
   }
 
   async function populateOrgSelect(selectID, outputID = "") {
@@ -132,6 +180,7 @@ const MoltenHubUI = (() => {
     req,
     out,
     initTopNav,
+    populateAgentIdentityBadge,
     populateOrgSelect,
     selectedOrg,
     clearSession,

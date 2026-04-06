@@ -1323,6 +1323,16 @@ func nackDelivery(t *testing.T, router http.Handler, token, deliveryID string) *
 	}, map[string]string{"Authorization": "Bearer " + token})
 }
 
+func nackDeliveryWithFailure(t *testing.T, router http.Handler, token, deliveryID, reason, errorDetail string, logPaths []string) *httptest.ResponseRecorder {
+	t.Helper()
+	return doJSONRequest(t, router, http.MethodPost, "/v1/messages/nack", map[string]any{
+		"delivery_id":  deliveryID,
+		"reason":       reason,
+		"error_detail": errorDetail,
+		"log_paths":    logPaths,
+	}, map[string]string{"Authorization": "Bearer " + token})
+}
+
 func messageStatus(t *testing.T, router http.Handler, token, messageID string) *httptest.ResponseRecorder {
 	t.Helper()
 	req := httptest.NewRequest(http.MethodGet, "/v1/messages/"+messageID, nil)
@@ -1352,6 +1362,15 @@ func requireAgentRuntimeSuccessEnvelope(t *testing.T, payload map[string]any) ma
 		t.Fatalf("expected result object in success envelope, got %T payload=%v", payload["result"], payload)
 	}
 	return result
+}
+
+func decodeJSONStringMap(t *testing.T, raw string) map[string]any {
+	t.Helper()
+	var out map[string]any
+	if err := json.Unmarshal([]byte(raw), &out); err != nil {
+		t.Fatalf("decode JSON string payload: %v raw=%q", err, raw)
+	}
+	return out
 }
 
 func setupTrustedAgents(t *testing.T, router http.Handler) (string, string, string, string, string, string, string, string) {
@@ -2721,6 +2740,103 @@ func TestNackRequeuesMessageWithNewAttempt(t *testing.T) {
 	}
 	if secondDeliveryObj["attempt"] != float64(2) {
 		t.Fatalf("expected second attempt after nack, got %v", secondDeliveryObj["attempt"])
+	}
+}
+
+func TestNackQueuesFailureResponseAndFollowUpTaskForCaller(t *testing.T) {
+	router := newTestRouter()
+	_, _, tokenA, tokenB, _, _, agentUUIDA, agentUUIDB := setupTrustedAgents(t, router)
+
+	pubResp := publish(t, router, tokenA, agentUUIDB, "hello-failure")
+	if pubResp.Code != http.StatusAccepted {
+		t.Fatalf("expected publish 202, got %d %s", pubResp.Code, pubResp.Body.String())
+	}
+	pubPayload := decodeJSONMap(t, pubResp.Body.Bytes())
+	originalMessageID, _ := pubPayload["message_id"].(string)
+	if originalMessageID == "" {
+		t.Fatalf("expected publish response message_id")
+	}
+
+	firstPull := pull(t, router, tokenB, 0)
+	if firstPull.Code != http.StatusOK {
+		t.Fatalf("expected first pull 200, got %d %s", firstPull.Code, firstPull.Body.String())
+	}
+	firstPayload := decodeJSONMap(t, firstPull.Body.Bytes())
+	deliveryObj, _ := firstPayload["delivery"].(map[string]any)
+	deliveryID, _ := deliveryObj["delivery_id"].(string)
+	if deliveryID == "" {
+		t.Fatalf("expected delivery_id in first pull payload=%v", firstPayload)
+	}
+
+	nackResp := nackDeliveryWithFailure(t, router, tokenB, deliveryID, "task_failed", "panic: nil pointer dereference", []string{"logs/agent-b/run-17.log", "internal/api"})
+	if nackResp.Code != http.StatusOK {
+		t.Fatalf("expected nack 200, got %d %s", nackResp.Code, nackResp.Body.String())
+	}
+
+	statusResp := messageStatus(t, router, tokenA, originalMessageID)
+	if statusResp.Code != http.StatusOK {
+		t.Fatalf("expected status 200 after nack, got %d %s", statusResp.Code, statusResp.Body.String())
+	}
+	statusPayload := decodeJSONMap(t, statusResp.Body.Bytes())
+	if got, _ := statusPayload["status"].(string); got != model.MessageDeliveryQueued {
+		t.Fatalf("expected queued status after failure nack, got %q payload=%v", got, statusPayload)
+	}
+	if got, _ := statusPayload["last_failure_reason"].(string); got != "task_failed" {
+		t.Fatalf("expected last_failure_reason=task_failed, got %q payload=%v", got, statusPayload)
+	}
+
+	failurePull := pull(t, router, tokenA, 0)
+	if failurePull.Code != http.StatusOK {
+		t.Fatalf("expected failure response pull 200, got %d %s", failurePull.Code, failurePull.Body.String())
+	}
+	failurePayload := decodeJSONMap(t, failurePull.Body.Bytes())
+	failureMessage, _ := failurePayload["message"].(map[string]any)
+	if got, _ := failureMessage["from_agent_uuid"].(string); got != agentUUIDB {
+		t.Fatalf("expected failure response from receiver agent %q, got %q payload=%v", agentUUIDB, got, failurePayload)
+	}
+	if got, _ := failureMessage["to_agent_uuid"].(string); got != agentUUIDA {
+		t.Fatalf("expected failure response to caller agent %q, got %q payload=%v", agentUUIDA, got, failurePayload)
+	}
+	failureBody := decodeJSONStringMap(t, fmt.Sprintf("%v", failureMessage["payload"]))
+	if got, _ := failureBody["status"].(string); got != "failed" {
+		t.Fatalf("expected failure status payload, got %v", failureBody)
+	}
+	if got, _ := failureBody["kind"].(string); got != "task_result" {
+		t.Fatalf("expected kind=task_result, got %v", failureBody)
+	}
+	if got, _ := failureBody["error_detail"].(string); got != "panic: nil pointer dereference" {
+		t.Fatalf("expected error detail in failure payload, got %v", failureBody)
+	}
+	logPaths, _ := failureBody["log_paths"].([]any)
+	if len(logPaths) != 2 || logPaths[0] != "logs/agent-b/run-17.log" || logPaths[1] != "internal/api" {
+		t.Fatalf("expected log_paths in failure payload, got %v", failureBody)
+	}
+	if got, _ := failureBody["failed_message_id"].(string); got != originalMessageID {
+		t.Fatalf("expected failed_message_id=%q, got %q payload=%v", originalMessageID, got, failureBody)
+	}
+
+	followUpPull := pull(t, router, tokenA, 0)
+	if followUpPull.Code != http.StatusOK {
+		t.Fatalf("expected follow-up pull 200, got %d %s", followUpPull.Code, followUpPull.Body.String())
+	}
+	followUpPayload := decodeJSONMap(t, followUpPull.Body.Bytes())
+	followUpMessage, _ := followUpPayload["message"].(map[string]any)
+	followUpBody := decodeJSONStringMap(t, fmt.Sprintf("%v", followUpMessage["payload"]))
+	if got, _ := followUpBody["base_branch"].(string); got != "main" {
+		t.Fatalf("expected follow-up base_branch=main, got %v", followUpBody)
+	}
+	if got, _ := followUpBody["target_subdir"].(string); got != "." {
+		t.Fatalf("expected follow-up target_subdir=., got %v", followUpBody)
+	}
+	repos, _ := followUpBody["repos"].([]any)
+	if len(repos) != 1 || repos[0] != "git@github.com:jefking/moltenhub-code.git" {
+		t.Fatalf("expected follow-up repos payload, got %v", followUpBody)
+	}
+	prompt, _ := followUpBody["prompt"].(string)
+	for _, fragment := range []string{"message_id " + originalMessageID, "logs/agent-b/run-17.log", "internal/api", "panic: nil pointer dereference"} {
+		if !strings.Contains(prompt, fragment) {
+			t.Fatalf("expected follow-up prompt to contain %q, got %q", fragment, prompt)
+		}
 	}
 }
 

@@ -53,6 +53,34 @@
         align-items: center;
         gap: 8px;
       }
+      .agentIdentity {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 6px 10px;
+        border: 1px solid var(--line);
+        border-radius: 999px;
+        background: #fff;
+      }
+      .agentIdentity[hidden] {
+        display: none;
+      }
+      .agentIdentityEmoji {
+        font-size: 1.15rem;
+      }
+      .agentIdentityLabel {
+        display: flex;
+        flex-direction: column;
+        min-width: 0;
+      }
+      .agentIdentityName {
+        font-weight: 600;
+      }
+      .agentIdentityUUID {
+        color: var(--muted);
+        font-size: 0.8rem;
+        font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      }
       main {
         max-width: 1200px;
         margin: 16px auto;
@@ -162,6 +190,13 @@
           </nav>
         </div>
         <div class="topActions">
+          <div id="agentIdentity" class="agentIdentity" hidden>
+            <span id="agentIdentityEmoji" class="agentIdentityEmoji">🤖</span>
+            <span class="agentIdentityLabel">
+              <span id="agentIdentityName" class="agentIdentityName">Agent</span>
+              <span id="agentIdentityUUID" class="agentIdentityUUID">uuid</span>
+            </span>
+          </div>
           <button id="btnProfile" class="navButton" type="button">Profile</button>
           <button id="btnLogout" class="navButton" type="button">Logout</button>
         </div>
