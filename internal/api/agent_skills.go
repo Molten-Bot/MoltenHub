@@ -146,7 +146,7 @@ func parseSkillParameterList(raw any) []agentSkillParameter {
 	}
 	out := make([]agentSkillParameter, 0, len(items))
 	for _, item := range items {
-		name, ok := normalizeSkillName(asStringValue(item["name"]))
+		name, ok := normalizeSkillParameterName(asStringValue(item["name"]))
 		if !ok {
 			continue
 		}
@@ -301,7 +301,7 @@ func parseMarkdownParameterPayload(markdown string) map[string]string {
 		if len(parts) != 2 {
 			continue
 		}
-		name, ok := normalizeSkillName(strings.Trim(strings.TrimSpace(parts[0]), "`"))
+		name, ok := normalizeSkillParameterName(strings.Trim(strings.TrimSpace(parts[0]), "`"))
 		if !ok {
 			continue
 		}
@@ -382,6 +382,23 @@ func strconvQuote(value string) string {
 func normalizeSkillName(raw string) (string, bool) {
 	normalized := strings.ToLower(strings.TrimSpace(raw))
 	if len(normalized) < 2 || len(normalized) > 64 {
+		return "", false
+	}
+	for _, ch := range normalized {
+		switch {
+		case ch >= 'a' && ch <= 'z':
+		case ch >= '0' && ch <= '9':
+		case ch == '-', ch == '_', ch == '.':
+		default:
+			return "", false
+		}
+	}
+	return normalized, true
+}
+
+func normalizeSkillParameterName(raw string) (string, bool) {
+	normalized := strings.ToLower(strings.TrimSpace(raw))
+	if len(normalized) < 1 || len(normalized) > 64 {
 		return "", false
 	}
 	for _, ch := range normalized {

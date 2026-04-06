@@ -200,7 +200,7 @@ func parseMarkdownSkillParameters(markdown string) ([]map[string]any, []map[stri
 			return nil, nil, ErrInvalidAgentSkills
 		}
 		name := firstNonEmpty(match[1], match[2], match[3])
-		normalizedName, ok := normalizeAgentSkillName(name)
+		normalizedName, ok := normalizeAgentSkillParameterName(name)
 		if !ok {
 			return nil, nil, ErrInvalidAgentSkills
 		}
@@ -299,7 +299,7 @@ func normalizeSkillParameterList(raw any) ([]map[string]any, error) {
 		if !ok {
 			return nil, ErrInvalidAgentSkills
 		}
-		name, ok := normalizeAgentSkillName(stringValue(entry["name"]))
+		name, ok := normalizeAgentSkillParameterName(stringValue(entry["name"]))
 		if !ok {
 			return nil, ErrInvalidAgentSkills
 		}
@@ -347,4 +347,21 @@ func firstNonEmpty(values ...string) string {
 		}
 	}
 	return ""
+}
+
+func normalizeAgentSkillParameterName(raw string) (string, bool) {
+	normalized := strings.ToLower(strings.TrimSpace(raw))
+	if len(normalized) < 1 || len(normalized) > 64 {
+		return "", false
+	}
+	for _, ch := range normalized {
+		switch {
+		case ch >= 'a' && ch <= 'z':
+		case ch >= '0' && ch <= '9':
+		case ch == '-', ch == '_', ch == '.':
+		default:
+			return "", false
+		}
+	}
+	return normalized, true
 }
