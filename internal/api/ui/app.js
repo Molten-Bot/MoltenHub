@@ -1,4 +1,5 @@
-const $ = (id) => document.getElementById(id);
+const UI = window.MoltenHubUI || null;
+const $ = UI ? UI.$ : (id) => document.getElementById(id);
 
 const TOKEN_KEY = "moltenhub_access_token";
 const DEV_ID_KEY = "moltenhub_dev_human_id";
@@ -18,6 +19,10 @@ function saveToken(token) {
 }
 
 function clearToken() {
+  if (UI) {
+    UI.clearSession();
+    return;
+  }
   localStorage.removeItem(TOKEN_KEY);
 }
 
@@ -129,6 +134,9 @@ function bindReadActions() {
 }
 
 async function init() {
+  if (UI) {
+    UI.initTopNav();
+  }
   if ($("authToken")) $("authToken").value = loadSavedToken();
   if ($("humanId")) $("humanId").value = readStorage(DEV_ID_KEY);
   if ($("humanEmail")) $("humanEmail").value = readStorage(DEV_EMAIL_KEY);

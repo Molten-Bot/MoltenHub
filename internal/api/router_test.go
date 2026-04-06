@@ -4683,6 +4683,32 @@ func TestUIRoutes_AgentsPageIncludesSelfSignupMetadataControls(t *testing.T) {
 	}
 }
 
+func TestUIRoutes_AllAppPagesIncludeAgentIdentityBadge(t *testing.T) {
+	router := newTestRouter()
+
+	for _, path := range []string{"/profile", "/organization", "/agents", "/domains"} {
+		req := httptest.NewRequest(http.MethodGet, path, nil)
+		resp := httptest.NewRecorder()
+		router.ServeHTTP(resp, req)
+		if resp.Code != http.StatusOK {
+			t.Fatalf("%s expected 200, got %d body=%s", path, resp.Code, resp.Body.String())
+		}
+		body := resp.Body.String()
+		if !strings.Contains(body, `id="agentIdentity"`) {
+			t.Fatalf("%s missing agent identity root", path)
+		}
+		if !strings.Contains(body, `id="agentIdentityName"`) {
+			t.Fatalf("%s missing agent identity name", path)
+		}
+		if !strings.Contains(body, `id="agentIdentityEmoji"`) {
+			t.Fatalf("%s missing agent identity emoji", path)
+		}
+		if !strings.Contains(body, `id="agentIdentityUUID"`) {
+			t.Fatalf("%s missing agent identity uuid", path)
+		}
+	}
+}
+
 func TestUIRoutes_JavascriptAssets(t *testing.T) {
 	router := newTestRouter()
 

@@ -25,6 +25,63 @@
         border-bottom: 1px solid var(--line);
         background: #fff;
       }
+      .topbar {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+      }
+      nav a {
+        margin-right: 12px;
+        color: var(--accent);
+        text-decoration: none;
+        font-weight: 600;
+      }
+      .topActions {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+      .navButton {
+        width: auto;
+        margin: 0;
+        padding: 6px 10px;
+        border-radius: 6px;
+        border: 1px solid var(--line);
+        background: #fff;
+        color: var(--ink);
+        font: inherit;
+        font-weight: 600;
+        cursor: pointer;
+      }
+      .agentIdentity {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 6px 10px;
+        border: 1px solid var(--line);
+        border-radius: 999px;
+        background: #fff;
+      }
+      .agentIdentity[hidden] {
+        display: none;
+      }
+      .agentIdentityEmoji {
+        font-size: 1.15rem;
+      }
+      .agentIdentityLabel {
+        display: flex;
+        flex-direction: column;
+        min-width: 0;
+      }
+      .agentIdentityName {
+        font-weight: 600;
+      }
+      .agentIdentityUUID {
+        color: var(--muted);
+        font-size: 0.8rem;
+        font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      }
       main {
         max-width: 1100px;
         margin: 16px auto;
@@ -88,13 +145,27 @@
   </head>
   <body>
     <header>
-      <strong>{{APP_NAME}} Domains UI</strong>
-      <span style="float: right">
-        <a href="/" style="color: var(--accent)">Login</a> |
-        <a href="/agents" style="color: var(--accent)">Agents</a> |
-        <a href="/organization" style="color: var(--accent)">Organization</a> |
-        <a href="/profile" style="color: var(--accent)">Profile</a>
-      </span>
+      <div class="topbar">
+        <div>
+          <strong>{{APP_NAME}} Domains UI</strong>
+          <nav style="margin-top: 6px">
+            <a href="/">Login</a>
+            <a href="/agents">Agents</a>
+            <a href="/organization">Organization</a>
+            <a href="/profile">Profile</a>
+          </nav>
+        </div>
+        <div class="topActions">
+          <div id="agentIdentity" class="agentIdentity" hidden>
+            <span id="agentIdentityEmoji" class="agentIdentityEmoji">🤖</span>
+            <span class="agentIdentityLabel">
+              <span id="agentIdentityName" class="agentIdentityName">Agent</span>
+              <span id="agentIdentityUUID" class="agentIdentityUUID">uuid</span>
+            </span>
+          </div>
+          <button id="btnGoLogin" class="navButton" type="button">Login</button>
+        </div>
+      </div>
     </header>
     <main>
       <div class="banner">
@@ -188,6 +259,7 @@
         </section>
       </div>
     </main>
+    <script src="/common.js"></script>
     <script src="/app.js"></script>
   </body>
 </html>
