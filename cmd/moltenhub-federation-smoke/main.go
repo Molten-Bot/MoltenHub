@@ -2,6 +2,8 @@ package main
 
 import (
 	"bytes"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -14,7 +16,6 @@ import (
 
 const (
 	peerID       = "alpha-beta"
-	peerSecret   = "local-federation-shared-secret"
 	alphaPeerURL = "http://moltenhub-alpha:8080"
 	betaPeerURL  = "http://moltenhub-beta:8080"
 )
@@ -22,6 +23,7 @@ const (
 type runner struct {
 	alphaBaseURL string
 	betaBaseURL  string
+	peerSecret   string
 	client       *http.Client
 
 	alphaOrgID     string
@@ -45,11 +47,23 @@ type step struct {
 func main() {
 	alphaBaseURL := flag.String("alpha-base-url", "http://127.0.0.1:18080", "Alpha MoltenHub base URL")
 	betaBaseURL := flag.String("beta-base-url", "http://127.0.0.1:18081", "Beta MoltenHub base URL")
+	peerSecret := flag.String("peer-secret", "", "Shared secret for peer pairing (generated when omitted)")
 	flag.Parse()
+
+	resolvedPeerSecret := strings.TrimSpace(*peerSecret)
+	if resolvedPeerSecret == "" {
+		generatedSecret, err := generatePeerSecret()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "failed to generate peer secret: %v\n", err)
+			os.Exit(2)
+		}
+		resolvedPeerSecret = generatedSecret
+	}
 
 	r := &runner{
 		alphaBaseURL: strings.TrimRight(*alphaBaseURL, "/"),
 		betaBaseURL:  strings.TrimRight(*betaBaseURL, "/"),
+		peerSecret:   resolvedPeerSecret,
 		client: &http.Client{
 			Timeout: 10 * time.Second,
 		},
@@ -306,7 +320,7 @@ func (r *runner) createPeer(baseURL, canonicalBaseURL, deliveryBaseURL string) e
 		"peer_id":            peerID,
 		"canonical_base_url": canonicalBaseURL,
 		"delivery_base_url":  deliveryBaseURL,
-		"shared_secret":      peerSecret,
+		"shared_secret":      r.peerSecret,
 	})
 	if err != nil {
 		return err
@@ -424,4 +438,12 @@ func containsString(payload map[string]any, topKey, nestedKey, want string) bool
 		}
 	}
 	return false
+}
+
+func generatePeerSecret() (string, error) {
+	secret := make([]byte, 32)
+	if _, err := rand.Read(secret); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(secret), nil
 }
