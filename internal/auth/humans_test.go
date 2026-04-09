@@ -20,16 +20,23 @@ func (errReadCloser) Read([]byte) (int, error) { return 0, errors.New("read fail
 func (errReadCloser) Close() error             { return nil }
 
 func TestNewHumanAuthProviderFromEnv(t *testing.T) {
-	t.Setenv("HUMAN_AUTH_PROVIDER", "supabase")
-	t.Setenv("SUPABASE_URL", "https://example.supabase.co")
-	t.Setenv("SUPABASE_ANON_KEY", "anon-key")
-	if got := NewHumanAuthProviderFromEnv().Name(); got != "supabase" {
-		t.Fatalf("expected supabase provider, got %q", got)
+	t.Setenv("HUMAN_AUTH_PROVIDER", "")
+	if _, ok := NewHumanAuthProviderFromEnv().(*DevHumanAuthProvider); !ok {
+		t.Fatal("expected default provider to be dev")
 	}
 
-	t.Setenv("HUMAN_AUTH_PROVIDER", "")
-	if got := NewHumanAuthProviderFromEnv().Name(); got != "dev" {
-		t.Fatalf("expected default dev provider, got %q", got)
+	t.Setenv("HUMAN_AUTH_PROVIDER", "supabase")
+	t.Setenv("SUPABASE_URL", " https://example.supabase.co/ ")
+	t.Setenv("SUPABASE_ANON_KEY", " anon ")
+	provider, ok := NewHumanAuthProviderFromEnv().(*SupabaseAuthProvider)
+	if !ok {
+		t.Fatal("expected supabase provider")
+	}
+	if provider.supabaseURL != "https://example.supabase.co" {
+		t.Fatalf("unexpected normalized supabase URL: %q", provider.supabaseURL)
+	}
+	if provider.anonKey != "anon" {
+		t.Fatalf("unexpected normalized anon key: %q", provider.anonKey)
 	}
 }
 
@@ -39,12 +46,11 @@ func TestDevHumanAuthProviderAuthenticate(t *testing.T) {
 		t.Fatalf("expected dev provider name, got %q", provider.Name())
 	}
 
-	reqMissing := &http.Request{Header: http.Header{}}
-	if _, err := provider.Authenticate(reqMissing); !errors.Is(err, ErrUnauthorizedHuman) {
+	req, _ := http.NewRequest(http.MethodGet, "http://example.test", nil)
+	if _, err := provider.Authenticate(req); !errors.Is(err, ErrUnauthorizedHuman) {
 		t.Fatalf("expected unauthorized error, got %v", err)
 	}
 
-	req := &http.Request{Header: http.Header{}}
 	req.Header.Set("X-Human-Id", "alice")
 	identity, err := provider.Authenticate(req)
 	if err != nil {
@@ -54,10 +60,17 @@ func TestDevHumanAuthProviderAuthenticate(t *testing.T) {
 		t.Fatalf("unexpected identity from implicit email: %+v", identity)
 	}
 
-	reqExplicitEmail := &http.Request{Header: http.Header{}}
-	reqExplicitEmail.Header.Set("X-Human-Id", "bob")
-	reqExplicitEmail.Header.Set("X-Human-Email", "  BOB@Example.COM  ")
-	identity, err = provider.Authenticate(reqExplicitEmail)
+	req.Header.Set("X-Human-Id", " Alice ")
+	identity, err = provider.Authenticate(req)
+	if err != nil {
+		t.Fatalf("unexpected auth error with spaced handle: %v", err)
+	}
+	if identity.Subject != "Alice" || identity.Email != "Alice@local.dev" {
+		t.Fatalf("expected trimmed dev identity, got %+v", identity)
+	}
+
+	req.Header.Set("X-Human-Email", "  BOB@Example.COM  ")
+	identity, err = provider.Authenticate(req)
 	if err != nil {
 		t.Fatalf("unexpected auth error with explicit email: %v", err)
 	}
@@ -66,26 +79,27 @@ func TestDevHumanAuthProviderAuthenticate(t *testing.T) {
 	}
 }
 
-func TestSupabaseAuthProviderAuthenticateUnauthorizedPaths(t *testing.T) {
+func TestSupabaseAuthProviderAuthenticateErrors(t *testing.T) {
 	request := func() *http.Request {
-		req := &http.Request{Header: http.Header{}}
-		req.Header.Set("Authorization", "Bearer token")
+		req, _ := http.NewRequest(http.MethodGet, "http://example.test", nil)
+		req.Header.Set("Authorization", "Bearer token-a")
 		return req
 	}
 
-	if _, err := NewSupabaseAuthProvider("", "").Authenticate(request()); !errors.Is(err, ErrUnauthorizedHuman) {
+	provider := NewSupabaseAuthProvider("", "")
+	if _, err := provider.Authenticate(request()); !errors.Is(err, ErrUnauthorizedHuman) {
 		t.Fatalf("expected unauthorized for missing config, got %v", err)
 	}
 
-	reqMissingBearer := &http.Request{Header: http.Header{}}
-	provider := NewSupabaseAuthProvider("https://example.supabase.co", "anon")
+	provider = NewSupabaseAuthProvider("https://example.supabase.co", "anon")
+	reqMissingBearer, _ := http.NewRequest(http.MethodGet, "http://example.test", nil)
 	if _, err := provider.Authenticate(reqMissingBearer); !errors.Is(err, ErrUnauthorizedHuman) {
 		t.Fatalf("expected unauthorized for missing bearer, got %v", err)
 	}
 
-	provider = NewSupabaseAuthProvider("://bad-url", "anon")
+	provider = NewSupabaseAuthProvider("::invalid::", "anon")
 	if _, err := provider.Authenticate(request()); !errors.Is(err, ErrUnauthorizedHuman) {
-		t.Fatalf("expected unauthorized for request-build failure, got %v", err)
+		t.Fatalf("expected unauthorized for invalid supabase URL, got %v", err)
 	}
 
 	provider = NewSupabaseAuthProvider("https://example.supabase.co", "anon")
@@ -111,27 +125,50 @@ func TestSupabaseAuthProviderAuthenticateUnauthorizedPaths(t *testing.T) {
 	}
 
 	provider.httpClient = &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+		return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(`not-json`))}, nil
+	})}
+	if _, err := provider.Authenticate(request()); !errors.Is(err, ErrUnauthorizedHuman) {
+		t.Fatalf("expected unauthorized for invalid json, got %v", err)
+	}
+
+	provider.httpClient = &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
 		return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(`{"id":""}`))}, nil
 	})}
 	if _, err := provider.Authenticate(request()); !errors.Is(err, ErrUnauthorizedHuman) {
 		t.Fatalf("expected unauthorized for empty id, got %v", err)
+	}
+
+	provider.httpClient = &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+		return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(`{"email":"a@b.test"}`))}, nil
+	})}
+	if _, err := provider.Authenticate(request()); !errors.Is(err, ErrUnauthorizedHuman) {
+		t.Fatalf("expected unauthorized when id missing, got %v", err)
 	}
 }
 
 func TestSupabaseAuthProviderAuthenticateSuccess(t *testing.T) {
 	provider := NewSupabaseAuthProvider("https://example.supabase.co", "anon")
 	provider.httpClient = &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		if req.URL.String() != "https://example.supabase.co/auth/v1/user" {
+			t.Fatalf("unexpected supabase URL: %s", req.URL.String())
+		}
 		if got := req.Header.Get("Authorization"); got != "Bearer valid-token" {
 			t.Fatalf("expected forwarded bearer token, got %q", got)
 		}
 		if got := req.Header.Get("apikey"); got != "anon" {
 			t.Fatalf("expected apikey header, got %q", got)
 		}
-		body := `{"id":"user-123","email":"USER@EXAMPLE.COM","email_confirmed_at":"2026-04-08T00:00:00Z"}`
-		return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(body))}, nil
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Body: io.NopCloser(strings.NewReader(`{
+				"id": " user-123 ",
+				"email": " USER@EXAMPLE.COM ",
+				"email_confirmed_at": "2026-04-08T00:00:00Z"
+			}`)),
+		}, nil
 	})}
 
-	req := &http.Request{Header: http.Header{}}
+	req, _ := http.NewRequest(http.MethodGet, "http://example.test", nil)
 	req.Header.Set("Authorization", "Bearer valid-token")
 
 	identity, err := provider.Authenticate(req)

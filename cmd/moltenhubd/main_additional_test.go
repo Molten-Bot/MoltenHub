@@ -27,32 +27,61 @@ func TestEnvBoolParsesAndFallsBack(t *testing.T) {
 }
 
 func TestLoadDotEnvParsesSupportedFormsAndPreservesExistingValues(t *testing.T) {
-	fromExportKey := "MOLTENHUB_TEST_DOTENV_FROM_EXPORT"
-	quotedKey := "MOLTENHUB_TEST_DOTENV_QUOTED"
-	singleQuotedKey := "MOLTENHUB_TEST_DOTENV_SINGLE_QUOTED"
-	existingKey := "MOLTENHUB_TEST_DOTENV_EXISTING"
+	const (
+		existingKey     = "MOLTENHUB_DOTENV_KEEP_EXISTING_TEST"
+		fromExportKey   = "MOLTENHUB_DOTENV_FROM_EXPORT_TEST"
+		quotedKey       = "MOLTENHUB_DOTENV_QUOTED_TEST"
+		singleQuotedKey = "MOLTENHUB_DOTENV_SINGLE_QUOTED_TEST"
+	)
 
 	t.Setenv(existingKey, "already-set")
 
 	dir := t.TempDir()
-	path := filepath.Join(dir, ".env")
-	content := fmt.Sprintf("# comment\nexport %s=exported\n%s=\"quoted value\"\n%s='single value'\n%s=from_file\nINVALID_LINE\n", fromExportKey, quotedKey, singleQuotedKey, existingKey)
-	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+	dotEnvPath := filepath.Join(dir, ".env")
+	contents := fmt.Sprintf(`
+# comment
+export %s=exported
+%s="two words"
+%s='three words'
+%s=should-not-overwrite
+INVALID_LINE
+=value-without-key
+`, fromExportKey, quotedKey, singleQuotedKey, existingKey)
+	if err := os.WriteFile(dotEnvPath, []byte(contents), 0o644); err != nil {
 		t.Fatalf("write temp .env: %v", err)
 	}
 
-	loadDotEnv(path)
+	loadDotEnv(dotEnvPath)
 
 	if got := os.Getenv(fromExportKey); got != "exported" {
 		t.Fatalf("expected %s=exported, got %q", fromExportKey, got)
 	}
-	if got := os.Getenv(quotedKey); got != "quoted value" {
+	if got := os.Getenv(quotedKey); got != "two words" {
 		t.Fatalf("expected %s with quotes stripped, got %q", quotedKey, got)
 	}
-	if got := os.Getenv(singleQuotedKey); got != "single value" {
+	if got := os.Getenv(singleQuotedKey); got != "three words" {
 		t.Fatalf("expected %s with quotes stripped, got %q", singleQuotedKey, got)
 	}
 	if got := os.Getenv(existingKey); got != "already-set" {
 		t.Fatalf("expected existing env var to be preserved, got %q", got)
+	}
+
+	loadDotEnv(filepath.Join(dir, "missing.env"))
+}
+
+func TestValidateLaunchConfiguration(t *testing.T) {
+	t.Setenv("HUMAN_AUTH_PROVIDER", "dev")
+	t.Setenv("MOLTENHUB_STORAGE_STARTUP_MODE", "strict")
+	t.Setenv("MOLTENHUB_STATE_BACKEND", "memory")
+	t.Setenv("MOLTENHUB_QUEUE_BACKEND", "memory")
+	t.Setenv("MOLTENHUB_CORS_ALLOWED_ORIGINS", "")
+
+	if err := validateLaunchConfiguration(); err != nil {
+		t.Fatalf("expected default launch config to validate, got %v", err)
+	}
+
+	t.Setenv("MOLTENHUB_STATE_BACKEND", "unknown-backend")
+	if err := validateLaunchConfiguration(); err == nil {
+		t.Fatal("expected validation error for unsupported state backend")
 	}
 }
