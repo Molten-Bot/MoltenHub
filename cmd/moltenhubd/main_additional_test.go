@@ -1,0 +1,84 @@
+package main
+
+import (
+	"fmt"
+	"os"
+	"path/filepath"
+	"testing"
+)
+
+func TestEnvBool(t *testing.T) {
+	t.Setenv("TEST_BOOL", "")
+	if got := envBool("TEST_BOOL", true); !got {
+		t.Fatal("expected fallback=true when env var unset")
+	}
+
+	t.Setenv("TEST_BOOL", "not-bool")
+	if got := envBool("TEST_BOOL", false); got {
+		t.Fatal("expected fallback=false when env var is invalid")
+	}
+
+	t.Setenv("TEST_BOOL", "true")
+	if got := envBool("TEST_BOOL", false); !got {
+		t.Fatal("expected parsed bool true")
+	}
+}
+
+func TestLoadDotEnv(t *testing.T) {
+	const (
+		keepExistingKey = "MOLTENHUB_DOTENV_KEEP_EXISTING_TEST"
+		fromExportKey   = "MOLTENHUB_DOTENV_FROM_EXPORT_TEST"
+		quotedKey       = "MOLTENHUB_DOTENV_QUOTED_TEST"
+		singleQuotedKey = "MOLTENHUB_DOTENV_SINGLE_QUOTED_TEST"
+	)
+	t.Setenv(keepExistingKey, "already-set")
+
+	dir := t.TempDir()
+	dotEnvPath := filepath.Join(dir, ".env")
+	contents := fmt.Sprintf(`
+# comment
+export %s=exported
+%s="two words"
+%s='three words'
+%s=should-not-overwrite
+INVALID_LINE
+=value-without-key
+`, fromExportKey, quotedKey, singleQuotedKey, keepExistingKey)
+	if err := os.WriteFile(dotEnvPath, []byte(contents), 0o644); err != nil {
+		t.Fatalf("write temp .env: %v", err)
+	}
+
+	loadDotEnv(dotEnvPath)
+
+	if got := os.Getenv(fromExportKey); got != "exported" {
+		t.Fatalf("expected %s=exported, got %q", fromExportKey, got)
+	}
+	if got := os.Getenv(quotedKey); got != "two words" {
+		t.Fatalf("expected %s with quotes stripped, got %q", quotedKey, got)
+	}
+	if got := os.Getenv(singleQuotedKey); got != "three words" {
+		t.Fatalf("expected %s with quotes stripped, got %q", singleQuotedKey, got)
+	}
+	if got := os.Getenv(keepExistingKey); got != "already-set" {
+		t.Fatalf("expected existing env var to be preserved, got %q", got)
+	}
+
+	loadDotEnv(filepath.Join(dir, "missing.env"))
+}
+
+func TestValidateLaunchConfiguration(t *testing.T) {
+	t.Setenv("HUMAN_AUTH_PROVIDER", "dev")
+	t.Setenv("MOLTENHUB_STORAGE_STARTUP_MODE", "strict")
+	t.Setenv("MOLTENHUB_STATE_BACKEND", "memory")
+	t.Setenv("MOLTENHUB_QUEUE_BACKEND", "memory")
+	t.Setenv("MOLTENHUB_CORS_ALLOWED_ORIGINS", "")
+
+	if err := validateLaunchConfiguration(); err != nil {
+		t.Fatalf("expected default launch config to validate, got %v", err)
+	}
+
+	t.Setenv("MOLTENHUB_STATE_BACKEND", "unknown-backend")
+	if err := validateLaunchConfiguration(); err == nil {
+		t.Fatal("expected validation error for unsupported state backend")
+	}
+}
