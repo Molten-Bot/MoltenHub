@@ -30,6 +30,7 @@ Optional privileged UI config key:
 Other auth/runtime knobs:
 - `BIND_TOKEN_TTL_MINUTES=15` (default `15`)
 - `MOLTENHUB_MAX_METADATA_BYTES=196608` (default `192KB`)
+- `MOLTENHUB_FEDERATION_PEER_SHARED_SECRET=<secret>`: optional runtime input used by the local federation smoke runner instead of embedding a shared secret in the repository.
 
 Browser API CORS:
 - `MOLTENHUB_ENABLE_LOCAL_CORS=true`: allows local testing origins (`localhost`, `127.0.0.1`, `::1`, plus `Origin: null` from `file://`).

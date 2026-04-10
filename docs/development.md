@@ -85,12 +85,14 @@ bash scripts/release/run_container_smoke.sh moltenhub:local
 Run federation smoke tests (two local containers, trust setup, bridged messaging):
 
 ```bash
+export MOLTENHUB_FEDERATION_PEER_SHARED_SECRET="$(openssl rand -hex 24)"
 docker build -t moltenhub:local .
 bash scripts/release/run_federation_container_smoke.sh moltenhub:local
 ```
 
 This uses `scripts/release/docker-compose.federation-smoke.yml`.
 The runner `cmd/moltenhub-federation-smoke/main.go` bootstraps pairing, trust approvals, and A<->B messaging.
+The runner fails fast unless the shared secret is provided via `MOLTENHUB_FEDERATION_PEER_SHARED_SECRET` or `-peer-shared-secret`.
 
 ## Federated Latency SLO
 

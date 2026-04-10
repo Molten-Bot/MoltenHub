@@ -14,7 +14,6 @@ import (
 
 const (
 	peerID       = "alpha-beta"
-	peerSecret   = "local-federation-shared-secret"
 	alphaPeerURL = "http://moltenhub-alpha:8080"
 	betaPeerURL  = "http://moltenhub-beta:8080"
 )
@@ -22,6 +21,7 @@ const (
 type runner struct {
 	alphaBaseURL string
 	betaBaseURL  string
+	peerSecret   string
 	client       *http.Client
 
 	alphaOrgID     string
@@ -45,11 +45,19 @@ type step struct {
 func main() {
 	alphaBaseURL := flag.String("alpha-base-url", "http://127.0.0.1:18080", "Alpha MoltenHub base URL")
 	betaBaseURL := flag.String("beta-base-url", "http://127.0.0.1:18081", "Beta MoltenHub base URL")
+	peerSharedSecretFlag := flag.String("peer-shared-secret", "", "Federation peer shared secret (falls back to MOLTENHUB_FEDERATION_PEER_SHARED_SECRET)")
 	flag.Parse()
+
+	peerSecret, err := resolvePeerSharedSecret(*peerSharedSecretFlag)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "FAIL startup: %v\n", err)
+		os.Exit(1)
+	}
 
 	r := &runner{
 		alphaBaseURL: strings.TrimRight(*alphaBaseURL, "/"),
 		betaBaseURL:  strings.TrimRight(*betaBaseURL, "/"),
+		peerSecret:   peerSecret,
 		client: &http.Client{
 			Timeout: 10 * time.Second,
 		},
@@ -72,6 +80,16 @@ func main() {
 		}
 		fmt.Printf("PASS %s\n", st.name)
 	}
+}
+
+func resolvePeerSharedSecret(flagValue string) (string, error) {
+	if secret := strings.TrimSpace(flagValue); secret != "" {
+		return secret, nil
+	}
+	if secret := strings.TrimSpace(os.Getenv("MOLTENHUB_FEDERATION_PEER_SHARED_SECRET")); secret != "" {
+		return secret, nil
+	}
+	return "", fmt.Errorf("missing federation peer shared secret: set -peer-shared-secret or MOLTENHUB_FEDERATION_PEER_SHARED_SECRET")
 }
 
 func (r *runner) stepHealth() error {
@@ -306,7 +324,7 @@ func (r *runner) createPeer(baseURL, canonicalBaseURL, deliveryBaseURL string) e
 		"peer_id":            peerID,
 		"canonical_base_url": canonicalBaseURL,
 		"delivery_base_url":  deliveryBaseURL,
-		"shared_secret":      peerSecret,
+		"shared_secret":      r.peerSecret,
 	})
 	if err != nil {
 		return err

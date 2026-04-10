@@ -26,6 +26,8 @@ type fakeFedHub struct {
 	server *httptest.Server
 	peer   *fakeFedHub
 
+	expectedPeerSecret string
+
 	nextOrgID      int
 	nextBindToken  int
 	nextTokenID    int
@@ -143,6 +145,11 @@ func (h *fakeFedHub) handle(w http.ResponseWriter, r *http.Request) {
 		return
 
 	case r.Method == http.MethodPost && r.URL.Path == "/v1/admin/peers":
+		body := decodeBody()
+		if got := asString(body, "shared_secret"); got != h.expectedPeerSecret {
+			writeJSON(http.StatusBadRequest, map[string]any{"error": "invalid_shared_secret"})
+			return
+		}
 		writeJSON(http.StatusCreated, map[string]any{"peer_id": peerID})
 		return
 
@@ -241,10 +248,13 @@ func TestRunnerFederationSmokeFlow(t *testing.T) {
 	defer beta.close()
 	alpha.peer = beta
 	beta.peer = alpha
+	alpha.expectedPeerSecret = "test-peer-secret"
+	beta.expectedPeerSecret = "test-peer-secret"
 
 	r := &runner{
 		alphaBaseURL: alpha.server.URL,
 		betaBaseURL:  beta.server.URL,
+		peerSecret:   "test-peer-secret",
 		client:       &http.Client{Timeout: 5 * time.Second},
 	}
 
@@ -263,5 +273,41 @@ func TestRunnerFederationSmokeFlow(t *testing.T) {
 		if err := tc.run(r); err != nil {
 			t.Fatalf("%s: %v", tc.name, err)
 		}
+	}
+}
+
+func TestResolvePeerSharedSecretPrefersFlag(t *testing.T) {
+	t.Setenv("MOLTENHUB_FEDERATION_PEER_SHARED_SECRET", "env-secret")
+
+	got, err := resolvePeerSharedSecret("flag-secret")
+	if err != nil {
+		t.Fatalf("resolvePeerSharedSecret returned error: %v", err)
+	}
+	if got != "flag-secret" {
+		t.Fatalf("expected flag-secret, got %q", got)
+	}
+}
+
+func TestResolvePeerSharedSecretFallsBackToEnv(t *testing.T) {
+	t.Setenv("MOLTENHUB_FEDERATION_PEER_SHARED_SECRET", "env-secret")
+
+	got, err := resolvePeerSharedSecret("")
+	if err != nil {
+		t.Fatalf("resolvePeerSharedSecret returned error: %v", err)
+	}
+	if got != "env-secret" {
+		t.Fatalf("expected env-secret, got %q", got)
+	}
+}
+
+func TestResolvePeerSharedSecretRequiresConfiguration(t *testing.T) {
+	t.Setenv("MOLTENHUB_FEDERATION_PEER_SHARED_SECRET", "")
+
+	_, err := resolvePeerSharedSecret("")
+	if err == nil {
+		t.Fatal("expected missing secret error")
+	}
+	if !strings.Contains(err.Error(), "MOLTENHUB_FEDERATION_PEER_SHARED_SECRET") {
+		t.Fatalf("expected env guidance in error, got %v", err)
 	}
 }
