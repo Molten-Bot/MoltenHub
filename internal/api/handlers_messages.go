@@ -41,6 +41,14 @@ type runtimeHandlerError struct {
 	extras  map[string]any
 }
 
+func runtimeErrorExtrasFromErr(err error) map[string]any {
+	detail := strings.TrimSpace(store.SanitizeErrorWithDetail(err))
+	if detail == "" {
+		return nil
+	}
+	return map[string]any{"details": detail}
+}
+
 func publishResponse(record model.MessageRecord, idempotent bool) map[string]any {
 	return map[string]any{
 		"message_id":        record.Message.MessageID,
@@ -216,6 +224,7 @@ func (h *Handler) publishFromAgent(ctx context.Context, senderAgentUUID string, 
 					status:  http.StatusInternalServerError,
 					code:    "store_error",
 					message: "failed to register message",
+					extras:  runtimeErrorExtrasFromErr(err),
 				}
 			}
 			h.clearStateRuntimeError()
@@ -237,6 +246,7 @@ func (h *Handler) publishFromAgent(ctx context.Context, senderAgentUUID string, 
 					status:  http.StatusInternalServerError,
 					code:    "store_error",
 					message: "failed to enqueue peer delivery",
+					extras:  runtimeErrorExtrasFromErr(err),
 				}
 			}
 			h.processPeerOutboxes(ctx, 1)
@@ -261,6 +271,7 @@ func (h *Handler) publishFromAgent(ctx context.Context, senderAgentUUID string, 
 					status:  http.StatusInternalServerError,
 					code:    "store_error",
 					message: "failed to resolve receiver",
+					extras:  runtimeErrorExtrasFromErr(err),
 				}
 			}
 			req.ToAgentUUID = resolvedUUID
@@ -287,6 +298,7 @@ func (h *Handler) publishFromAgent(ctx context.Context, senderAgentUUID string, 
 			status:  http.StatusInternalServerError,
 			code:    "store_error",
 			message: "failed to resolve receiver",
+			extras:  runtimeErrorExtrasFromErr(err),
 		}
 	}
 	if req.ToAgentURI != "" && req.ToAgentURI != h.agentURI(targetAgent) {
@@ -320,6 +332,7 @@ func (h *Handler) publishFromAgent(ctx context.Context, senderAgentUUID string, 
 				status:  http.StatusInternalServerError,
 				code:    "store_error",
 				message: "failed to authorize publish",
+				extras:  runtimeErrorExtrasFromErr(err),
 			}
 		}
 	}
@@ -364,6 +377,7 @@ func (h *Handler) publishFromAgent(ctx context.Context, senderAgentUUID string, 
 			status:  http.StatusInternalServerError,
 			code:    "store_error",
 			message: "failed to register message",
+			extras:  runtimeErrorExtrasFromErr(err),
 		}
 	}
 	h.clearStateRuntimeError()
@@ -393,6 +407,7 @@ func (h *Handler) publishFromAgent(ctx context.Context, senderAgentUUID string, 
 			status:  http.StatusInternalServerError,
 			code:    "store_error",
 			message: "failed to enqueue message",
+			extras:  runtimeErrorExtrasFromErr(err),
 		}
 	}
 
@@ -448,6 +463,7 @@ func (h *Handler) pullForAgent(ctx context.Context, receiverAgentUUID string, ti
 				status:  http.StatusInternalServerError,
 				code:    "store_error",
 				message: "failed to dequeue message",
+				extras:  runtimeErrorExtrasFromErr(err),
 			}
 		} else if ok {
 			result, handlerErr := h.claimMessageForAgent(ctx, receiverAgentUUID, message)
@@ -474,6 +490,7 @@ func (h *Handler) pullForAgent(ctx context.Context, receiverAgentUUID string, ti
 				status:  http.StatusInternalServerError,
 				code:    "store_error",
 				message: "failed to dequeue message",
+				extras:  runtimeErrorExtrasFromErr(err),
 			}
 		} else if ok {
 			cancel()
@@ -638,6 +655,7 @@ func (h *Handler) ackDeliveryForAgent(receiverAgentUUID, deliveryID string) (mod
 				status:  http.StatusInternalServerError,
 				code:    "store_error",
 				message: "failed to acknowledge delivery",
+				extras:  runtimeErrorExtrasFromErr(err),
 			}
 		}
 	}
@@ -665,6 +683,7 @@ func (h *Handler) nackDeliveryForAgent(ctx context.Context, receiverAgentUUID, d
 				status:  http.StatusInternalServerError,
 				code:    "store_error",
 				message: "failed to requeue delivery",
+				extras:  runtimeErrorExtrasFromErr(err),
 			}
 		}
 	}
@@ -674,6 +693,7 @@ func (h *Handler) nackDeliveryForAgent(ctx context.Context, receiverAgentUUID, d
 			status:  http.StatusInternalServerError,
 			code:    "store_error",
 			message: "failed to requeue message",
+			extras:  runtimeErrorExtrasFromErr(err),
 		}
 	}
 	h.clearQueueRuntimeError()
@@ -695,6 +715,7 @@ func (h *Handler) messageStatusForAgent(agentUUID, messageID string) (model.Mess
 			status:  http.StatusInternalServerError,
 			code:    "store_error",
 			message: "failed to load message status",
+			extras:  runtimeErrorExtrasFromErr(err),
 		}
 	}
 	if record.Message.FromAgentUUID != agentUUID && record.Message.ToAgentUUID != agentUUID {
@@ -759,6 +780,7 @@ func (h *Handler) claimMessageForAgent(ctx context.Context, receiverAgentUUID st
 			status:  http.StatusInternalServerError,
 			code:    "store_error",
 			message: "failed to lease message",
+			extras:  runtimeErrorExtrasFromErr(err),
 		}
 	}
 	return deliveryResponse(record, delivery), nil

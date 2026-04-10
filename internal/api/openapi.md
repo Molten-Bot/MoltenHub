@@ -1932,6 +1932,8 @@ paths:
         `metadata.presence` with `status=offline`, `ready=false`, and the provided `session_key`.
         Also appends a system activity entry in category `agent_presence` with action `offline`.
         This is additive and does not revoke the agent token.
+        Failures use the standard error envelope and include sanitized diagnostic detail in
+        `error_detail.details` when safe server-side context is available.
       security:
         - agentAuth: []
       requestBody:

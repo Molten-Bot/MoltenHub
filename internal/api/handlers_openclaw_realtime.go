@@ -138,7 +138,7 @@ func (h *Handler) handleOpenClawRegisterPlugin(w http.ResponseWriter, r *http.Re
 		case errors.Is(err, store.ErrInvalidAgentType):
 			writeError(w, http.StatusBadRequest, "invalid_agent_type", "metadata.agent_type must be 2-64 chars: a-z, 0-9, ., _, -")
 		default:
-			writeError(w, http.StatusInternalServerError, "store_error", "failed to register plugin metadata")
+			writeErrorWithHintAndExtras(w, http.StatusInternalServerError, "store_error", "failed to register plugin metadata", nil, runtimeErrorExtrasFromErr(err))
 		}
 		return
 	}
@@ -156,7 +156,7 @@ func (h *Handler) handleOpenClawRegisterPlugin(w http.ResponseWriter, r *http.Re
 			writeError(w, http.StatusNotFound, "unknown_agent", "agent_uuid is not registered")
 			return
 		}
-		writeError(w, http.StatusInternalServerError, "store_error", "failed to register plugin activity")
+		writeErrorWithHintAndExtras(w, http.StatusInternalServerError, "store_error", "failed to register plugin activity", nil, runtimeErrorExtrasFromErr(err))
 		return
 	}
 
@@ -196,7 +196,7 @@ func (h *Handler) handleOpenClawOffline(w http.ResponseWriter, r *http.Request) 
 		case errors.Is(err, store.ErrInvalidAgentType):
 			writeError(w, http.StatusBadRequest, "invalid_agent_type", "metadata.agent_type must be 2-64 chars: a-z, 0-9, ., _, -")
 		default:
-			writeError(w, http.StatusInternalServerError, "store_error", "failed to update agent presence")
+			writeErrorWithHintAndExtras(w, http.StatusInternalServerError, "store_error", "failed to update agent presence", nil, runtimeErrorExtrasFromErr(err))
 		}
 		return
 	}

@@ -8,6 +8,10 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
+
+	"moltenhub/internal/auth"
+	"moltenhub/internal/longpoll"
+	"moltenhub/internal/store"
 )
 
 func TestOpenClawPublishPullAckFlow(t *testing.T) {
@@ -365,6 +369,58 @@ func TestOpenClawOfflineEndpointUpdatesPresenceAndActivityLog(t *testing.T) {
 	activityLog, _ := agent["activity_log"].([]any)
 	if !hasActivityText(activityLog, "websocket transport offline") {
 		t.Fatalf("expected activity_log to include websocket transport offline, got %v", activityLog)
+	}
+}
+
+func TestOpenClawWebSocketPublishFailureIncludesErrorDetailsForCaller(t *testing.T) {
+	mem := store.NewMemoryStore()
+	waiters := longpoll.NewWaiters()
+	queue := &failOnceQueue{
+		base:            mem,
+		failNextEnqueue: true,
+	}
+	h := NewHandler(mem, queue, waiters, auth.NewDevHumanAuthProvider(), "https://hub.example.com", "", "", "", "", "example.com", true, 15*time.Minute, false)
+	router := NewRouter(h)
+
+	_, _, tokenA, _, _, _, _, agentUUIDB := setupTrustedAgents(t, router)
+
+	server := httptest.NewServer(router)
+	defer server.Close()
+
+	wsURL := strings.Replace(server.URL, "http://", "ws://", 1) + "/v1/openclaw/messages/ws?session_key=enqueue-failure"
+	headers := http.Header{}
+	headers.Set("Authorization", "Bearer "+tokenA)
+
+	conn, _, err := websocket.DefaultDialer.Dial(wsURL, headers)
+	if err != nil {
+		t.Fatalf("expected websocket dial to succeed, got err=%v", err)
+	}
+	defer conn.Close()
+
+	_ = readWSMessage(t, conn, 5*time.Second)
+
+	if err := conn.WriteJSON(map[string]any{
+		"type":          "publish",
+		"request_id":    "enqueue-failure",
+		"to_agent_uuid": agentUUIDB,
+		"message": map[string]any{
+			"kind": "task_request",
+			"text": "run failing task",
+		},
+	}); err != nil {
+		t.Fatalf("expected websocket publish write to succeed, got err=%v", err)
+	}
+
+	resp := waitForWSResponseRequestID(t, conn, "enqueue-failure", 5*time.Second)
+	if ok, _ := resp["ok"].(bool); ok {
+		t.Fatalf("expected ws publish response ok=false, got payload=%v", resp)
+	}
+	errorObj, _ := resp["error"].(map[string]any)
+	if got, _ := errorObj["code"].(string); got != "store_error" {
+		t.Fatalf("expected error.code=store_error, got %q payload=%v", got, resp)
+	}
+	if got, _ := errorObj["details"].(string); !strings.Contains(got, "enqueue unavailable") {
+		t.Fatalf("expected error.details to include enqueue failure, got %q payload=%v", got, resp)
 	}
 }
 

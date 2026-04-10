@@ -456,6 +456,36 @@ func TestPeerOutboxProcessingCoalescesConcurrentKicks(t *testing.T) {
 	}
 }
 
+func TestPublishFailureIncludesSanitizedErrorDetailsForCaller(t *testing.T) {
+	mem := store.NewMemoryStore()
+	waiters := longpoll.NewWaiters()
+	queue := &failOnceQueue{
+		base:            mem,
+		failNextEnqueue: true,
+	}
+	h := NewHandler(mem, queue, waiters, auth.NewDevHumanAuthProvider(), "https://hub.example.com", "", "", "", "", "example.com", true, 15*time.Minute, false)
+	router := NewRouter(h)
+
+	_, _, tokenA, _, _, _, _, agentUUIDB := setupTrustedAgents(t, router)
+
+	resp := publish(t, router, tokenA, agentUUIDB, "first")
+	if resp.Code != http.StatusInternalServerError {
+		t.Fatalf("expected publish 500 on enqueue failure, got %d %s", resp.Code, resp.Body.String())
+	}
+
+	payload := decodeJSONMap(t, resp.Body.Bytes())
+	if got, _ := payload["error"].(string); got != "store_error" {
+		t.Fatalf("expected store_error, got %q payload=%v", got, payload)
+	}
+	if got, _ := payload["details"].(string); !strings.Contains(got, "enqueue unavailable") {
+		t.Fatalf("expected top-level details to include enqueue failure, got %q payload=%v", got, payload)
+	}
+	errorDetail, _ := payload["error_detail"].(map[string]any)
+	if got, _ := errorDetail["details"].(string); !strings.Contains(got, "enqueue unavailable") {
+		t.Fatalf("expected nested error_detail.details to include enqueue failure, got %q payload=%v", got, payload)
+	}
+}
+
 func TestHealthReportsRuntimeQueueFailureAndRecovery(t *testing.T) {
 	mem := store.NewMemoryStore()
 	waiters := longpoll.NewWaiters()
