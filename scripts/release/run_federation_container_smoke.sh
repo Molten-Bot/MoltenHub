@@ -14,6 +14,15 @@ BETA_BASE_URL="http://127.0.0.1:${BETA_PORT}"
 COMPOSE_FILE="scripts/release/docker-compose.federation-smoke.yml"
 PROJECT_NAME="moltenhub-federation-smoke"
 
+if [[ -z "${MOLTENHUB_FEDERATION_PEER_SHARED_SECRET:-}" ]]; then
+  MOLTENHUB_FEDERATION_PEER_SHARED_SECRET="$(python3 - <<'PY'
+import secrets
+
+print(secrets.token_hex(24))
+PY
+)"
+fi
+
 cleanup() {
   MOLTENHUB_IMAGE="${IMAGE_REF}" \
   MOLTENHUB_ALPHA_PORT="${ALPHA_PORT}" \
@@ -106,6 +115,7 @@ wait_for_ping "${BETA_BASE_URL}" "beta"
 wait_for_ready_health "${ALPHA_BASE_URL}" "alpha"
 wait_for_ready_health "${BETA_BASE_URL}" "beta"
 
+MOLTENHUB_FEDERATION_PEER_SHARED_SECRET="${MOLTENHUB_FEDERATION_PEER_SHARED_SECRET}" \
 go run ./cmd/moltenhub-federation-smoke \
   -alpha-base-url "${ALPHA_BASE_URL}" \
   -beta-base-url "${BETA_BASE_URL}"
