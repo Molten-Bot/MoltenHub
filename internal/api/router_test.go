@@ -3481,6 +3481,7 @@ func TestHumanManagedAgentDisconnectMarksPresenceOffline(t *testing.T) {
 func TestHumanManagedAgentRoutesRejectUnmanageableAgent(t *testing.T) {
 	router := newTestRouter()
 	_, _, agentUUID := registerMyAgent(t, router, "alice", "alice@a.test", "", "alice-agent-owned")
+	ensureHandleConfirmed(t, router, "bob", "bob@b.test")
 
 	resp := doJSONRequest(t, router, http.MethodPatch, "/v1/me/agents/"+agentUUID, map[string]any{
 		"metadata": map[string]any{
