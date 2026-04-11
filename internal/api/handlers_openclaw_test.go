@@ -613,7 +613,7 @@ func TestOpenClawWebSocketSkillActivationIncludesValidationErrors(t *testing.T) 
 		t.Fatalf("expected ws publish response retryable=false, got payload=%v", resp)
 	}
 	nextAction, _ := resp["next_action"].(string)
-	if !strings.Contains(nextAction, "fix") {
+	if !strings.Contains(nextAction, "read the receiver skill parameters") {
 		t.Fatalf("expected ws publish response next_action guidance, got payload=%v", resp)
 	}
 	errorObj, _ := resp["error"].(map[string]any)
