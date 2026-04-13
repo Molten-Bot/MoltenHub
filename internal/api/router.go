@@ -76,6 +76,8 @@ type humanActor struct {
 type RouterOptions struct {
 	EnableLocalCORS    bool
 	AllowedCORSOrigins map[string]struct{}
+	RateLimitPerMinute int
+	TrustProxyHeaders  bool
 }
 
 func NewHandler(
@@ -178,6 +180,7 @@ func NewRouterWithOptions(handler *Handler, opts RouterOptions) http.Handler {
 	mux.HandleFunc("/", handler.handleUI)
 	router := withAPICompression(mux)
 	router = withPeerOutboxProcessing(handler, router)
+	router = withRateLimit(router, newRateLimiter(opts.RateLimitPerMinute), opts.TrustProxyHeaders)
 	if opts.EnableLocalCORS || len(opts.AllowedCORSOrigins) > 0 {
 		router = withAPICORS(router, opts.EnableLocalCORS, opts.AllowedCORSOrigins)
 	}
@@ -794,6 +797,7 @@ func writeError(w http.ResponseWriter, status int, code string, message string) 
 
 func writeErrorWithHintAndExtras(w http.ResponseWriter, status int, code string, message string, overrideHint *errorHint, extras map[string]any) {
 	payload := map[string]any{
+		"failure": true,
 		"error":   code,
 		"message": message,
 	}
@@ -965,6 +969,11 @@ func defaultErrorHint(code string) (errorHint, bool) {
 		return errorHint{
 			Retryable:  false,
 			NextAction: "read the receiver skill parameters, send required fields only, and never pass secrets",
+		}, true
+	case "rate_limited":
+		return errorHint{
+			Retryable:  true,
+			NextAction: "wait for the Retry-After interval before retrying from the same caller IP",
 		}, true
 	case "agent_handle_locked":
 		return errorHint{

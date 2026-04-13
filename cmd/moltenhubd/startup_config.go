@@ -5,6 +5,7 @@ import (
 	"log"
 	"os"
 	"sort"
+	"strconv"
 	"strings"
 
 	"moltenhub/internal/api"
@@ -26,6 +27,7 @@ const (
 	defaultHydrationTimeout = "20"
 	defaultHydrationListC   = "6"
 	defaultHydrationGetC    = "24"
+	defaultRateLimitRPM     = "500"
 )
 
 type launchDiagnostic struct {
@@ -151,6 +153,8 @@ func collectLaunchDiagnostics(lookup func(string) (string, bool)) ([]launchDiagn
 		warnIfUnset(lookup, "MOLTENHUB_UI_DEV_MODE", "false", "embedded UI assets will be served; local file hot-reload stays disabled"),
 		warnIfUnset(lookup, "MOLTENHUB_ENABLE_LOCAL_CORS", "false", "browser calls from local file:// or alternate localhost origins remain blocked"),
 		warnIfUnset(lookup, "MOLTENHUB_CORS_ALLOWED_ORIGINS", "<unset>", "browser calls from other origins remain blocked unless explicitly allowlisted"),
+		warnIfUnset(lookup, "MOLTENHUB_RATE_LIMIT_REQUESTS_PER_MINUTE", defaultRateLimitRPM, "per-caller IP HTTP rate limiting will use the default ceiling"),
+		warnIfUnset(lookup, "MOLTENHUB_RATE_LIMIT_TRUST_PROXY_HEADERS", "false", "rate limiting will use direct remote addresses instead of forwarded proxy headers"),
 		warnIfUnset(lookup, "MOLTENHUB_HEADLESS_MODE", "false", "the built-in UI stays enabled"),
 		warnIfUnset(lookup, "MOLTENHUB_CANONICAL_BASE_URL", "<unset>", "entity uri fields will be omitted from responses and snapshots"),
 		warnIfUnset(lookup, "MOLTENHUB_ADMIN_SNAPSHOT_KEY", "<unset>", "snapshot endpoint access falls back to admin identity checks only"),
@@ -171,6 +175,17 @@ func collectLaunchDiagnostics(lookup func(string) (string, bool)) ([]launchDiagn
 			diagnostics = append(diagnostics, launchDiagnostic{
 				level:   "ERROR",
 				name:    "MOLTENHUB_CORS_ALLOWED_ORIGINS",
+				value:   raw,
+				message: err.Error(),
+			})
+		}
+	}
+	if raw := envValue(lookup, "MOLTENHUB_RATE_LIMIT_REQUESTS_PER_MINUTE"); raw != "" {
+		if _, err := parseRateLimitRequestsPerMinute(raw); err != nil {
+			failures = append(failures, "MOLTENHUB_RATE_LIMIT_REQUESTS_PER_MINUTE")
+			diagnostics = append(diagnostics, launchDiagnostic{
+				level:   "ERROR",
+				name:    "MOLTENHUB_RATE_LIMIT_REQUESTS_PER_MINUTE",
 				value:   raw,
 				message: err.Error(),
 			})
@@ -355,4 +370,19 @@ func appendOptionalWarnings(existing []launchDiagnostic, extra ...launchDiagnost
 		existing = append(existing, diagnostic)
 	}
 	return existing
+}
+
+func parseRateLimitRequestsPerMinute(raw string) (int, error) {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		return 500, nil
+	}
+	value, err := strconv.Atoi(trimmed)
+	if err != nil {
+		return 0, fmt.Errorf("expected a non-negative integer requests-per-minute value")
+	}
+	if value < 0 {
+		return 0, fmt.Errorf("expected a non-negative integer requests-per-minute value")
+	}
+	return value, nil
 }

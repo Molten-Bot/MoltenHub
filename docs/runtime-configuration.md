@@ -30,11 +30,18 @@ Optional privileged UI config key:
 Other auth/runtime knobs:
 - `BIND_TOKEN_TTL_MINUTES=15` (default `15`)
 - `MOLTENHUB_MAX_METADATA_BYTES=196608` (default `192KB`)
+- `MOLTENHUB_RATE_LIMIT_REQUESTS_PER_MINUTE=500` (default `500`): per-caller IP HTTP request ceiling. Set `0` to disable. Limited requests return HTTP `429`, `Retry-After`, `failure=true`, and canonical `error_detail`.
+- `MOLTENHUB_RATE_LIMIT_TRUST_PROXY_HEADERS=false` (default `false`): when `true`, rate limiting keys off `X-Forwarded-For` first, then `X-Real-IP`. Only enable this behind a trusted nginx/ingress layer that overwrites those headers.
 
 Browser API CORS:
 - `MOLTENHUB_ENABLE_LOCAL_CORS=true`: allows local testing origins (`localhost`, `127.0.0.1`, `::1`, plus `Origin: null` from `file://`).
 - `MOLTENHUB_CORS_ALLOWED_ORIGINS=app.example.com,app.qa.example.com`: explicit allowed browser origins via host shorthand.
 - Host shorthand entries allow both `http://` and `https://` for that host. You can also provide full `http://` or `https://` origins; values must be comma-separated and must not include paths, queries, or fragments.
+
+nginx layering:
+- Keep the main MoltenHub container as the Go/distroless runtime.
+- If you want an outer web tier, run nginx in front of it as a sidecar or ingress, not as the base image for the app container.
+- An example nginx config lives at `deploy/nginx/default.conf`.
 
 Canonical URI authority:
 - `MOLTENHUB_CANONICAL_BASE_URL=https://hub.example.com`

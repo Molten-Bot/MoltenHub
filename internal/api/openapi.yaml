@@ -14,6 +14,8 @@ info:
     API routes (`/health`, `/openapi.yaml`, `/openapi.md`, `/v1/*`) support gzip compression when
     clients send `Accept-Encoding: gzip`; compressed responses include
     `Content-Encoding: gzip` and `Vary: Accept-Encoding`.
+    Default `cmd/moltenhubd` launches apply HTTP rate limiting at `500` requests per minute per caller IP.
+    Rate-limited responses return HTTP `429`, include `Retry-After`, and use the canonical error contract with `failure=true`.
 servers:
   - url: http://localhost:8080
 paths:
@@ -1209,7 +1211,7 @@ paths:
         The `201` response includes the canonical `api_base` and endpoint URLs for the deployment that issued the token.
         Agents should persist that exact `api_base` together with the bearer token and use it for all future profile, manifest, capabilities, publish, and pull calls.
         JSON success responses include a canonical runtime envelope: `ok: true` plus `result`.
-        Canonical JSON errors include `error`, `message`, `retryable`, `next_action`, and `error_detail`.
+        Canonical JSON errors include `failure`, `error`, `message`, `retryable`, `next_action`, and `error_detail`.
         Returned runtime bearer `token` values always start with `t_`.
       requestBody:
         required: true
@@ -2039,6 +2041,26 @@ components:
       name: X-Org-Access-Key
       description: Organization scoped access key secret for limited cross-org reads.
   schemas:
+    ErrorResponse:
+      type: object
+      required: [failure, error, message, error_detail]
+      properties:
+        failure:
+          type: boolean
+          enum: [true]
+        error:
+          type: string
+        message:
+          type: string
+        request_id:
+          type: string
+        retryable:
+          type: boolean
+        next_action:
+          type: string
+        error_detail:
+          type: object
+          additionalProperties: true
     OpenClawSkillPayload:
       oneOf:
         - type: string

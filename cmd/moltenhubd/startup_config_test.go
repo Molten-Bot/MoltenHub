@@ -14,6 +14,7 @@ func TestCollectLaunchDiagnostics_DefaultsStateAndQueueToMemoryWithWarnings(t *t
 	assertDiagnosticContains(t, diagnostics, "WARN", "MOLTENHUB_STATE_BACKEND", "defaulting to in-memory state")
 	assertDiagnosticContains(t, diagnostics, "WARN", "MOLTENHUB_QUEUE_BACKEND", "defaulting to in-memory queue")
 	assertDiagnosticContains(t, diagnostics, "WARN", "MOLTENHUB_CANONICAL_BASE_URL", "entity uri fields will be omitted")
+	assertDiagnosticContains(t, diagnostics, "WARN", "MOLTENHUB_RATE_LIMIT_REQUESTS_PER_MINUTE", "per-caller IP HTTP rate limiting will use the default ceiling")
 }
 
 func TestCollectLaunchDiagnostics_FailsWhenSupabaseRequiredVarsMissing(t *testing.T) {
@@ -139,6 +140,19 @@ func TestCollectLaunchDiagnostics_AcceptsHostShorthandCORSAllowedOrigins(t *test
 			t.Fatalf("did not expect MOLTENHUB_CORS_ALLOWED_ORIGINS error diagnostic, got %+v", diagnostic)
 		}
 	}
+}
+
+func TestCollectLaunchDiagnostics_FailsWhenRateLimitIsInvalid(t *testing.T) {
+	diagnostics, err := collectLaunchDiagnostics(mapLookup(map[string]string{
+		"MOLTENHUB_RATE_LIMIT_REQUESTS_PER_MINUTE": "-1",
+	}))
+	if err == nil {
+		t.Fatal("expected error for invalid rate limit configuration")
+	}
+	if !strings.Contains(err.Error(), "MOLTENHUB_RATE_LIMIT_REQUESTS_PER_MINUTE") {
+		t.Fatalf("expected rate limit env in error, got %v", err)
+	}
+	assertDiagnosticContains(t, diagnostics, "ERROR", "MOLTENHUB_RATE_LIMIT_REQUESTS_PER_MINUTE", "non-negative integer")
 }
 
 func TestDiagnosticLogValueRedactsSensitiveValues(t *testing.T) {

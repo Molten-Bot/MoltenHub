@@ -10,6 +10,23 @@ Run tests in the existing `multi-agent` MoltenHub container:
 docker exec multi-agent-moltenhub-1 sh -lc 'cd /app && /usr/local/go/bin/go test ./...'
 ```
 
+## nginx Layering
+
+Recommended deployment shape:
+- keep the existing MoltenHub Docker image as the application container
+- place nginx in front of it as a sidecar or ingress layer when you need edge buffering, TLS termination, or an outer proxy shield
+
+Why this shape is preferred over making nginx the base image:
+- the app stays a single-process Go runtime with direct health/startup semantics
+- websocket upgrades and runtime error contracts remain owned by MoltenHub
+- you avoid bundling process supervision for nginx plus the app into one container
+- nginx can still add a first-pass edge limit while MoltenHub keeps the canonical per-IP runtime limit
+
+Example companion config:
+- `deploy/nginx/default.conf`
+
+If nginx is forwarding client IPs, set `MOLTENHUB_RATE_LIMIT_TRUST_PROXY_HEADERS=true` in the MoltenHub container so the app keys rate limiting off `X-Forwarded-For` / `X-Real-IP` instead of the proxy address.
+
 ## Release Pipeline
 
 This repository builds, tests, and publishes Docker images.

@@ -54,6 +54,11 @@ func main() {
 		}
 	}
 	enableLocalCORS := envBool("MOLTENHUB_ENABLE_LOCAL_CORS", false)
+	rateLimitPerMinute, err := parseRateLimitRequestsPerMinute(os.Getenv("MOLTENHUB_RATE_LIMIT_REQUESTS_PER_MINUTE"))
+	if err != nil {
+		log.Fatalf("rate limit configuration error: %v", err)
+	}
+	trustProxyHeaders := envBool("MOLTENHUB_RATE_LIMIT_TRUST_PROXY_HEADERS", false)
 	allowedCORSOrigins, err := api.ParseCORSAllowedOrigins(os.Getenv("MOLTENHUB_CORS_ALLOWED_ORIGINS"))
 	if err != nil {
 		log.Fatalf("CORS allowed origins configuration error: %v", err)
@@ -163,6 +168,8 @@ func main() {
 		bootstrap.SetReady(api.NewRouterWithOptions(handler, api.RouterOptions{
 			EnableLocalCORS:    enableLocalCORS,
 			AllowedCORSOrigins: allowedCORSOrigins,
+			RateLimitPerMinute: rateLimitPerMinute,
+			TrustProxyHeaders:  trustProxyHeaders,
 		}))
 		log.Printf("moltenhub runtime ready total_ms=%d phase_durations_ms=%v", totalMS, phaseDurationsMS)
 	}()
@@ -170,6 +177,8 @@ func main() {
 	log.Printf("moltenhub listening on %s", listener.Addr().String())
 	log.Printf("local CORS enabled: %t", enableLocalCORS)
 	log.Printf("configured CORS origins: %d", len(allowedCORSOrigins))
+	log.Printf("rate limit requests per minute: %d", rateLimitPerMinute)
+	log.Printf("rate limit trust proxy headers: %t", trustProxyHeaders)
 	if err := server.Serve(listener); err != nil && err != http.ErrServerClosed {
 		log.Fatalf("server failed: %v", err)
 	}

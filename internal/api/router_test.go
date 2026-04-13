@@ -287,6 +287,95 @@ func TestAPICORSAllowsHostShorthandOrigin(t *testing.T) {
 	}
 }
 
+func TestRateLimitRejectsRepeatedRequestsFromSameIP(t *testing.T) {
+	mem := store.NewMemoryStore()
+	waiters := longpoll.NewWaiters()
+	h := NewHandler(mem, mem, waiters, auth.NewDevHumanAuthProvider(), "https://hub.example.com", "", "", "", "", "example.com", true, 15*time.Minute, false)
+	router := NewRouterWithOptions(h, RouterOptions{RateLimitPerMinute: 1})
+
+	firstReq := httptest.NewRequest(http.MethodGet, "/health", nil)
+	firstReq.RemoteAddr = "198.51.100.10:1234"
+	firstResp := httptest.NewRecorder()
+	router.ServeHTTP(firstResp, firstReq)
+	if firstResp.Code != http.StatusOK {
+		t.Fatalf("expected first request to pass, got %d %s", firstResp.Code, firstResp.Body.String())
+	}
+
+	secondReq := httptest.NewRequest(http.MethodGet, "/health", nil)
+	secondReq.RemoteAddr = "198.51.100.10:9999"
+	secondResp := httptest.NewRecorder()
+	router.ServeHTTP(secondResp, secondReq)
+	if secondResp.Code != http.StatusTooManyRequests {
+		t.Fatalf("expected second request to be rate limited, got %d %s", secondResp.Code, secondResp.Body.String())
+	}
+	if retryAfter := secondResp.Header().Get("Retry-After"); retryAfter == "" {
+		t.Fatalf("expected Retry-After header on rate limit response")
+	}
+
+	payload := decodeJSONMap(t, secondResp.Body.Bytes())
+	if failure, _ := payload["failure"].(bool); !failure {
+		t.Fatalf("expected failure=true on rate limit response, got payload=%v", payload)
+	}
+	if got, _ := payload["error"].(string); got != "rate_limited" {
+		t.Fatalf("expected error=rate_limited, got %q payload=%v", got, payload)
+	}
+	if retryable, ok := payload["retryable"].(bool); !ok || !retryable {
+		t.Fatalf("expected retryable=true, got %v payload=%v", payload["retryable"], payload)
+	}
+	if got, _ := payload["client_ip"].(string); got != "198.51.100.10" {
+		t.Fatalf("expected client_ip to match remote address, got %q payload=%v", got, payload)
+	}
+	if got, _ := payload["limit_per_minute"].(float64); got != 1 {
+		t.Fatalf("expected limit_per_minute=1, got %v payload=%v", payload["limit_per_minute"], payload)
+	}
+	detail, _ := payload["error_detail"].(map[string]any)
+	if got, _ := detail["client_ip"].(string); got != "198.51.100.10" {
+		t.Fatalf("expected error_detail.client_ip to match remote address, got %q payload=%v", got, payload)
+	}
+}
+
+func TestRateLimitTrustsForwardedClientIPWhenEnabled(t *testing.T) {
+	mem := store.NewMemoryStore()
+	waiters := longpoll.NewWaiters()
+	h := NewHandler(mem, mem, waiters, auth.NewDevHumanAuthProvider(), "https://hub.example.com", "", "", "", "", "example.com", true, 15*time.Minute, false)
+	router := NewRouterWithOptions(h, RouterOptions{
+		RateLimitPerMinute: 1,
+		TrustProxyHeaders:  true,
+	})
+
+	firstReq := httptest.NewRequest(http.MethodGet, "/health", nil)
+	firstReq.RemoteAddr = "10.0.0.5:1234"
+	firstReq.Header.Set("X-Forwarded-For", "203.0.113.20")
+	firstResp := httptest.NewRecorder()
+	router.ServeHTTP(firstResp, firstReq)
+	if firstResp.Code != http.StatusOK {
+		t.Fatalf("expected first forwarded request to pass, got %d %s", firstResp.Code, firstResp.Body.String())
+	}
+
+	secondReq := httptest.NewRequest(http.MethodGet, "/health", nil)
+	secondReq.RemoteAddr = "10.0.0.5:4321"
+	secondReq.Header.Set("X-Forwarded-For", "203.0.113.21")
+	secondResp := httptest.NewRecorder()
+	router.ServeHTTP(secondResp, secondReq)
+	if secondResp.Code != http.StatusOK {
+		t.Fatalf("expected distinct forwarded client IP to bypass previous bucket, got %d %s", secondResp.Code, secondResp.Body.String())
+	}
+
+	thirdReq := httptest.NewRequest(http.MethodGet, "/health", nil)
+	thirdReq.RemoteAddr = "10.0.0.5:4444"
+	thirdReq.Header.Set("X-Forwarded-For", "203.0.113.20, 10.0.0.5")
+	thirdResp := httptest.NewRecorder()
+	router.ServeHTTP(thirdResp, thirdReq)
+	if thirdResp.Code != http.StatusTooManyRequests {
+		t.Fatalf("expected repeated forwarded client IP to be rate limited, got %d %s", thirdResp.Code, thirdResp.Body.String())
+	}
+
+	payload := decodeJSONMap(t, thirdResp.Body.Bytes())
+	if got, _ := payload["client_ip"].(string); got != "203.0.113.20" {
+		t.Fatalf("expected forwarded client IP to drive rate limiting, got %q payload=%v", got, payload)
+	}
+}
+
 type eofTrackingBody struct {
 	reader     io.Reader
 	reachedEOF bool
@@ -3830,6 +3919,26 @@ func TestPublishSkillActivationValidatesJSONParameters(t *testing.T) {
 	validationErrors, _ := body["validation_errors"].([]any)
 	if len(validationErrors) == 0 || !strings.Contains(fmt.Sprint(validationErrors[0]), "missing required parameter") {
 		t.Fatalf("expected missing required parameter detail, got %v", validationErrors)
+	}
+}
+
+func TestUnauthorizedErrorsIncludeFailureFlagAndErrorDetail(t *testing.T) {
+	router := newTestRouter()
+
+	req := httptest.NewRequest(http.MethodGet, "/v1/messages/pull", nil)
+	resp := httptest.NewRecorder()
+	router.ServeHTTP(resp, req)
+
+	if resp.Code != http.StatusUnauthorized {
+		t.Fatalf("expected unauthorized pull to return 401, got %d %s", resp.Code, resp.Body.String())
+	}
+	payload := decodeJSONMap(t, resp.Body.Bytes())
+	if failure, _ := payload["failure"].(bool); !failure {
+		t.Fatalf("expected failure=true on unauthorized response, got payload=%v", payload)
+	}
+	detail, _ := payload["error_detail"].(map[string]any)
+	if got, _ := detail["code"].(string); got != "unauthorized" {
+		t.Fatalf("expected error_detail.code=unauthorized, got %q payload=%v", got, payload)
 	}
 }
 

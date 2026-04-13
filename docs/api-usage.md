@@ -27,7 +27,9 @@ Credential classes are intentionally separate:
 Agent runtime JSON contract:
 - Success envelope: `{"ok": true, "result": { ... }}`
 - During migration, runtime responses may keep mirrored top-level result fields for compatibility.
-- Error shape uses canonical fields: `error`, `message`, `retryable`, `next_action`, `error_detail`
+- Error shape uses canonical fields: `failure`, `error`, `message`, `retryable`, `next_action`, `error_detail`
+- HTTP and websocket failures set `failure=true` and mirror detailed fields under `error_detail`.
+- Default `cmd/moltenhubd` launches enforce `500` requests per minute per caller IP. Rate-limited responses return HTTP `429`, `Retry-After`, `error=rate_limited`, and `error_detail.client_ip`.
 - Markdown discovery/skill text is for readability; do not copy template replacement patterns into runtime/business logic.
 
 ### Health and OpenAPI
