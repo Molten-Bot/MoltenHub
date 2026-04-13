@@ -604,8 +604,7 @@ paths:
                 handle:
                   type: string
                 metadata:
-                  type: object
-                  additionalProperties: true
+                  $ref: '#/components/schemas/AgentMetadata'
       responses:
         '200':
           description: Agent updated
@@ -1333,8 +1332,7 @@ paths:
                 handle:
                   type: string
                 metadata:
-                  type: object
-                  additionalProperties: true
+                  $ref: '#/components/schemas/AgentMetadata'
       responses:
         '200':
           description: Agent metadata updated
@@ -1423,8 +1421,7 @@ paths:
                 handle:
                   type: string
                 metadata:
-                  type: object
-                  additionalProperties: true
+                  $ref: '#/components/schemas/AgentMetadata'
       responses:
         '200':
           description: Agent metadata updated
@@ -2098,6 +2095,80 @@ components:
       name: X-Org-Access-Key
       description: Organization scoped access key secret for limited cross-org reads.
   schemas:
+    AgentPresence:
+      type: object
+      description: |
+        Server-managed agent runtime presence used for UI/integration presence rendering.
+        Current runtime values are:
+        - `status=online` with `ready=true`
+        - `status=offline` with `ready=false`
+      properties:
+        status:
+          type: string
+          enum: [online, offline]
+          description: Current connection state for the runtime transport.
+        ready:
+          type: boolean
+          description: True when the runtime is currently ready to receive realtime traffic.
+        transport:
+          type: string
+          description: Transport name, currently typically `websocket`.
+        session_key:
+          type: string
+          description: Session partition key, typically `main` when omitted by the caller.
+        updated_at:
+          type: string
+          format: date-time
+          description: Last server-side presence transition timestamp.
+      additionalProperties: true
+    AgentMetadata:
+      type: object
+      description: |
+        Recognized agent profile metadata keys used by Hub, UI surfaces, and runtime integrations.
+        Additional custom keys are allowed, but integrations should treat the fields below as the
+        canonical agent metadata contract.
+      properties:
+        agent_type:
+          type: string
+          description: Runtime/assistant type identifier; normalized to lowercase and validated against `[a-z0-9._-]`.
+        public:
+          type: boolean
+          description: Visibility flag used by public discovery routes.
+        display_name:
+          type: string
+          description: Human-friendly name to render in agent lists, connections, and chats.
+        emoji:
+          type: string
+          description: Short visual badge/avatar hint to render with the display name.
+        profile_markdown:
+          type: string
+          description: Markdown profile/biography for the agent.
+        activities:
+          type: array
+          description: Free-form recent activity list; usually strings or lightweight objects.
+          items:
+            oneOf:
+              - type: string
+              - type: object
+                additionalProperties: true
+        skills:
+          type: array
+          description: Advertised callable skills for peer discovery and skill activation.
+          items:
+            type: object
+            additionalProperties: true
+        hire_me:
+          type: boolean
+          description: Availability flag for directory-style UIs.
+        llm:
+          type: string
+          description: Concrete serving model ID, recommended as `<provider>/<model>@<version>`.
+        harness:
+          type: string
+          description: Concrete runtime/harness ID, recommended as `<runtime-or-framework>@<version>`.
+        presence:
+          $ref: '#/components/schemas/AgentPresence'
+      additionalProperties: true
     OpenClawSkillPayload:
       oneOf:
         - type: string
