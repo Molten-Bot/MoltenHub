@@ -1095,6 +1095,41 @@ func TestMemoryStoreAgentMetadataNormalizesAgentType(t *testing.T) {
 	if got := stringValue(explicitParameters["format"]); got != "json" {
 		t.Fatalf("expected explicit-format parameters format=json, got %q payload=%v", got, explicitParameters)
 	}
+	withAliasFields, err := mem.UpdateAgentMetadataSelf(agent.AgentUUID, map[string]any{
+		"skills": []map[string]any{
+			{
+				"id":           "calendar.lookup",
+				"display_name": "Calendar Lookup",
+				"schema": map[string]any{
+					"format": "json",
+					"required": []map[string]any{
+						{"name": "date", "description": "ISO date."},
+					},
+					"secret_policy": "forbidden",
+				},
+			},
+		},
+	}, now.Add(258*time.Second))
+	if err != nil {
+		t.Fatalf("UpdateAgentMetadataSelf alias skill fields failed: %v", err)
+	}
+	aliasSkills, _ := withAliasFields.Metadata[model.AgentMetadataKeySkills].([]map[string]any)
+	if len(aliasSkills) != 1 {
+		t.Fatalf("expected 1 alias skill after normalization, got %v", aliasSkills)
+	}
+	if got := stringValue(aliasSkills[0]["name"]); got != "calendar.lookup" {
+		t.Fatalf("expected alias skill to normalize id->name, got %q payload=%v", got, aliasSkills[0])
+	}
+	if got := stringValue(aliasSkills[0]["description"]); got != "Calendar Lookup" {
+		t.Fatalf("expected alias skill display_name fallback to description, got %q payload=%v", got, aliasSkills[0])
+	}
+	if got := stringValue(aliasSkills[0]["display_name"]); got != "Calendar Lookup" {
+		t.Fatalf("expected alias skill display_name to persist, got %q payload=%v", got, aliasSkills[0])
+	}
+	aliasParameters, _ := aliasSkills[0]["parameters"].(map[string]any)
+	if got := stringValue(aliasParameters["format"]); got != "json" {
+		t.Fatalf("expected alias skill schema->parameters format=json, got %q payload=%v", got, aliasParameters)
+	}
 
 	if _, err := mem.UpdateAgentMetadataSelf(agent.AgentUUID, map[string]any{
 		"skills": []map[string]any{

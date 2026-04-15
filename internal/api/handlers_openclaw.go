@@ -75,6 +75,11 @@ func (h *Handler) handleOpenClawPublish(w http.ResponseWriter, r *http.Request) 
 	out := cloneStringAnyMap(result)
 	out["transport"] = openClawTransportMetadata()
 	out["openclaw_message"] = envelope
+	if messageID := strings.TrimSpace(asStringAny(out["message_id"])); messageID != "" {
+		if record, err := h.control.GetMessageRecord(messageID); err == nil {
+			out["openclaw_message"] = parseOpenClawEnvelopeFromMessage(record.Message)
+		}
+	}
 	h.recordOpenClawAdapterUsage(senderAgentUUID, "publish", map[string]any{
 		"message_id": openClawMessageIDFromResult(out),
 	})

@@ -268,3 +268,49 @@ func TestParseAdvertisedSkillsFiltersAndNormalizes(t *testing.T) {
 		t.Fatalf("unexpected second skill: %+v", skills[1])
 	}
 }
+
+func TestParseAdvertisedSkillsIncludesAliasFieldsAndSchema(t *testing.T) {
+	metadata := map[string]any{
+		"skills": []any{
+			map[string]any{
+				"id":           "calendar.lookup",
+				"display_name": "Calendar Lookup",
+				"schema": map[string]any{
+					"format": "json",
+					"schema": map[string]any{
+						"required": []any{
+							map[string]any{"name": "date", "description": "ISO date."},
+						},
+						"secret_policy":     "forbidden",
+						"secrets_forbidden": true,
+					},
+					"required": []any{
+						map[string]any{"name": "date", "description": "ISO date."},
+					},
+					"secret_policy": "forbidden",
+				},
+			},
+		},
+	}
+
+	skills := parseAdvertisedSkills(metadata)
+	if len(skills) != 1 {
+		t.Fatalf("expected exactly 1 normalized skill, got %d skills=%v", len(skills), skills)
+	}
+	skill := skills[0]
+	if skill.ID != "calendar.lookup" || skill.Handle != "calendar.lookup" || skill.Name != "calendar.lookup" {
+		t.Fatalf("expected alias id/handle/name fields, got %+v", skill)
+	}
+	if skill.DisplayName != "Calendar Lookup" {
+		t.Fatalf("expected display_name to be preserved, got %+v", skill)
+	}
+	if skill.Description != "Calendar Lookup" {
+		t.Fatalf("expected display_name fallback to description, got %+v", skill)
+	}
+	if skill.Schema == nil || skill.Parameters == nil {
+		t.Fatalf("expected schema and parameters aliases to be populated, got %+v", skill)
+	}
+	if skill.Schema.Format != "json" || skill.Parameters.Format != "json" {
+		t.Fatalf("expected schema format json, got %+v", skill)
+	}
+}

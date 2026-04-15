@@ -181,6 +181,64 @@ func TestOpenClawPublishSkillActivationAllowsMissingPayload(t *testing.T) {
 	}
 }
 
+func TestOpenClawPublishSkillActivationStripsPayloadWithoutSchema(t *testing.T) {
+	router := newTestRouter()
+	_, _, tokenA, tokenB, _, _, _, agentUUIDB := setupTrustedAgents(t, router)
+
+	metadataPatch := doJSONRequest(t, router, http.MethodPatch, "/v1/agents/me/metadata", map[string]any{
+		"metadata": map[string]any{
+			"skills": []map[string]any{
+				{
+					"id":           "weather_lookup",
+					"display_name": "Weather Lookup",
+				},
+			},
+		},
+	}, map[string]string{"Authorization": "Bearer " + tokenB})
+	if metadataPatch.Code != http.StatusOK {
+		t.Fatalf("metadata patch failed: %d %s", metadataPatch.Code, metadataPatch.Body.String())
+	}
+
+	publishResp := doJSONRequest(t, router, http.MethodPost, "/v1/openclaw/messages/publish", map[string]any{
+		"to_agent_uuid": agentUUIDB,
+		"message": map[string]any{
+			"type":           "skill_request",
+			"request_id":     "req-skill-strip-payload",
+			"skill_name":     "weather_lookup",
+			"reply_required": false,
+			"payload": map[string]any{
+				"location": "Seattle, WA",
+			},
+		},
+	}, map[string]string{"Authorization": "Bearer " + tokenA})
+	if publishResp.Code != http.StatusAccepted {
+		t.Fatalf("expected openclaw schema-less skill_request publish 202, got %d %s", publishResp.Code, publishResp.Body.String())
+	}
+	publishPayload := decodeJSONMap(t, publishResp.Body.Bytes())
+	publishResult := requireAgentRuntimeSuccessEnvelope(t, publishPayload)
+	publishMessage, _ := publishResult["openclaw_message"].(map[string]any)
+	if _, ok := publishMessage["payload"]; ok {
+		t.Fatalf("expected publish openclaw_message payload to be stripped without schema, got payload=%v", publishMessage["payload"])
+	}
+	if _, ok := publishMessage["payload_format"]; ok {
+		t.Fatalf("expected publish openclaw_message payload_format to be stripped without schema, got payload=%v", publishMessage["payload_format"])
+	}
+
+	pullResp := doJSONRequest(t, router, http.MethodGet, "/v1/openclaw/messages/pull?timeout_ms=1000", nil, map[string]string{"Authorization": "Bearer " + tokenB})
+	if pullResp.Code != http.StatusOK {
+		t.Fatalf("expected openclaw pull 200, got %d %s", pullResp.Code, pullResp.Body.String())
+	}
+	pullPayload := decodeJSONMap(t, pullResp.Body.Bytes())
+	pullResult := requireAgentRuntimeSuccessEnvelope(t, pullPayload)
+	pullMessage, _ := pullResult["openclaw_message"].(map[string]any)
+	if _, ok := pullMessage["payload"]; ok {
+		t.Fatalf("expected pulled openclaw_message payload to be stripped without schema, got payload=%v", pullMessage["payload"])
+	}
+	if _, ok := pullMessage["payload_format"]; ok {
+		t.Fatalf("expected pulled openclaw_message payload_format to be stripped without schema, got payload=%v", pullMessage["payload_format"])
+	}
+}
+
 func TestOpenClawPublishSkillActivationRejectsInvalidPayloadType(t *testing.T) {
 	router := newTestRouter()
 	_, _, tokenA, _, _, _, _, agentUUIDB := setupTrustedAgents(t, router)

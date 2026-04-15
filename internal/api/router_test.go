@@ -3120,7 +3120,17 @@ func TestAgentCapabilitiesAndSkillEndpoints(t *testing.T) {
 	skillPatchA := doJSONRequest(t, router, http.MethodPatch, "/v1/agents/me/metadata", map[string]any{
 		"metadata": map[string]any{
 			"skills": []map[string]any{
-				{"name": "weather_lookup", "description": "Get current weather for a location."},
+				{
+					"name":         "weather_lookup",
+					"display_name": "Weather Lookup",
+					"description":  "Get current weather for a location.",
+					"parameters": map[string]any{
+						"required": []map[string]any{
+							{"name": "location", "description": "City or postal code."},
+						},
+						"secret_policy": "forbidden",
+					},
+				},
 			},
 		},
 	}, map[string]string{
@@ -3187,6 +3197,23 @@ func TestAgentCapabilitiesAndSkillEndpoints(t *testing.T) {
 	if _, ok := capsPayload["advertised_skills"].([]any); !ok {
 		t.Fatalf("expected advertised_skills in capabilities payload, got %v", capsPayload)
 	}
+	advertisedSkills, _ := capsPayload["advertised_skills"].([]any)
+	if len(advertisedSkills) == 0 {
+		t.Fatalf("expected at least one advertised skill, got %v", capsPayload["advertised_skills"])
+	}
+	firstSkill, _ := advertisedSkills[0].(map[string]any)
+	if got, _ := firstSkill["id"].(string); got != "weather_lookup" {
+		t.Fatalf("expected advertised skill id alias, got %q payload=%v", got, firstSkill)
+	}
+	if got, _ := firstSkill["handle"].(string); got != "weather_lookup" {
+		t.Fatalf("expected advertised skill handle alias, got %q payload=%v", got, firstSkill)
+	}
+	if got, _ := firstSkill["display_name"].(string); got != "Weather Lookup" {
+		t.Fatalf("expected advertised skill display_name, got %q payload=%v", got, firstSkill)
+	}
+	if _, ok := firstSkill["schema"].(map[string]any); !ok {
+		t.Fatalf("expected advertised skill schema alias, got %v", firstSkill)
+	}
 	peerSkillCatalog, ok := capsPayload["peer_skill_catalog"].([]any)
 	if !ok || len(peerSkillCatalog) == 0 {
 		t.Fatalf("expected peer_skill_catalog in capabilities payload, got %v", capsPayload)
@@ -3216,6 +3243,17 @@ func TestAgentCapabilitiesAndSkillEndpoints(t *testing.T) {
 		t.Fatalf("agent skill json failed: %d %s", skillJSONResp.Code, skillJSONResp.Body.String())
 	}
 	skillJSON := decodeJSONMap(t, skillJSONResp.Body.Bytes())
+	jsonAdvertisedSkills, _ := skillJSON["advertised_skills"].([]any)
+	if len(jsonAdvertisedSkills) == 0 {
+		t.Fatalf("expected advertised_skills in skill payload, got %v", skillJSON)
+	}
+	jsonSkill, _ := jsonAdvertisedSkills[0].(map[string]any)
+	if got, _ := jsonSkill["display_name"].(string); got != "Weather Lookup" {
+		t.Fatalf("expected skill endpoint to expose display_name, got %q payload=%v", got, jsonSkill)
+	}
+	if _, ok := jsonSkill["schema"].(map[string]any); !ok {
+		t.Fatalf("expected skill endpoint to expose schema alias, got %v", jsonSkill)
+	}
 	skillObj, ok := skillJSON["skill"].(map[string]any)
 	if !ok {
 		t.Fatalf("missing skill object: %v", skillJSON)

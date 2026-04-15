@@ -2083,12 +2083,28 @@ func normalizeAndValidateAgentSkillsMetadata(metadata map[string]any, key string
 
 	entriesByName := map[string]map[string]any{}
 	for _, entry := range entries {
-		rawName, _ := entry["name"].(string)
+		rawName := firstNonEmpty(
+			stringValue(entry["name"]),
+			stringValue(entry["id"]),
+			stringValue(entry["handle"]),
+		)
 		name, ok := normalizeAgentSkillName(rawName)
 		if !ok {
 			return nil, true, ErrInvalidAgentSkills
 		}
-		description, _ := entry["description"].(string)
+		displayName := strings.TrimSpace(stringValue(entry["display_name"]))
+		if displayName != "" {
+			if len(displayName) > 240 {
+				return nil, true, ErrInvalidAgentSkills
+			}
+			if containsLikelySecret(displayName) {
+				return nil, true, ErrInvalidSkillDescription
+			}
+		}
+		description := strings.TrimSpace(firstNonEmpty(
+			stringValue(entry["description"]),
+			displayName,
+		))
 		description = strings.TrimSpace(description)
 		if description == "" || len(description) > 240 {
 			return nil, true, ErrInvalidAgentSkills
@@ -2100,7 +2116,14 @@ func normalizeAndValidateAgentSkillsMetadata(metadata map[string]any, key string
 			"name":        name,
 			"description": description,
 		}
-		if rawParameters, exists := entry["parameters"]; exists {
+		if displayName != "" {
+			normalizedEntry["display_name"] = displayName
+		}
+		rawParameters, exists := entry["parameters"]
+		if !exists {
+			rawParameters, exists = entry["schema"]
+		}
+		if exists {
 			parameters, err := normalizeSkillParameters(rawParameters)
 			if err != nil {
 				return nil, true, err

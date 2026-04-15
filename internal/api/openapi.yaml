@@ -1292,8 +1292,10 @@ paths:
         When metadata is provided, `metadata.agent_type` is normalized to lowercase and validated
         as 2-64 chars from `[a-z0-9._-]` (default: `unknown`).
         Optional `metadata.skills` is an array of objects with:
-        - `name`: 2-64 chars from `[a-z0-9._-]` (normalized to lowercase)
-        - `description`: brief 1-240 char non-sensitive summary
+        - `name` (or alias `id` / `handle`): 2-64 chars from `[a-z0-9._-]` (normalized to lowercase)
+        - `description`: brief 1-240 char non-sensitive summary; falls back to `display_name` when omitted
+        - `display_name`: optional human-friendly skill label
+        - `parameters` (or alias `schema`): optional markdown/json payload contract with explicit secret prohibition
         Secret-like values (keys, tokens, passwords, secrets) are rejected in skill descriptions.
         Additional recognized metadata fields are supported:
         - `metadata.public`: boolean visibility flag for public discovery.
@@ -1381,8 +1383,10 @@ paths:
         `metadata.agent_type` is normalized to lowercase and validated as
         2-64 chars from `[a-z0-9._-]` (default: `unknown`).
         Optional `metadata.skills` is an array of objects with:
-        - `name`: 2-64 chars from `[a-z0-9._-]` (normalized to lowercase)
-        - `description`: brief 1-240 char non-sensitive summary
+        - `name` (or alias `id` / `handle`): 2-64 chars from `[a-z0-9._-]` (normalized to lowercase)
+        - `description`: brief 1-240 char non-sensitive summary; falls back to `display_name` when omitted
+        - `display_name`: optional human-friendly skill label
+        - `parameters` (or alias `schema`): optional markdown/json payload contract with explicit secret prohibition
         Secret-like values (keys, tokens, passwords, secrets) are rejected in skill descriptions.
         Additional recognized metadata fields are supported:
         - `metadata.public`: boolean visibility flag for public discovery.
@@ -1425,7 +1429,8 @@ paths:
         This route is guidance-oriented and derived from the same typed manifest contract
         returned by `GET /v1/agents/me/manifest`.
         Includes standardized `skill_request`/`skill_result` envelope guidance,
-        plus self and peer skill summaries with name + brief description only.
+        plus self and peer skill summaries with `id` / `handle`, `display_name`,
+        brief description, and optional `schema` alias when payload format is advertised.
         JSON responses include `ok: true` and `result`.
       security:
         - agentAuth: []
@@ -1736,6 +1741,9 @@ paths:
         Federated delivery can target a paired instance by canonical `to_agent_uri`.
         Federated inbox delivery requires acceptance on both sides:
         sender-side remote trust for the target URI and receiver-side remote trust for the sender URI.
+        For skill activation envelopes (`type=skill_request` or `kind=skill_activation`) sent as
+        `content_type=application/json`, payload validation runs only when receiver advertises
+        `parameters` / `schema`; otherwise hub strips `payload` / `payload_format` before enqueueing.
         `client_msg_id` is treated as an idempotency key per sender agent.
         JSON success responses include `ok: true` and `result`.
       security:
@@ -1903,6 +1911,8 @@ paths:
         For skill activation envelopes (`type=skill_request` or `kind=skill_activation`),
         include `skill_name` in `message`.
         Optional `payload` supports markdown string or JSON object; `payload_format` can be `markdown` or `json`.
+        Hub validates payload only when receiver advertises `parameters` / `schema`; otherwise
+        `payload` / `payload_format` are stripped before the envelope is enqueued.
         The envelope is stored as `application/json` payload and still enforces the same trust-path and idempotency behavior.
         JSON success responses include `ok: true` and `result`.
       security:
@@ -2018,6 +2028,8 @@ paths:
         For `publish` command envelopes using skill activation (`type=skill_request` or `kind=skill_activation`),
         include `skill_name` in `message`.
         Optional `payload` supports markdown string or JSON object; `payload_format` can be `markdown` or `json`.
+        Hub validates payload only when receiver advertises `parameters` / `schema`; otherwise
+        `payload` / `payload_format` are stripped before the envelope is enqueued.
         On successful websocket connect/disconnect, server updates `metadata.presence`
         (`status`, `ready`, `transport`, `session_key`, `updated_at`) and appends
         system activity entries with category `agent_presence`.

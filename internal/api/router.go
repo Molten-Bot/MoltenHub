@@ -954,7 +954,7 @@ func defaultErrorHint(code string) (errorHint, bool) {
 	case "invalid_agent_skills":
 		return errorHint{
 			Retryable:  false,
-			NextAction: "set metadata.skills as [{name,description,parameters?}] and mark parameters as required/optional with secrets forbidden",
+			NextAction: "set metadata.skills as [{name|id|handle,description|display_name,parameters?|schema?}] and mark payload contracts as required/optional with secrets forbidden",
 		}, true
 	case "invalid_skill_description":
 		return errorHint{

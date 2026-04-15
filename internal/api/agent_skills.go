@@ -9,8 +9,12 @@ import (
 )
 
 type agentSkillSummary struct {
+	ID          string                `json:"id,omitempty"`
+	Handle      string                `json:"handle,omitempty"`
+	DisplayName string                `json:"display_name,omitempty"`
 	Name        string                `json:"name"`
 	Description string                `json:"description"`
+	Schema      *agentSkillParameters `json:"schema,omitempty"`
 	Parameters  *agentSkillParameters `json:"parameters,omitempty"`
 }
 
@@ -56,23 +60,25 @@ func parseAdvertisedSkills(metadata map[string]any) []agentSkillSummary {
 
 	skillsByName := map[string]agentSkillSummary{}
 	for _, item := range items {
-		rawName, _ := item["name"].(string)
+		rawName := firstNonEmptyString(
+			asStringValue(item["name"]),
+			asStringValue(item["id"]),
+			asStringValue(item["handle"]),
+		)
 		name, valid := normalizeSkillName(rawName)
 		if !valid {
 			continue
 		}
-		description := strings.TrimSpace(asStringValue(item["description"]))
+		displayName := strings.TrimSpace(asStringValue(item["display_name"]))
+		description := strings.TrimSpace(firstNonEmptyString(asStringValue(item["description"]), displayName))
 		if description == "" {
 			continue
 		}
 		if len(description) > 240 {
 			description = strings.TrimSpace(description[:240])
 		}
-		skillsByName[name] = agentSkillSummary{
-			Name:        name,
-			Description: description,
-			Parameters:  parseSkillParameters(item["parameters"]),
-		}
+		parameters := parseSkillParameters(firstNonNilValue(item["parameters"], item["schema"]))
+		skillsByName[name] = buildAgentSkillSummary(name, description, displayName, parameters)
 	}
 
 	if len(skillsByName) == 0 {
@@ -89,6 +95,22 @@ func parseAdvertisedSkills(metadata map[string]any) []agentSkillSummary {
 		out = append(out, skillsByName[name])
 	}
 	return out
+}
+
+func buildAgentSkillSummary(name, description, displayName string, parameters *agentSkillParameters) agentSkillSummary {
+	displayName = strings.TrimSpace(displayName)
+	if displayName == "" {
+		displayName = name
+	}
+	return agentSkillSummary{
+		ID:          name,
+		Handle:      name,
+		DisplayName: displayName,
+		Name:        name,
+		Description: description,
+		Schema:      parameters,
+		Parameters:  parameters,
+	}
 }
 
 func parseSkillParameters(raw any) *agentSkillParameters {
@@ -181,37 +203,51 @@ func parseAdvertisedSkillsByName(metadata map[string]any) map[string]agentSkillS
 }
 
 func validateSkillActivationRequest(receiver model.Agent, contentType, payload string) *runtimeHandlerError {
+	_, err := prepareSkillActivationRequest(receiver, contentType, payload)
+	return err
+}
+
+func prepareSkillActivationRequest(receiver model.Agent, contentType, payload string) (string, *runtimeHandlerError) {
 	if strings.TrimSpace(contentType) != "application/json" || strings.TrimSpace(payload) == "" {
-		return nil
+		return payload, nil
 	}
 
 	var envelope map[string]any
 	if err := json.Unmarshal([]byte(payload), &envelope); err != nil || len(envelope) == 0 {
-		return nil
+		return payload, nil
 	}
 
 	if err := normalizeOpenClawSkillActivationEnvelope(envelope); err != nil {
-		return skillValidationRuntimeError([]string{err.Error()})
+		return payload, skillValidationRuntimeError([]string{err.Error()})
 	}
 	if !isSkillActivationEnvelope(envelope) {
-		return nil
+		return payload, nil
 	}
 
 	skillName, _ := normalizeSkillName(asStringValue(envelope["skill_name"]))
 	skillsByName := parseAdvertisedSkillsByName(receiver.Metadata)
 	skill, ok := skillsByName[skillName]
 	if !ok {
-		return skillValidationRuntimeError([]string{"receiver does not advertise skill " + strconvQuote(skillName)})
+		return payload, skillValidationRuntimeError([]string{"receiver does not advertise skill " + strconvQuote(skillName)})
 	}
 	if skill.Parameters == nil {
-		return nil
+		stripSkillActivationPayload(envelope)
+		normalizedPayload, err := json.Marshal(envelope)
+		if err != nil {
+			return payload, nil
+		}
+		return string(normalizedPayload), nil
 	}
 
 	errors := validateSkillActivationPayload(skill, envelope["payload"], asStringValue(envelope["payload_format"]))
 	if len(errors) > 0 {
-		return skillValidationRuntimeError(errors)
+		return payload, skillValidationRuntimeError(errors)
 	}
-	return nil
+	normalizedPayload, err := json.Marshal(envelope)
+	if err != nil {
+		return payload, nil
+	}
+	return string(normalizedPayload), nil
 }
 
 func isSkillActivationEnvelope(envelope map[string]any) bool {
@@ -374,6 +410,12 @@ func skillValidationRuntimeError(details []string) *runtimeHandlerError {
 	}
 }
 
+func stripSkillActivationPayload(envelope map[string]any) {
+	delete(envelope, "input")
+	delete(envelope, "payload")
+	delete(envelope, "payload_format")
+}
+
 func strconvQuote(value string) string {
 	body, _ := json.Marshal(value)
 	return string(body)
@@ -416,6 +458,24 @@ func normalizeSkillParameterName(raw string) (string, bool) {
 func asStringValue(value any) string {
 	str, _ := value.(string)
 	return str
+}
+
+func firstNonEmptyString(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return value
+		}
+	}
+	return ""
+}
+
+func firstNonNilValue(values ...any) any {
+	for _, value := range values {
+		if value != nil {
+			return value
+		}
+	}
+	return nil
 }
 
 func defaultSkillCallContract(apiBase string) map[string]any {

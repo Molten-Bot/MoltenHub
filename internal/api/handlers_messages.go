@@ -296,9 +296,11 @@ func (h *Handler) publishFromAgent(ctx context.Context, senderAgentUUID string, 
 			message: "to_agent_uuid and to_agent_uri refer to different agents",
 		}
 	}
-	if validationErr := validateSkillActivationRequest(targetAgent, req.ContentType, req.Payload); validationErr != nil {
+	normalizedPayload, validationErr := prepareSkillActivationRequest(targetAgent, req.ContentType, req.Payload)
+	if validationErr != nil {
 		return nil, validationErr
 	}
+	req.Payload = normalizedPayload
 
 	senderOrgID, receiverOrgID, err := h.control.CanPublish(senderAgentUUID, targetAgent.AgentUUID)
 	if err != nil {
