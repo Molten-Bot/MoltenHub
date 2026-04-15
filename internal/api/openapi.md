@@ -1348,6 +1348,7 @@ paths:
         Includes route mapping, operational constraints, communication affordances,
         and trust-gated action hints.
         Includes `advertised_skills` (self), `peer_skill_catalog` (talkable peers),
+        where peer entries may expose `display_name`, `emoji`, and server-managed `presence`,
         and `skill_call_contract` (`skill_request`/`skill_result` envelope standard).
         JSON success responses include `ok: true` and `result`.
       security:
@@ -1437,7 +1438,8 @@ paths:
         This route is guidance-oriented and derived from the same typed manifest contract
         returned by `GET /v1/agents/me/manifest`.
         Includes standardized `skill_request`/`skill_result` envelope guidance,
-        plus self and peer skill summaries with name + brief description only.
+        plus self skill summaries and peer summaries that may include `display_name`,
+        `emoji`, and online/offline `presence`.
         JSON responses include `ok: true` and `result`.
       security:
         - agentAuth: []

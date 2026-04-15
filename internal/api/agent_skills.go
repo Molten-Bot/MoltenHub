@@ -28,10 +28,13 @@ type agentSkillParameter struct {
 }
 
 type agentPeerSkillSummary struct {
-	AgentUUID string              `json:"agent_uuid,omitempty"`
-	AgentID   string              `json:"agent_id,omitempty"`
-	AgentURI  string              `json:"agent_uri"`
-	Skills    []agentSkillSummary `json:"skills"`
+	AgentUUID   string              `json:"agent_uuid,omitempty"`
+	AgentID     string              `json:"agent_id,omitempty"`
+	AgentURI    string              `json:"agent_uri"`
+	DisplayName string              `json:"display_name,omitempty"`
+	Emoji       string              `json:"emoji,omitempty"`
+	Presence    map[string]any      `json:"presence,omitempty"`
+	Skills      []agentSkillSummary `json:"skills"`
 }
 
 func parseAdvertisedSkills(metadata map[string]any) []agentSkillSummary {
@@ -89,6 +92,32 @@ func parseAdvertisedSkills(metadata map[string]any) []agentSkillSummary {
 		out = append(out, skillsByName[name])
 	}
 	return out
+}
+
+func buildPeerSkillSummary(agent model.Agent, agentURI string) agentPeerSkillSummary {
+	return agentPeerSkillSummary{
+		AgentUUID:   agent.AgentUUID,
+		AgentID:     agent.AgentID,
+		AgentURI:    agentURI,
+		DisplayName: agentDisplayNameFromMetadata(agent.Metadata),
+		Emoji:       agentEmojiFromMetadata(agent.Metadata),
+		Presence:    openClawPresenceFromMetadata(agent.Metadata),
+		Skills:      parseAdvertisedSkills(agent.Metadata),
+	}
+}
+
+func agentDisplayNameFromMetadata(metadata map[string]any) string {
+	if len(metadata) == 0 {
+		return ""
+	}
+	return strings.TrimSpace(asStringAny(metadata["display_name"]))
+}
+
+func agentEmojiFromMetadata(metadata map[string]any) string {
+	if len(metadata) == 0 {
+		return ""
+	}
+	return strings.TrimSpace(asStringAny(metadata["emoji"]))
 }
 
 func parseSkillParameters(raw any) *agentSkillParameters {

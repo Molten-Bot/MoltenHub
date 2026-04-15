@@ -34,7 +34,14 @@ func TestBuildAgentDiscoveryMarkdownRendersTemplateTokens(t *testing.T) {
 				Optional:     []agentSkillParameter{{Name: "units", Description: "metric or imperial."}},
 			},
 		}},
-		PeerSkillCatalog: []agentPeerSkillSummary{{AgentID: "org-bob/agent-b", AgentURI: "https://hub.example/org-bob/agent-b", Skills: []agentSkillSummary{{Name: "math.add", Description: "Add two numbers."}}}},
+		PeerSkillCatalog: []agentPeerSkillSummary{{
+			AgentID:     "org-bob/agent-b",
+			AgentURI:    "https://hub.example/org-bob/agent-b",
+			DisplayName: "Beta Agent",
+			Emoji:       "🤖",
+			Presence:    map[string]any{"status": "online", "ready": true},
+			Skills:      []agentSkillSummary{{Name: "math.add", Description: "Add two numbers."}},
+		}},
 	}
 	manifest := buildAgentManifest(agent, cp, time.Date(2026, 3, 14, 0, 0, 0, 0, time.UTC))
 
@@ -73,7 +80,7 @@ func TestBuildAgentDiscoveryMarkdownRendersTemplateTokens(t *testing.T) {
 	if !strings.Contains(markdown, "Parameters (json; secrets forbidden)") || !strings.Contains(markdown, "`location`: City or postal code.") {
 		t.Fatalf("expected parameter guidance in markdown, got markdown=%q", markdown)
 	}
-	if !strings.Contains(markdown, "## Talkable Peer Skills") || !strings.Contains(markdown, "org-bob/agent-b") {
+	if !strings.Contains(markdown, "## Talkable Peer Skills") || !strings.Contains(markdown, "🤖 Beta Agent (org-bob/agent-b) [online]") {
 		t.Fatalf("expected peer skill catalog section in markdown, got markdown=%q", markdown)
 	}
 	if !strings.Contains(markdown, "## Skill Call Contract") || !strings.Contains(markdown, "\"type\": \"skill_request\"") {
@@ -106,7 +113,14 @@ func TestBuildAgentSkillMarkdownRendersTemplateTokens(t *testing.T) {
 				Required:     []agentSkillParameter{{Name: "location", Description: "City or postal code."}},
 			},
 		}},
-		PeerSkillCatalog: []agentPeerSkillSummary{{AgentID: "org-bob/agent-b", AgentURI: "https://hub.example/org-bob/agent-b", Skills: []agentSkillSummary{{Name: "math.add", Description: "Add two numbers."}}}},
+		PeerSkillCatalog: []agentPeerSkillSummary{{
+			AgentID:     "org-bob/agent-b",
+			AgentURI:    "https://hub.example/org-bob/agent-b",
+			DisplayName: "Beta Agent",
+			Emoji:       "🤖",
+			Presence:    map[string]any{"status": "online", "ready": true},
+			Skills:      []agentSkillSummary{{Name: "math.add", Description: "Add two numbers."}},
+		}},
 	}
 	manifest := buildAgentManifest(agent, cp, time.Date(2026, 3, 14, 0, 0, 0, 0, time.UTC))
 
@@ -147,6 +161,9 @@ func TestBuildAgentSkillMarkdownRendersTemplateTokens(t *testing.T) {
 	}
 	if !strings.Contains(markdown, "## Talkable Peer Skills") || !strings.Contains(markdown, "`math.add`: Add two numbers.") {
 		t.Fatalf("expected peer skills in skill markdown, got markdown=%q", markdown)
+	}
+	if !strings.Contains(markdown, "🤖 Beta Agent (org-bob/agent-b) [online]") {
+		t.Fatalf("expected peer identity metadata in skill markdown, got markdown=%q", markdown)
 	}
 	if !strings.Contains(markdown, "## Skill Call Contract") || !strings.Contains(markdown, "\"type\": \"skill_result\"") {
 		t.Fatalf("expected skill call contract in skill markdown, got markdown=%q", markdown)

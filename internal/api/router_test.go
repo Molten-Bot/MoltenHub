@@ -3131,6 +3131,8 @@ func TestAgentCapabilitiesAndSkillEndpoints(t *testing.T) {
 	}
 	skillPatchB := doJSONRequest(t, router, http.MethodPatch, "/v1/agents/me/metadata", map[string]any{
 		"metadata": map[string]any{
+			"display_name": "Beta Agent",
+			"emoji":        "🤖",
 			"skills": []map[string]any{
 				{"name": "math.add", "description": "Add two numbers."},
 			},
@@ -3140,6 +3142,15 @@ func TestAgentCapabilitiesAndSkillEndpoints(t *testing.T) {
 	})
 	if skillPatchB.Code != http.StatusOK {
 		t.Fatalf("expected agent B skill metadata patch 200, got %d %s", skillPatchB.Code, skillPatchB.Body.String())
+	}
+	disconnectB := doJSONRequest(t, router, http.MethodPost, "/v1/openclaw/messages/offline", map[string]any{
+		"session_key": "main",
+		"reason":      "test_presence",
+	}, map[string]string{
+		"Authorization": "Bearer " + tokenB,
+	})
+	if disconnectB.Code != http.StatusOK {
+		t.Fatalf("expected agent B disconnect 200, got %d %s", disconnectB.Code, disconnectB.Body.String())
 	}
 
 	manifestResp := doJSONRequest(t, router, http.MethodGet, "/v1/agents/me/manifest", nil, map[string]string{
@@ -3191,6 +3202,20 @@ func TestAgentCapabilitiesAndSkillEndpoints(t *testing.T) {
 	if !ok || len(peerSkillCatalog) == 0 {
 		t.Fatalf("expected peer_skill_catalog in capabilities payload, got %v", capsPayload)
 	}
+	peerCatalogEntry, ok := peerSkillCatalog[0].(map[string]any)
+	if !ok {
+		t.Fatalf("expected peer_skill_catalog entry object, got %T payload=%v", peerSkillCatalog[0], capsPayload)
+	}
+	if got, _ := peerCatalogEntry["display_name"].(string); got != "Beta Agent" {
+		t.Fatalf("expected peer display_name, got %q entry=%v", got, peerCatalogEntry)
+	}
+	if got, _ := peerCatalogEntry["emoji"].(string); got != "🤖" {
+		t.Fatalf("expected peer emoji, got %q entry=%v", got, peerCatalogEntry)
+	}
+	peerPresence, _ := peerCatalogEntry["presence"].(map[string]any)
+	if got, _ := peerPresence["status"].(string); got != "offline" {
+		t.Fatalf("expected peer presence.status=offline, got %q entry=%v", got, peerCatalogEntry)
+	}
 	if _, ok := capsPayload["skill_call_contract"].(map[string]any); !ok {
 		t.Fatalf("expected skill_call_contract in capabilities payload, got %v", capsPayload)
 	}
@@ -3235,6 +3260,9 @@ func TestAgentCapabilitiesAndSkillEndpoints(t *testing.T) {
 	}
 	if !strings.Contains(skillContent, "Talkable Peer Skills") || !strings.Contains(skillContent, "math.add") {
 		t.Fatalf("expected peer skills in skill, got %q", skillContent)
+	}
+	if !strings.Contains(skillContent, "🤖 Beta Agent") || !strings.Contains(skillContent, "[offline]") {
+		t.Fatalf("expected peer identity metadata in skill, got %q", skillContent)
 	}
 	if !strings.Contains(skillContent, "Skill Call Contract") || !strings.Contains(skillContent, "skill_request") {
 		t.Fatalf("expected skill call contract in skill, got %q", skillContent)

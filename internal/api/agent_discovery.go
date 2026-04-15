@@ -577,10 +577,7 @@ func renderPeerSkillCatalogMarkdown(peers []agentPeerSkillSummary, peerHeaderTem
 	}
 	lines := make([]string, 0, len(peers))
 	for _, peer := range peers {
-		peerLabel := strings.TrimSpace(peer.AgentID)
-		if peerLabel == "" {
-			peerLabel = strings.TrimSpace(peer.AgentURI)
-		}
+		peerLabel := renderPeerSkillCatalogLabel(peer)
 		if peerLabel == "" {
 			continue
 		}
@@ -607,6 +604,44 @@ func renderPeerSkillCatalogMarkdown(peers []agentPeerSkillSummary, peerHeaderTem
 		return noPeersFallback
 	}
 	return strings.Join(lines, "")
+}
+
+func renderPeerSkillCatalogLabel(peer agentPeerSkillSummary) string {
+	base := strings.TrimSpace(peer.DisplayName)
+	identity := strings.TrimSpace(peer.AgentID)
+	if identity == "" {
+		identity = strings.TrimSpace(peer.AgentURI)
+	}
+	if base == "" {
+		base = identity
+	}
+	if base == "" {
+		return ""
+	}
+
+	parts := make([]string, 0, 4)
+	if emoji := strings.TrimSpace(peer.Emoji); emoji != "" {
+		parts = append(parts, emoji)
+	}
+	parts = append(parts, base)
+	if identity != "" && identity != base {
+		parts = append(parts, "("+identity+")")
+	}
+	if status := peerPresenceStatus(peer.Presence); status != "" {
+		parts = append(parts, "["+status+"]")
+	}
+	return strings.Join(parts, " ")
+}
+
+func peerPresenceStatus(presence map[string]any) string {
+	if len(presence) == 0 {
+		return ""
+	}
+	status := strings.ToLower(strings.TrimSpace(asStringAny(presence["status"])))
+	if status != openClawPresenceStatusOnline && status != openClawPresenceStatusOffline {
+		return ""
+	}
+	return status
 }
 
 func renderSkillParametersMarkdown(params *agentSkillParameters, indent string) string {

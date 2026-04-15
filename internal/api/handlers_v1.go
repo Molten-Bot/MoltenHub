@@ -1245,12 +1245,7 @@ func (h *Handler) buildAgentControlPlane(r *http.Request, agent model.Agent) (ag
 		}
 		peerURI := h.agentURI(peerAgent)
 		talkableURIs = append(talkableURIs, peerURI)
-		peerSkillCatalog = append(peerSkillCatalog, agentPeerSkillSummary{
-			AgentUUID: peerAgent.AgentUUID,
-			AgentID:   peerAgent.AgentID,
-			AgentURI:  peerURI,
-			Skills:    parseAdvertisedSkills(peerAgent.Metadata),
-		})
+		peerSkillCatalog = append(peerSkillCatalog, buildPeerSkillSummary(peerAgent, peerURI))
 	}
 	remoteTrusts, err := h.control.ListRemoteAgentTrustsForLocalAgent(agent.AgentUUID)
 	if err != nil {
