@@ -1099,6 +1099,7 @@ func (s *s3StateStore) loadFromS3(ctx context.Context) error {
 		pPresence,
 		pStats,
 		pStatsDaily,
+		pAudit,
 		pPersonalOrgs,
 		pQueues,
 		pMessages,
@@ -1711,18 +1712,19 @@ getLoop:
 
 func (s *s3StateStore) loadTypedObjects(ctx context.Context, prefix string, fn func(key string, body []byte) error) error {
 	if prefetched := s.hydrationPrefetch; prefetched != nil {
-		objects := prefetched[prefix]
-		keys := make([]string, 0, len(objects))
-		for key := range objects {
-			keys = append(keys, key)
-		}
-		sort.Strings(keys)
-		for _, key := range keys {
-			if err := fn(key, objects[key]); err != nil {
-				return fmt.Errorf("decode %s: %w", key, err)
+		if objects, ok := prefetched[prefix]; ok {
+			keys := make([]string, 0, len(objects))
+			for key := range objects {
+				keys = append(keys, key)
 			}
+			sort.Strings(keys)
+			for _, key := range keys {
+				if err := fn(key, objects[key]); err != nil {
+					return fmt.Errorf("decode %s: %w", key, err)
+				}
+			}
+			return nil
 		}
-		return nil
 	}
 	keys, err := s.listKeys(ctx, prefix+"/")
 	if err != nil {

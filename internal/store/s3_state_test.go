@@ -261,6 +261,52 @@ func TestS3StateStore_ProfileAndPermissionsRoundTrip(t *testing.T) {
 	}
 }
 
+func TestS3StateStore_LoadFromS3HydratesAuditFeed(t *testing.T) {
+	fake := newFakeS3State()
+	server := fake.server("state-bucket")
+	defer server.Close()
+
+	store := newTestS3StateStore(t, server.Client(), server.URL, "state-bucket", "moltenhub-state")
+	if err := store.loadFromS3(context.Background()); err != nil {
+		t.Fatalf("loadFromS3 empty failed: %v", err)
+	}
+
+	now := time.Date(2026, 3, 6, 9, 0, 0, 0, time.UTC)
+	id := &idGen{}
+
+	alice, err := store.UpsertHuman("dev", "alice-sub", "alice@a.test", true, now, id.Next)
+	if err != nil {
+		t.Fatalf("UpsertHuman failed: %v", err)
+	}
+	if _, _, err := store.CreateOrg("org-a", "Org A", alice.HumanID, id.MustID(t), now); err != nil {
+		t.Fatalf("CreateOrg failed: %v", err)
+	}
+
+	if !fake.hasKey("moltenhub-state/state/audit/") {
+		t.Fatalf("expected persisted audit objects after org creation")
+	}
+
+	reloaded := newTestS3StateStore(t, server.Client(), server.URL, "state-bucket", "moltenhub-state")
+	if err := reloaded.loadFromS3(context.Background()); err != nil {
+		t.Fatalf("reload loadFromS3 failed: %v", err)
+	}
+
+	snapshot := reloaded.AdminSnapshot()
+	if len(snapshot.ActivityFeed) == 0 {
+		t.Fatalf("expected non-empty AdminSnapshot activity_feed after reload")
+	}
+	foundOrgCreate := false
+	for _, event := range snapshot.ActivityFeed {
+		if event.Category == "org" && event.Action == "create" {
+			foundOrgCreate = true
+			break
+		}
+	}
+	if !foundOrgCreate {
+		t.Fatalf("expected org/create event in reloaded activity_feed, got=%v", snapshot.ActivityFeed)
+	}
+}
+
 func TestS3StateStore_DoesNotPersistSecondaryIndexes(t *testing.T) {
 	fake := newFakeS3State()
 	server := fake.server("state-bucket")

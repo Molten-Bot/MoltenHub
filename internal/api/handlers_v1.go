@@ -1377,17 +1377,7 @@ func (h *Handler) agentControlPlanePayload(cp agentControlPlaneView) map[string]
 		"peer_skill_catalog":  cp.PeerSkillCatalog,
 		"skill_call_contract": defaultSkillCallContract(cp.APIBase),
 		"protocol_adapters":   protocolAdaptersPayload(cp.APIBase),
-		"endpoints": map[string]string{
-			"publish":      cp.APIBase + "/messages/publish",
-			"pull":         cp.APIBase + "/messages/pull",
-			"ack":          cp.APIBase + "/messages/ack",
-			"nack":         cp.APIBase + "/messages/nack",
-			"status":       cp.APIBase + "/messages/{message_id}",
-			"profile":      cp.APIBase + "/agents/me",
-			"manifest":     cp.APIBase + "/agents/me/manifest",
-			"capabilities": cp.APIBase + "/agents/me/capabilities",
-			"skill":        cp.APIBase + "/agents/me/skill",
-		},
+		"endpoints":           agentRuntimeEndpoints(cp.APIBase),
 	}
 }
 
@@ -2883,17 +2873,7 @@ func (h *Handler) handleRedeemBindToken(w http.ResponseWriter, r *http.Request) 
 			"api_base":          apiBase,
 			"agent":             h.agentResponsePayload(agent),
 			"protocol_adapters": protocolAdaptersPayload(apiBase),
-			"endpoints": map[string]string{
-				"profile":      apiBase + "/agents/me",
-				"manifest":     apiBase + "/agents/me/manifest",
-				"capabilities": apiBase + "/agents/me/capabilities",
-				"skill":        apiBase + "/agents/me/skill",
-				"publish":      apiBase + "/messages/publish",
-				"pull":         apiBase + "/messages/pull",
-				"ack":          apiBase + "/messages/ack",
-				"nack":         apiBase + "/messages/nack",
-				"status":       apiBase + "/messages/{message_id}",
-			},
+			"endpoints":         agentRuntimeEndpoints(apiBase),
 		})
 	}
 	writeBindError := func(err error) {

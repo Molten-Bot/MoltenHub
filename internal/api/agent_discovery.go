@@ -54,18 +54,7 @@ type agentRouteContract struct {
 }
 
 func buildAgentManifest(agent model.Agent, cp agentControlPlaneView, now time.Time) agentManifest {
-	endpoints := map[string]string{
-		"profile":      cp.APIBase + "/agents/me",
-		"manifest":     cp.APIBase + "/agents/me/manifest",
-		"capabilities": cp.APIBase + "/agents/me/capabilities",
-		"skill":        cp.APIBase + "/agents/me/skill",
-		"publish":      cp.APIBase + "/messages/publish",
-		"pull":         cp.APIBase + "/messages/pull",
-		"ack":          cp.APIBase + "/messages/ack",
-		"nack":         cp.APIBase + "/messages/nack",
-		"status":       cp.APIBase + "/messages/{message_id}",
-		"offline":      cp.APIBase + "/openclaw/messages/offline",
-	}
+	endpoints := agentManifestEndpoints(cp.APIBase)
 	protocolAdapters := protocolAdaptersPayload(cp.APIBase)
 
 	routes := []agentRouteContract{
