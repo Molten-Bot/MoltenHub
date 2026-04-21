@@ -353,6 +353,16 @@ type flakyStateWriteStore struct {
 	failMetadataWriteLeft int
 }
 
+func (s *flakyStateWriteStore) consumeWriteFailure() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.failMetadataWriteLeft <= 0 {
+		return false
+	}
+	s.failMetadataWriteLeft--
+	return true
+}
+
 func (s *flakyBindTokenStore) CreateBindToken(orgID string, ownerHumanID *string, actorHumanID, bindID, bindTokenHash string, expiresAt, now time.Time, isSuperAdmin bool) (model.BindToken, error) {
 	s.mu.Lock()
 	shouldFail := s.failCreateBindLeft > 0
@@ -367,16 +377,17 @@ func (s *flakyBindTokenStore) CreateBindToken(orgID string, ownerHumanID *string
 }
 
 func (s *flakyStateWriteStore) UpdateAgentMetadataSelf(agentUUID string, metadata map[string]any, now time.Time) (model.Agent, error) {
-	s.mu.Lock()
-	shouldFail := s.failMetadataWriteLeft > 0
-	if shouldFail {
-		s.failMetadataWriteLeft--
-	}
-	s.mu.Unlock()
-	if shouldFail {
+	if s.consumeWriteFailure() {
 		return model.Agent{}, context.DeadlineExceeded
 	}
 	return s.MemoryStore.UpdateAgentMetadataSelf(agentUUID, metadata, now)
+}
+
+func (s *flakyStateWriteStore) SetAgentPresence(agentUUID string, presence map[string]any, now time.Time) (model.Agent, bool, error) {
+	if s.consumeWriteFailure() {
+		return model.Agent{}, false, context.DeadlineExceeded
+	}
+	return s.MemoryStore.SetAgentPresence(agentUUID, presence, now)
 }
 
 func (s *flakyStateWriteStore) UpdateAgentMetadataSelfBestEffort(agentUUID string, metadata map[string]any, now time.Time) (model.Agent, error) {
@@ -2109,8 +2120,11 @@ func TestMyAgentBindTokenCreateIncludesConnectPrompt(t *testing.T) {
 	if !strings.Contains(connectPrompt, "GET {api_base}/agents/me/skill") {
 		t.Fatalf("expected connect prompt to include skill read step, got %q", connectPrompt)
 	}
-	if !strings.Contains(connectPrompt, "agent_type") || !strings.Contains(connectPrompt, "llm") || !strings.Contains(connectPrompt, "harness") {
-		t.Fatalf("expected connect prompt to include minimal metadata guidance, got %q", connectPrompt)
+	if !strings.Contains(connectPrompt, "display_name") || !strings.Contains(connectPrompt, "emoji") || !strings.Contains(connectPrompt, "agent_type") || !strings.Contains(connectPrompt, "llm") || !strings.Contains(connectPrompt, "harness") {
+		t.Fatalf("expected connect prompt to include profile metadata guidance, got %q", connectPrompt)
+	}
+	if !strings.Contains(connectPrompt, "metadata.presence") || !strings.Contains(connectPrompt, "server-managed") {
+		t.Fatalf("expected connect prompt to describe server-managed presence, got %q", connectPrompt)
 	}
 	if !strings.Contains(connectPrompt, "control_plane.can_communicate=true") || !strings.Contains(connectPrompt, "POST {api_base}/messages/publish") {
 		t.Fatalf("expected connect prompt to include readiness + first publish guidance, got %q", connectPrompt)
@@ -2818,6 +2832,9 @@ func TestBindTokenRedeemSingleUse(t *testing.T) {
 	if bindToken == "" {
 		t.Fatalf("bind_token missing in create response")
 	}
+	if !strings.HasPrefix(bindToken, "b_") {
+		t.Fatalf("expected bind_token to start with b_, got %q", bindToken)
+	}
 
 	redeemResp := doJSONRequest(t, router, http.MethodPost, "/v1/agents/bind", map[string]string{
 		"hub_url":    "https://hub.qa.example.com",
@@ -2830,6 +2847,9 @@ func TestBindTokenRedeemSingleUse(t *testing.T) {
 	token, _ := redeemPayload["token"].(string)
 	if token == "" {
 		t.Fatalf("expected token in bind response")
+	}
+	if !strings.HasPrefix(token, "t_") {
+		t.Fatalf("expected agent token to start with t_, got %q", token)
 	}
 	apiBase, _ := redeemPayload["api_base"].(string)
 	if apiBase != "http://example.com/v1" {
@@ -3004,6 +3024,9 @@ func TestOrgBoundAgentNameUniqueWithinOrg(t *testing.T) {
 	if strings.TrimSpace(bindTokenA) == "" {
 		t.Fatalf("expected first bind token")
 	}
+	if !strings.HasPrefix(bindTokenA, "b_") {
+		t.Fatalf("expected first bind token to start with b_, got %q", bindTokenA)
+	}
 	redeemA := doJSONRequest(t, router, http.MethodPost, "/v1/agents/bind", map[string]any{
 		"bind_token": bindTokenA,
 	}, nil)
@@ -3013,6 +3036,9 @@ func TestOrgBoundAgentNameUniqueWithinOrg(t *testing.T) {
 	tokenA, _ := decodeJSONMap(t, redeemA.Body.Bytes())["token"].(string)
 	if strings.TrimSpace(tokenA) == "" {
 		t.Fatalf("expected first agent token from bind redeem")
+	}
+	if !strings.HasPrefix(tokenA, "t_") {
+		t.Fatalf("expected first agent token to start with t_, got %q", tokenA)
 	}
 	finalizeA := doJSONRequest(t, router, http.MethodPatch, "/v1/agents/me", map[string]any{
 		"handle": "org-agent",
@@ -3033,6 +3059,9 @@ func TestOrgBoundAgentNameUniqueWithinOrg(t *testing.T) {
 	if strings.TrimSpace(bindTokenB) == "" {
 		t.Fatalf("expected second bind token")
 	}
+	if !strings.HasPrefix(bindTokenB, "b_") {
+		t.Fatalf("expected second bind token to start with b_, got %q", bindTokenB)
+	}
 	redeemB := doJSONRequest(t, router, http.MethodPost, "/v1/agents/bind", map[string]any{
 		"bind_token": bindTokenB,
 	}, nil)
@@ -3042,6 +3071,9 @@ func TestOrgBoundAgentNameUniqueWithinOrg(t *testing.T) {
 	tokenB, _ := decodeJSONMap(t, redeemB.Body.Bytes())["token"].(string)
 	if strings.TrimSpace(tokenB) == "" {
 		t.Fatalf("expected second agent token from bind redeem")
+	}
+	if !strings.HasPrefix(tokenB, "t_") {
+		t.Fatalf("expected second agent token to start with t_, got %q", tokenB)
 	}
 	dup := doJSONRequest(t, router, http.MethodPatch, "/v1/agents/me", map[string]any{
 		"handle": "ORG-AGENT",
@@ -3094,7 +3126,7 @@ func TestBindTokenExpires(t *testing.T) {
 
 func TestAgentCapabilitiesAndSkillEndpoints(t *testing.T) {
 	router := newTestRouter()
-	_, _, tokenA, tokenB, _, _, _, _ := setupTrustedAgents(t, router)
+	_, _, tokenA, tokenB, _, _, agentUUIDA, agentUUIDB := setupTrustedAgents(t, router)
 
 	skillPatchA := doJSONRequest(t, router, http.MethodPatch, "/v1/agents/me/metadata", map[string]any{
 		"metadata": map[string]any{
@@ -3110,6 +3142,8 @@ func TestAgentCapabilitiesAndSkillEndpoints(t *testing.T) {
 	}
 	skillPatchB := doJSONRequest(t, router, http.MethodPatch, "/v1/agents/me/metadata", map[string]any{
 		"metadata": map[string]any{
+			"display_name": "Math Bot",
+			"emoji":        "🧮",
 			"skills": []map[string]any{
 				{"name": "math.add", "description": "Add two numbers."},
 			},
@@ -3135,6 +3169,14 @@ func TestAgentCapabilitiesAndSkillEndpoints(t *testing.T) {
 	if manifestObj["schema_version"] != "2" {
 		t.Fatalf("expected manifest schema_version=2, got %v", manifestObj["schema_version"])
 	}
+	manifestCommunication, ok := manifestObj["communication"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected communication in manifest payload, got %v", manifestObj)
+	}
+	manifestTalkablePeers, ok := manifestCommunication["talkable_peers"].([]any)
+	if !ok || len(manifestTalkablePeers) == 0 {
+		t.Fatalf("expected communication.talkable_peers in manifest payload, got %v", manifestCommunication["talkable_peers"])
+	}
 
 	capsResp := doJSONRequest(t, router, http.MethodGet, "/v1/agents/me/capabilities", nil, map[string]string{
 		"Authorization": "Bearer " + tokenA,
@@ -3153,6 +3195,71 @@ func TestAgentCapabilitiesAndSkillEndpoints(t *testing.T) {
 	}
 	if len(peers) == 0 {
 		t.Fatalf("expected at least one talkable peer")
+	}
+	talkablePeers, ok := controlPlane["talkable_peers"].([]any)
+	if !ok || len(talkablePeers) == 0 {
+		t.Fatalf("expected talkable_peers in control_plane payload, got %v", controlPlane["talkable_peers"])
+	}
+	foundPeerB := false
+	for _, raw := range talkablePeers {
+		peer, _ := raw.(map[string]any)
+		if peer == nil {
+			continue
+		}
+		if gotUUID, _ := peer["agent_uuid"].(string); gotUUID != agentUUIDB {
+			continue
+		}
+		foundPeerB = true
+		if gotName, _ := peer["display_name"].(string); gotName != "Math Bot" {
+			t.Fatalf("expected talkable peer B display_name Math Bot, got %q peer=%v", gotName, peer)
+		}
+		if gotEmoji, _ := peer["emoji"].(string); gotEmoji != "🧮" {
+			t.Fatalf("expected talkable peer B emoji 🧮, got %q peer=%v", gotEmoji, peer)
+		}
+	}
+	if !foundPeerB {
+		t.Fatalf("expected talkable_peers to include peer B %q, got %v", agentUUIDB, talkablePeers)
+	}
+	communication, ok := capsPayload["communication"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected communication in capabilities payload, got %v", capsPayload)
+	}
+	communicationTalkablePeers, ok := communication["talkable_peers"].([]any)
+	if !ok || len(communicationTalkablePeers) == 0 {
+		t.Fatalf("expected communication.talkable_peers in capabilities payload, got %v", communication["talkable_peers"])
+	}
+
+	capsRespB := doJSONRequest(t, router, http.MethodGet, "/v1/agents/me/capabilities", nil, map[string]string{
+		"Authorization": "Bearer " + tokenB,
+	})
+	if capsRespB.Code != http.StatusOK {
+		t.Fatalf("agent B capabilities failed: %d %s", capsRespB.Code, capsRespB.Body.String())
+	}
+	capsPayloadB := decodeJSONMap(t, capsRespB.Body.Bytes())
+	controlPlaneB, ok := capsPayloadB["control_plane"].(map[string]any)
+	if !ok {
+		t.Fatalf("missing control_plane for agent B: %v", capsPayloadB)
+	}
+	talkablePeersB, ok := controlPlaneB["talkable_peers"].([]any)
+	if !ok || len(talkablePeersB) == 0 {
+		t.Fatalf("expected talkable_peers for agent B, got %v", controlPlaneB["talkable_peers"])
+	}
+	foundPeerA := false
+	for _, raw := range talkablePeersB {
+		peer, _ := raw.(map[string]any)
+		if peer == nil {
+			continue
+		}
+		if gotUUID, _ := peer["agent_uuid"].(string); gotUUID != agentUUIDA {
+			continue
+		}
+		foundPeerA = true
+		if gotName, _ := peer["display_name"].(string); gotName != "agent-a" {
+			t.Fatalf("expected talkable peer A fallback display_name agent-a, got %q peer=%v", gotName, peer)
+		}
+	}
+	if !foundPeerA {
+		t.Fatalf("expected talkable_peers to include peer A %q, got %v", agentUUIDA, talkablePeersB)
 	}
 	if _, ok := capsPayload["manifest_url"].(string); !ok {
 		t.Fatalf("expected manifest_url in capabilities payload, got %v", capsPayload)
@@ -3218,8 +3325,14 @@ func TestAgentCapabilitiesAndSkillEndpoints(t *testing.T) {
 	if !strings.Contains(skillContent, "Skill Call Contract") || !strings.Contains(skillContent, "skill_request") {
 		t.Fatalf("expected skill call contract in skill, got %q", skillContent)
 	}
-	if !strings.Contains(skillContent, "\"agent_type\":\"<assistant-type>\"") || !strings.Contains(skillContent, "\"llm\":\"<provider>/<model>@<version>\"") || !strings.Contains(skillContent, "\"harness\":\"<runtime-or-framework>@<version>\"") {
-		t.Fatalf("expected onboarding skill to include minimal metadata setup guidance, got %q", skillContent)
+	if !strings.Contains(skillContent, "\"display_name\":\"<human-friendly-name>\"") || !strings.Contains(skillContent, "\"emoji\":\"<single-emoji>\"") || !strings.Contains(skillContent, "\"agent_type\":\"<assistant-type>\"") || !strings.Contains(skillContent, "\"llm\":\"<provider>/<model>@<version>\"") || !strings.Contains(skillContent, "\"harness\":\"<runtime-or-framework>@<version>\"") {
+		t.Fatalf("expected onboarding skill to include profile metadata setup guidance, got %q", skillContent)
+	}
+	if !strings.Contains(skillContent, "metadata.display_name") || !strings.Contains(skillContent, "metadata.emoji") {
+		t.Fatalf("expected onboarding skill to mention display_name and emoji guidance, got %q", skillContent)
+	}
+	if !strings.Contains(skillContent, "status=online") || !strings.Contains(skillContent, "status=offline") {
+		t.Fatalf("expected onboarding skill to describe online/offline presence semantics, got %q", skillContent)
 	}
 	if strings.Contains(skillContent, "## OpenClaw Node + Agent HTTP Path") {
 		t.Fatalf("did not expect OpenClaw-only section for non-OpenClaw profile, got %q", skillContent)
@@ -3281,6 +3394,57 @@ func TestAgentCapabilitiesAndSkillEndpoints(t *testing.T) {
 	notAcceptablePayload := decodeJSONMap(t, notAcceptableResp.Body.Bytes())
 	if notAcceptablePayload["error"] != "not_acceptable" {
 		t.Fatalf("expected not_acceptable error code, got %v", notAcceptablePayload["error"])
+	}
+}
+
+func TestAgentCapabilitiesTalkablePeersIncludesRemoteURIOnlyEntry(t *testing.T) {
+	router := newTestRouter()
+	_, _, tokenA, _, _, _, agentUUIDA, _ := setupTrustedAgents(t, router)
+
+	const peerID = "peer-remote"
+	createPeer(t, router, peerID, "https://remote.example", "https://remote.example", "peer-secret")
+
+	const remoteURI = "https://remote.example/human/remote/agent/assistant"
+	createRemoteAgentTrustAdmin(t, router, agentUUIDA, peerID, remoteURI)
+
+	capsResp := doJSONRequest(t, router, http.MethodGet, "/v1/agents/me/capabilities", nil, map[string]string{
+		"Authorization": "Bearer " + tokenA,
+	})
+	if capsResp.Code != http.StatusOK {
+		t.Fatalf("agent capabilities failed: %d %s", capsResp.Code, capsResp.Body.String())
+	}
+	capsPayload := decodeJSONMap(t, capsResp.Body.Bytes())
+	controlPlane, ok := capsPayload["control_plane"].(map[string]any)
+	if !ok {
+		t.Fatalf("missing control_plane: %v", capsPayload)
+	}
+	talkablePeers, ok := controlPlane["talkable_peers"].([]any)
+	if !ok || len(talkablePeers) == 0 {
+		t.Fatalf("expected talkable_peers in control_plane payload, got %v", controlPlane["talkable_peers"])
+	}
+
+	foundRemote := false
+	for _, raw := range talkablePeers {
+		peer, _ := raw.(map[string]any)
+		if peer == nil {
+			continue
+		}
+		if gotURI, _ := peer["agent_uri"].(string); gotURI != remoteURI {
+			continue
+		}
+		foundRemote = true
+		if gotName, _ := peer["display_name"].(string); gotName != remoteURI {
+			t.Fatalf("expected remote talkable peer display_name fallback %q, got %q peer=%v", remoteURI, gotName, peer)
+		}
+		if _, exists := peer["agent_uuid"]; exists {
+			t.Fatalf("expected remote URI-only peer to omit agent_uuid, got peer=%v", peer)
+		}
+		if _, exists := peer["agent_id"]; exists {
+			t.Fatalf("expected remote URI-only peer to omit agent_id, got peer=%v", peer)
+		}
+	}
+	if !foundRemote {
+		t.Fatalf("expected talkable_peers to include remote URI %q, got %v", remoteURI, talkablePeers)
 	}
 }
 
@@ -3411,6 +3575,94 @@ func TestAgentMeMetadataPatchMergesAndNullDeletes(t *testing.T) {
 	}
 	if got, _ := thirdMetadata["profile_markdown"].(string); got != "# About\nSecond version" {
 		t.Fatalf("expected profile_markdown to remain after llm delete, got %q metadata=%v", got, thirdMetadata)
+	}
+}
+
+func TestHumanManagedAgentProfilePatchUpdatesMetadataAndHandle(t *testing.T) {
+	router := newTestRouter()
+	_, _, agentUUID := registerMyAgent(t, router, "alice", "alice@a.test", "", "alice-agent-editable")
+
+	resp := doJSONRequest(t, router, http.MethodPatch, "/v1/me/agents/"+agentUUID, map[string]any{
+		"handle": "alice-agent-updated",
+		"metadata": map[string]any{
+			"display_name":     "Alice Agent",
+			"emoji":            "😄",
+			"profile_markdown": "Builds release pipelines.",
+		},
+	}, humanHeaders("alice", "alice@a.test"))
+	if resp.Code != http.StatusOK {
+		t.Fatalf("expected owner profile patch 200, got %d %s", resp.Code, resp.Body.String())
+	}
+
+	payload := decodeJSONMap(t, resp.Body.Bytes())
+	agent, _ := payload["agent"].(map[string]any)
+	if got, _ := agent["agent_uuid"].(string); got != agentUUID {
+		t.Fatalf("expected agent_uuid=%q, got %q payload=%v", agentUUID, got, payload)
+	}
+	if got, _ := agent["handle"].(string); got != "alice-agent-updated" {
+		t.Fatalf("expected updated handle, got %q payload=%v", got, payload)
+	}
+
+	metadata, _ := agent["metadata"].(map[string]any)
+	if got, _ := metadata["display_name"].(string); got != "Alice Agent" {
+		t.Fatalf("expected display_name metadata, got %q payload=%v", got, payload)
+	}
+	if got, _ := metadata["emoji"].(string); got != "😄" {
+		t.Fatalf("expected emoji metadata, got %q payload=%v", got, payload)
+	}
+	if got, _ := metadata["profile_markdown"].(string); got != "Builds release pipelines." {
+		t.Fatalf("expected profile_markdown metadata, got %q payload=%v", got, payload)
+	}
+}
+
+func TestHumanManagedAgentDisconnectMarksPresenceOffline(t *testing.T) {
+	router := newTestRouter()
+	_, _, agentUUID := registerMyAgent(t, router, "alice", "alice@a.test", "", "alice-agent-disconnect")
+
+	resp := doJSONRequest(t, router, http.MethodPost, "/v1/me/agents/"+agentUUID+"/disconnect", map[string]any{
+		"session_key": "main",
+		"reason":      "owner_disconnect",
+	}, humanHeaders("alice", "alice@a.test"))
+	if resp.Code != http.StatusOK {
+		t.Fatalf("expected owner disconnect 200, got %d %s", resp.Code, resp.Body.String())
+	}
+
+	payload := decodeJSONMap(t, resp.Body.Bytes())
+	agent, _ := payload["agent"].(map[string]any)
+	metadata, _ := agent["metadata"].(map[string]any)
+	presence, _ := metadata["presence"].(map[string]any)
+	if got, _ := presence["status"].(string); got != "offline" {
+		t.Fatalf("expected presence.status=offline, got %q payload=%v", got, payload)
+	}
+	if ready, ok := presence["ready"].(bool); !ok || ready {
+		t.Fatalf("expected presence.ready=false, got %v payload=%v", presence["ready"], payload)
+	}
+	if got, _ := presence["session_key"].(string); got != "main" {
+		t.Fatalf("expected presence.session_key=main, got %q payload=%v", got, payload)
+	}
+}
+
+func TestHumanManagedAgentRoutesRejectUnmanageableAgent(t *testing.T) {
+	router := newTestRouter()
+	_, _, agentUUID := registerMyAgent(t, router, "alice", "alice@a.test", "", "alice-agent-owned")
+	ensureHandleConfirmed(t, router, "bob", "bob@b.test")
+
+	resp := doJSONRequest(t, router, http.MethodPatch, "/v1/me/agents/"+agentUUID, map[string]any{
+		"metadata": map[string]any{
+			"profile_markdown": "nope",
+		},
+	}, humanHeaders("bob", "bob@b.test"))
+	if resp.Code != http.StatusForbidden {
+		t.Fatalf("expected non-manager profile patch 403, got %d %s", resp.Code, resp.Body.String())
+	}
+
+	payload := decodeJSONMap(t, resp.Body.Bytes())
+	if got, _ := payload["error"].(string); got != "forbidden" {
+		t.Fatalf("expected forbidden error, got %q payload=%v", got, payload)
+	}
+	detail, _ := payload["error_detail"].(map[string]any)
+	if got, _ := detail["code"].(string); got != "forbidden" {
+		t.Fatalf("expected forbidden error_detail.code, got %q payload=%v", got, payload)
 	}
 }
 
@@ -3918,11 +4170,14 @@ func TestOpenAPIMarkdownHeaders(t *testing.T) {
 	if !strings.Contains(body, "```yaml") || !strings.Contains(body, "/v1/agents/me") {
 		t.Fatalf("expected embedded yaml spec content in openapi markdown, got %q", body)
 	}
-	if !strings.Contains(body, "metadata.profile_markdown") || !strings.Contains(body, "metadata.activities") || !strings.Contains(body, "metadata.hire_me") {
+	if !strings.Contains(body, "metadata.display_name") || !strings.Contains(body, "metadata.emoji") || !strings.Contains(body, "metadata.profile_markdown") || !strings.Contains(body, "metadata.activities") || !strings.Contains(body, "metadata.hire_me") {
 		t.Fatalf("expected metadata directory fields in openapi markdown, got %q", body)
 	}
-	if !strings.Contains(body, "metadata.llm") || !strings.Contains(body, "metadata.harness") {
-		t.Fatalf("expected llm/harness metadata fields in openapi markdown, got %q", body)
+	if !strings.Contains(body, "metadata.llm") || !strings.Contains(body, "metadata.harness") || !strings.Contains(body, "metadata.presence") {
+		t.Fatalf("expected llm/harness/presence metadata fields in openapi markdown, got %q", body)
+	}
+	if !strings.Contains(body, "status=online") || !strings.Contains(body, "status=offline") {
+		t.Fatalf("expected presence status guidance in openapi markdown, got %q", body)
 	}
 	if !strings.Contains(body, "copy-ready self-signup prompt") {
 		t.Fatalf("expected self-signup prompt contract text in openapi markdown, got %q", body)
@@ -4717,8 +4972,11 @@ func TestUIRoutes_AgentsPageIncludesSelfSignupMetadataControls(t *testing.T) {
 	if !strings.Contains(body, "Generate Self-Signup Prompt") || !strings.Contains(body, "Copy Agent Prompt") {
 		t.Fatalf("expected self-signup prompt controls in /agents page, got %q", body)
 	}
-	if !strings.Contains(body, "profile_markdown") || !strings.Contains(body, "activities") || !strings.Contains(body, "hire_me") {
+	if !strings.Contains(body, "display_name") || !strings.Contains(body, "emoji") || !strings.Contains(body, "profile_markdown") || !strings.Contains(body, "activities") || !strings.Contains(body, "hire_me") {
 		t.Fatalf("expected metadata field hints in /agents page, got %q", body)
+	}
+	if !strings.Contains(body, "Agent Profile") || !strings.Contains(body, "Disconnect") || !strings.Contains(body, "emoji-picker-element") {
+		t.Fatalf("expected agent profile modal controls and emoji picker library in /agents page, got %q", body)
 	}
 }
 

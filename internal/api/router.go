@@ -135,6 +135,7 @@ func NewRouterWithOptions(handler *Handler, opts RouterOptions) http.Handler {
 	mux.HandleFunc("/v1/me/metadata", handler.handleMeMetadata)
 	mux.HandleFunc("/v1/me/orgs", handler.handleMyOrgs)
 	mux.HandleFunc("/v1/me/agents", handler.handleMyAgents)
+	mux.HandleFunc("/v1/me/agents/", handler.handleMyAgentSubroutes)
 	mux.HandleFunc("/v1/me/agents/bind-token", handler.handleMyAgentBindToken)
 	mux.HandleFunc("/v1/me/agents/bind-tokens", handler.handleMyAgentBindTokens)
 	mux.HandleFunc("/v1/me/agent-trusts", handler.handleMyAgentTrusts)
@@ -795,6 +796,7 @@ func writeErrorWithHintAndExtras(w http.ResponseWriter, status int, code string,
 	payload := map[string]any{
 		"error":   code,
 		"message": message,
+		"failure": true,
 	}
 	if requestID := strings.TrimSpace(w.Header().Get("X-Request-ID")); requestID != "" {
 		payload["request_id"] = requestID
@@ -831,6 +833,8 @@ func writeErrorWithHintAndExtras(w http.ResponseWriter, status int, code string,
 		detail[key] = value
 	}
 	payload["error_detail"] = detail
+	payload["Failure"] = true
+	payload["Error details"] = detail
 	writeJSON(w, status, payload)
 }
 

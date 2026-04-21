@@ -91,14 +91,15 @@ var agentConnectPromptLines = []string{
 	"",
 	"Use this one-time bind token exactly once:",
 	"{{bind_token}}",
+	"(bind tokens are prefixed with `b_`)",
 	"",
 	"Steps:",
 	"1. Redeem with your preferred handle:",
 	"   curl -fsS -X POST {{bind_api_url}} -H \"Content-Type: application/json\" -d '{\"hub_url\":\"{{hub_url}}\",\"bind_token\":\"{{bind_token}}\",\"handle\":\"<your-agent-handle>\"}'",
 	"2. If the bind response returns `agent_exists`, retry with another handle permutation such as `<your-agent-handle>-2`.",
-	"3. Persist the returned bearer `token`, exact `api_base`, and `endpoints` exactly as returned.",
+	"3. Persist the returned bearer `token` (prefixed with `t_`), exact `api_base`, and `endpoints` exactly as returned.",
 	"4. Read skill guidance: `GET {api_base}/agents/me/skill` with `Authorization: Bearer <token>`.",
-	"5. Set minimal metadata via `PATCH {api_base}/agents/me/metadata` including `agent_type`, `llm`, and `harness`.",
+	"5. Set profile metadata via `PATCH {api_base}/agents/me/metadata` including `display_name`, `emoji`, `agent_type`, `llm`, and `harness`. Treat `metadata.presence` as server-managed.",
 	"6. Check readiness with `GET {api_base}/agents/me/capabilities`: publish only when `control_plane.can_communicate=true` and a target exists in `control_plane.can_talk_to` or `control_plane.can_talk_to_uris`.",
 	"7. Publish a first test message via `POST {api_base}/messages/publish`.",
 	"",
@@ -125,6 +126,7 @@ type agentControlPlaneView struct {
 	OwnerHumanID     string
 	CanTalkTo        []string
 	CanTalkToURIs    []string
+	TalkablePeers    []agentTalkablePeerSummary
 	Capabilities     []string
 	AdvertisedSkills []agentSkillSummary
 	PeerSkillCatalog []agentPeerSkillSummary
@@ -418,6 +420,16 @@ func (h *Handler) meResponsePayload(human model.Human, isAdmin bool) map[string]
 
 func (h *Handler) agentResponsePayload(agent model.Agent) map[string]any {
 	payload := agentResponsePayload(agent)
+	metadata, _ := payload["metadata"].(map[string]any)
+	if metadata == nil {
+		metadata = map[string]any{}
+	}
+	if presence := h.currentAgentPresence(agent.AgentUUID, agent.Metadata); presence != nil {
+		metadata[model.AgentMetadataKeyPresence] = presence
+	} else {
+		delete(metadata, model.AgentMetadataKeyPresence)
+	}
+	payload["metadata"] = metadata
 	payload["uri"] = h.agentURI(agent)
 	return payload
 }
@@ -551,6 +563,175 @@ func (h *Handler) handleMyAgents(w http.ResponseWriter, r *http.Request) {
 		writeMethodNotAllowed(w)
 		return
 	}
+}
+
+func (h *Handler) handleMyAgentSubroutes(w http.ResponseWriter, r *http.Request) {
+	path := strings.TrimSuffix(r.URL.Path, "/")
+	const prefix = "/v1/me/agents/"
+	if !strings.HasPrefix(path, prefix) {
+		writeError(w, http.StatusNotFound, "not_found", "route not found")
+		return
+	}
+	tail := strings.Trim(strings.TrimPrefix(path, prefix), "/")
+	if tail == "" || tail == "bind-token" || tail == "bind-tokens" {
+		writeError(w, http.StatusNotFound, "not_found", "route not found")
+		return
+	}
+
+	action := ""
+	agentRef := tail
+	if r.Method == http.MethodPost && strings.HasSuffix(tail, "/disconnect") {
+		action = "disconnect"
+		agentRef = strings.Trim(strings.TrimSuffix(tail, "/disconnect"), "/")
+	}
+
+	agentUUID := normalizeUUID(agentRef)
+	if !validateUUID(agentUUID) {
+		writeError(w, http.StatusBadRequest, "invalid_agent_uuid", "agent_uuid must be a valid UUID")
+		return
+	}
+
+	actor, err := h.authenticateHuman(r)
+	if err != nil {
+		writeError(w, http.StatusUnauthorized, "unauthorized", "missing or invalid human auth")
+		return
+	}
+	if h.requireHandleConfirmedForWrite(w, actor) {
+		return
+	}
+
+	agent, err := h.control.GetAgentByUUID(agentUUID)
+	if err != nil {
+		if errors.Is(err, store.ErrAgentNotFound) {
+			writeError(w, http.StatusNotFound, "unknown_agent", "agent_uuid is not registered")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "store_error", "failed to load agent")
+		return
+	}
+	if !actor.IsSuperAdmin && !h.humanCanManageAgent(actor.Human.HumanID, agentUUID) {
+		writeError(w, http.StatusForbidden, "forbidden", "admin/owner required")
+		return
+	}
+
+	switch {
+	case r.Method == http.MethodPatch && action == "":
+		h.handleMyAgentProfilePatch(w, r, agent)
+		return
+	case r.Method == http.MethodPost && action == "disconnect":
+		h.handleMyAgentDisconnect(w, r, agent)
+		return
+	default:
+		writeMethodNotAllowed(w)
+		return
+	}
+}
+
+func (h *Handler) humanCanManageAgent(humanID, agentUUID string) bool {
+	for _, candidate := range h.control.ListHumanAgents(humanID) {
+		if candidate.AgentUUID == agentUUID {
+			return true
+		}
+	}
+	return false
+}
+
+func (h *Handler) handleMyAgentProfilePatch(w http.ResponseWriter, r *http.Request, agent model.Agent) {
+	if !requireJSONRequestContentType(w, r) {
+		return
+	}
+
+	handle, metadata, err := decodeAgentProfileUpdateRequest(r)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_request", err.Error())
+		return
+	}
+
+	updated := agent
+	now := h.now().UTC()
+	if handle != nil {
+		updated, err = h.finalizeAgentHandleSelfWithRuntimeFallback(agent.AgentUUID, *handle, now)
+		if err != nil {
+			switch {
+			case errors.Is(err, store.ErrAgentNotFound):
+				writeError(w, http.StatusNotFound, "unknown_agent", "agent_uuid is not registered")
+			case errors.Is(err, store.ErrInvalidHandle):
+				writeError(w, http.StatusBadRequest, "invalid_handle", "handle must be 2-64 chars, URL-safe (a-z, 0-9, ., _, -), and not blocked")
+			case errors.Is(err, store.ErrAgentExists):
+				writeError(w, http.StatusConflict, "agent_exists", "agent_id already registered")
+			case errors.Is(err, store.ErrAgentHandleLocked):
+				writeError(w, http.StatusConflict, "agent_handle_locked", "agent handle is already finalized")
+			default:
+				writeError(w, http.StatusInternalServerError, "store_error", "failed to finalize agent handle")
+			}
+			return
+		}
+	}
+	if metadata != nil {
+		updated, err = h.updateAgentMetadataSelfWithRuntimeFallback(agent.AgentUUID, metadata, now)
+		if err != nil {
+			switch {
+			case errors.Is(err, store.ErrAgentNotFound):
+				writeError(w, http.StatusNotFound, "unknown_agent", "agent_uuid is not registered")
+			case errors.Is(err, store.ErrInvalidAgentType):
+				writeError(w, http.StatusBadRequest, "invalid_agent_type", "metadata.agent_type must be 2-64 chars: a-z, 0-9, ., _, -")
+			case errors.Is(err, store.ErrInvalidAgentSkills):
+				writeError(w, http.StatusBadRequest, "invalid_agent_skills", "metadata.skills must be an array of {name, description, parameters?}; parameters may be markdown or json, must mark required/optional values, and must keep secrets forbidden")
+			case errors.Is(err, store.ErrInvalidSkillDescription):
+				writeError(w, http.StatusBadRequest, "invalid_skill_description", "metadata.skills and metadata.skills[].parameters must not include secret values; parameter docs must clearly forbid passing secrets")
+			default:
+				writeError(w, http.StatusInternalServerError, "store_error", "failed to update agent metadata")
+			}
+			return
+		}
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"agent": h.agentResponsePayload(updated),
+	})
+}
+
+func (h *Handler) handleMyAgentDisconnect(w http.ResponseWriter, r *http.Request, agent model.Agent) {
+	if !requireJSONRequestContentType(w, r) {
+		return
+	}
+
+	var req openClawOfflineRequest
+	if r.Body != nil && r.ContentLength != 0 {
+		if err := decodeJSON(r, &req); err != nil {
+			writeError(w, http.StatusBadRequest, "invalid_request", "invalid JSON request")
+			return
+		}
+	}
+
+	sessionKey := normalizeOpenClawSessionKey(req.SessionKey)
+	updated, err := h.setOpenClawWebSocketPresence(agent.AgentUUID, sessionKey, openClawPresenceStatusOffline, req.Reason)
+	if err != nil {
+		switch {
+		case errors.Is(err, store.ErrAgentNotFound):
+			writeError(w, http.StatusNotFound, "unknown_agent", "agent_uuid is not registered")
+		case errors.Is(err, store.ErrInvalidAgentType):
+			writeError(w, http.StatusBadRequest, "invalid_agent_type", "metadata.agent_type must be 2-64 chars: a-z, 0-9, ., _, -")
+		default:
+			writeError(w, http.StatusInternalServerError, "store_error", "failed to update agent presence")
+		}
+		return
+	}
+
+	details := map[string]any{"session_key": sessionKey, "source": "human_ui"}
+	if reason := strings.TrimSpace(req.Reason); reason != "" {
+		details["reason"] = reason
+	}
+	h.recordOpenClawAdapterUsage(agent.AgentUUID, "ws_offline", details)
+
+	payload := map[string]any{
+		"agent":        h.agentResponsePayload(updated),
+		"disconnected": true,
+	}
+	if presence := h.currentAgentPresence(updated.AgentUUID, updated.Metadata); presence != nil {
+		payload["presence"] = presence
+	}
+	writeJSON(w, http.StatusOK, payload)
 }
 
 func (h *Handler) handleMyAgentBindTokens(w http.ResponseWriter, r *http.Request) {
@@ -1067,6 +1248,7 @@ func (h *Handler) buildAgentControlPlane(r *http.Request, agent model.Agent) (ag
 		return agentControlPlaneView{}, err
 	}
 	talkableURIs := make([]string, 0, len(peers))
+	talkablePeers := make([]agentTalkablePeerSummary, 0, len(peers))
 	peerSkillCatalog := make([]agentPeerSkillSummary, 0, len(peers))
 	for _, peerUUID := range peers {
 		peerAgent, err := h.control.GetAgentByUUID(peerUUID)
@@ -1075,6 +1257,7 @@ func (h *Handler) buildAgentControlPlane(r *http.Request, agent model.Agent) (ag
 		}
 		peerURI := h.agentURI(peerAgent)
 		talkableURIs = append(talkableURIs, peerURI)
+		talkablePeers = append(talkablePeers, talkablePeerSummaryFromLocalAgent(peerAgent, peerURI))
 		peerSkillCatalog = append(peerSkillCatalog, agentPeerSkillSummary{
 			AgentUUID: peerAgent.AgentUUID,
 			AgentID:   peerAgent.AgentID,
@@ -1092,12 +1275,27 @@ func (h *Handler) buildAgentControlPlane(r *http.Request, agent model.Agent) (ag
 			continue
 		}
 		talkableURIs = append(talkableURIs, remoteURI)
+		talkablePeers = append(talkablePeers, agentTalkablePeerSummary{
+			AgentURI:    remoteURI,
+			DisplayName: remoteURI,
+		})
 		peerSkillCatalog = append(peerSkillCatalog, agentPeerSkillSummary{
 			AgentURI: remoteURI,
 			Skills:   []agentSkillSummary{},
 		})
 	}
 	sort.Strings(talkableURIs)
+	sort.Slice(talkablePeers, func(i, j int) bool {
+		left := strings.TrimSpace(talkablePeers[i].AgentID)
+		if left == "" {
+			left = strings.TrimSpace(talkablePeers[i].AgentURI)
+		}
+		right := strings.TrimSpace(talkablePeers[j].AgentID)
+		if right == "" {
+			right = strings.TrimSpace(talkablePeers[j].AgentURI)
+		}
+		return left < right
+	})
 	sort.Slice(peerSkillCatalog, func(i, j int) bool {
 		left := strings.TrimSpace(peerSkillCatalog[i].AgentID)
 		if left == "" {
@@ -1122,10 +1320,35 @@ func (h *Handler) buildAgentControlPlane(r *http.Request, agent model.Agent) (ag
 		OwnerHumanID:     ownerHumanID,
 		CanTalkTo:        peers,
 		CanTalkToURIs:    talkableURIs,
+		TalkablePeers:    talkablePeers,
 		Capabilities:     []string{"publish_messages", "pull_messages", "read_capabilities", "read_skill", "update_profile"},
 		AdvertisedSkills: parseAdvertisedSkills(agent.Metadata),
 		PeerSkillCatalog: peerSkillCatalog,
 	}, nil
+}
+
+func talkablePeerSummaryFromLocalAgent(peer model.Agent, peerURI string) agentTalkablePeerSummary {
+	displayName := metadataStringAliasValue(peer.Metadata, "display_name")
+	if displayName == "" {
+		displayName = strings.TrimSpace(peer.Handle)
+	}
+	if displayName == "" {
+		displayName = strings.TrimSpace(peer.AgentID)
+	}
+	if displayName == "" {
+		displayName = strings.TrimSpace(peerURI)
+	}
+
+	summary := agentTalkablePeerSummary{
+		AgentUUID:   strings.TrimSpace(peer.AgentUUID),
+		AgentID:     strings.TrimSpace(peer.AgentID),
+		AgentURI:    strings.TrimSpace(peerURI),
+		DisplayName: displayName,
+	}
+	if emoji := metadataStringAliasValue(peer.Metadata, "emoji"); emoji != "" {
+		summary.Emoji = emoji
+	}
+	return summary
 }
 
 func (h *Handler) agentControlPlanePayload(cp agentControlPlaneView) map[string]any {
@@ -1147,23 +1370,14 @@ func (h *Handler) agentControlPlanePayload(cp agentControlPlaneView) map[string]
 		"owner":               owner,
 		"can_talk_to":         cp.CanTalkTo,
 		"can_talk_to_uris":    cp.CanTalkToURIs,
+		"talkable_peers":      cp.TalkablePeers,
 		"capabilities":        cp.Capabilities,
 		"can_communicate":     len(cp.CanTalkToURIs) > 0,
 		"advertised_skills":   cp.AdvertisedSkills,
 		"peer_skill_catalog":  cp.PeerSkillCatalog,
 		"skill_call_contract": defaultSkillCallContract(cp.APIBase),
 		"protocol_adapters":   protocolAdaptersPayload(cp.APIBase),
-		"endpoints": map[string]string{
-			"publish":      cp.APIBase + "/messages/publish",
-			"pull":         cp.APIBase + "/messages/pull",
-			"ack":          cp.APIBase + "/messages/ack",
-			"nack":         cp.APIBase + "/messages/nack",
-			"status":       cp.APIBase + "/messages/{message_id}",
-			"profile":      cp.APIBase + "/agents/me",
-			"manifest":     cp.APIBase + "/agents/me/manifest",
-			"capabilities": cp.APIBase + "/agents/me/capabilities",
-			"skill":        cp.APIBase + "/agents/me/skill",
-		},
+		"endpoints":           agentRuntimeEndpoints(cp.APIBase),
 	}
 }
 
@@ -1401,7 +1615,23 @@ func entityMetadataForRender(metadata map[string]any) map[string]any {
 }
 
 func agentMetadataForRender(metadata map[string]any) map[string]any {
-	return entityMetadataForRender(metadata)
+	out := entityMetadataForRender(metadata)
+	delete(out, model.AgentMetadataKeyPresence)
+	return out
+}
+
+func (h *Handler) currentAgentPresence(agentUUID string, fallbackMetadata map[string]any) map[string]any {
+	agentUUID = strings.TrimSpace(agentUUID)
+	if agentUUID != "" {
+		if presence, ok, err := h.control.GetAgentPresence(agentUUID); err == nil && ok {
+			return openClawPresenceFromMetadataAt(
+				map[string]any{model.AgentMetadataKeyPresence: presence},
+				h.now().UTC(),
+				openClawPresenceOfflineAfter,
+			)
+		}
+	}
+	return openClawPresenceFromMetadata(fallbackMetadata)
 }
 
 func agentSystemActivityLog(metadata map[string]any) []map[string]any {
@@ -2547,7 +2777,7 @@ func (h *Handler) bindTokenCreateResponse(r *http.Request, bind model.BindToken,
 func (h *Handler) createBindTokenWithRetry(orgID string, ownerHumanID *string, actorHumanID string, isSuperAdmin bool) (model.BindToken, string, error) {
 	var lastErr error
 	for attempt := 0; attempt < 2; attempt++ {
-		bindSecret, err := auth.GenerateToken()
+		bindSecret, err := auth.GenerateBindToken()
 		if err != nil {
 			return model.BindToken{}, "", err
 		}
@@ -2624,7 +2854,7 @@ func (h *Handler) handleRedeemBindToken(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	agentToken, err := auth.GenerateToken()
+	agentToken, err := auth.GenerateAgentToken()
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "token_generation_failed", "failed to generate agent token")
 		return
@@ -2643,17 +2873,7 @@ func (h *Handler) handleRedeemBindToken(w http.ResponseWriter, r *http.Request) 
 			"api_base":          apiBase,
 			"agent":             h.agentResponsePayload(agent),
 			"protocol_adapters": protocolAdaptersPayload(apiBase),
-			"endpoints": map[string]string{
-				"profile":      apiBase + "/agents/me",
-				"manifest":     apiBase + "/agents/me/manifest",
-				"capabilities": apiBase + "/agents/me/capabilities",
-				"skill":        apiBase + "/agents/me/skill",
-				"publish":      apiBase + "/messages/publish",
-				"pull":         apiBase + "/messages/pull",
-				"ack":          apiBase + "/messages/ack",
-				"nack":         apiBase + "/messages/nack",
-				"status":       apiBase + "/messages/{message_id}",
-			},
+			"endpoints":         agentRuntimeEndpoints(apiBase),
 		})
 	}
 	writeBindError := func(err error) {
@@ -2802,9 +3022,9 @@ func (h *Handler) handleAgentsSubroutes(w http.ResponseWriter, r *http.Request) 
 			writeMethodNotAllowed(w)
 			return
 		}
-		token, err := auth.GenerateToken()
+		token, err := auth.GenerateAgentToken()
 		if err != nil {
-			writeError(w, http.StatusInternalServerError, "token_generation_failed", "failed to generate token")
+			writeError(w, http.StatusInternalServerError, "token_generation_failed", "failed to generate agent token")
 			return
 		}
 		if err := h.control.RotateAgentToken(agentUUID, actor.Human.HumanID, auth.HashToken(token), h.now().UTC(), actor.IsSuperAdmin); err != nil {

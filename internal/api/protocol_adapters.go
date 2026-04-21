@@ -1,5 +1,25 @@
 package api
 
+func agentRuntimeEndpoints(apiBase string) map[string]string {
+	return map[string]string{
+		"profile":      apiBase + "/agents/me",
+		"manifest":     apiBase + "/agents/me/manifest",
+		"capabilities": apiBase + "/agents/me/capabilities",
+		"skill":        apiBase + "/agents/me/skill",
+		"publish":      apiBase + "/messages/publish",
+		"pull":         apiBase + "/messages/pull",
+		"ack":          apiBase + "/messages/ack",
+		"nack":         apiBase + "/messages/nack",
+		"status":       apiBase + "/messages/{message_id}",
+	}
+}
+
+func agentManifestEndpoints(apiBase string) map[string]string {
+	endpoints := agentRuntimeEndpoints(apiBase)
+	endpoints["offline"] = apiBase + "/openclaw/messages/offline"
+	return endpoints
+}
+
 func protocolAdaptersPayload(apiBase string) map[string]any {
 	endpoints := openClawAdapterEndpoints(apiBase)
 	return map[string]any{
