@@ -49,7 +49,6 @@ type openClawPluginRegisterRequest struct {
 
 type openClawOfflineRequest struct {
 	SessionKey string `json:"session_key,omitempty"`
-	Transport  string `json:"transport,omitempty"`
 	Reason     string `json:"reason,omitempty"`
 }
 
@@ -190,11 +189,7 @@ func (h *Handler) handleOpenClawOffline(w http.ResponseWriter, r *http.Request) 
 	}
 
 	sessionKey := normalizeOpenClawSessionKey(req.SessionKey)
-	transport := strings.TrimSpace(req.Transport)
-	if transport == "" {
-		transport = "websocket"
-	}
-	agent, err := h.setOpenClawRuntimePresence(agentUUID, sessionKey, transport, openClawPresenceStatusOffline, req.Reason)
+	agent, err := h.setOpenClawWebSocketPresence(agentUUID, sessionKey, openClawPresenceStatusOffline, req.Reason)
 	if err != nil {
 		switch {
 		case errors.Is(err, store.ErrAgentNotFound):
@@ -208,65 +203,10 @@ func (h *Handler) handleOpenClawOffline(w http.ResponseWriter, r *http.Request) 
 	}
 
 	details := map[string]any{"session_key": sessionKey}
-	if transport != "" {
-		details["transport"] = transport
-	}
 	if reason := strings.TrimSpace(req.Reason); reason != "" {
 		details["reason"] = reason
 	}
 	h.recordOpenClawAdapterUsage(agentUUID, "ws_offline", details)
-
-	out := map[string]any{
-		"agent": h.agentResponsePayload(agent),
-	}
-	if presence := h.currentAgentPresence(agent.AgentUUID, agent.Metadata); presence != nil {
-		out["presence"] = presence
-	}
-	writeAgentRuntimeSuccess(w, http.StatusOK, out)
-}
-
-func (h *Handler) handleOpenClawOnline(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		writeMethodNotAllowed(w)
-		return
-	}
-	if !requireJSONRequestContentType(w, r) {
-		return
-	}
-
-	agentUUID, err := h.authenticateAgent(r)
-	if err != nil {
-		writeError(w, http.StatusUnauthorized, "unauthorized", "missing or invalid bearer token")
-		return
-	}
-
-	var req openClawOfflineRequest
-	if err := decodeJSON(r, &req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid_request", "invalid JSON request")
-		return
-	}
-
-	sessionKey := normalizeOpenClawSessionKey(req.SessionKey)
-	transport := strings.TrimSpace(req.Transport)
-	if transport == "" {
-		transport = "http_long_poll"
-	}
-	if heartbeatErr := h.touchAgentPresenceOnline(agentUUID, sessionKey, transport); heartbeatErr != nil {
-		writeRuntimeHandlerError(w, heartbeatErr)
-		return
-	}
-
-	agent, err := h.control.GetAgentByUUID(agentUUID)
-	if err != nil {
-		writeError(w, http.StatusNotFound, "unknown_agent", "agent_uuid is not registered")
-		return
-	}
-
-	details := map[string]any{"session_key": sessionKey, "transport": transport}
-	if reason := strings.TrimSpace(req.Reason); reason != "" {
-		details["reason"] = reason
-	}
-	h.recordOpenClawAdapterUsage(agentUUID, "online", details)
 
 	out := map[string]any{
 		"agent": h.agentResponsePayload(agent),
@@ -720,12 +660,8 @@ func (h *Handler) touchAgentPresenceOnline(agentUUID, sessionKey, transport stri
 		return nil
 	}
 	if changedStatus {
-		activityTransport := strings.TrimSpace(transport)
-		if activityTransport == "" {
-			activityTransport = "runtime"
-		}
 		entry := map[string]any{
-			"activity":   activityTransport + " transport online",
+			"activity":   "websocket transport online",
 			"category":   "agent_presence",
 			"action":     openClawPresenceStatusOnline,
 			"subject_id": normalizeOpenClawSessionKey(sessionKey),
@@ -776,10 +712,6 @@ func runtimeHandlerErrorForPresenceUpdate(err error) *runtimeHandlerError {
 }
 
 func (h *Handler) setOpenClawWebSocketPresence(agentUUID, sessionKey, status, reason string) (model.Agent, error) {
-	return h.setOpenClawRuntimePresence(agentUUID, sessionKey, "websocket", status, reason)
-}
-
-func (h *Handler) setOpenClawRuntimePresence(agentUUID, sessionKey, transport, status, reason string) (model.Agent, error) {
 	now := h.now().UTC()
 	agentUUID = strings.TrimSpace(agentUUID)
 	if agentUUID == "" {
@@ -790,15 +722,11 @@ func (h *Handler) setOpenClawRuntimePresence(agentUUID, sessionKey, transport, s
 		status = openClawPresenceStatusOffline
 	}
 	sessionKey = normalizeOpenClawSessionKey(sessionKey)
-	transport = strings.TrimSpace(transport)
-	if transport == "" {
-		transport = "websocket"
-	}
 
 	patch := map[string]any{
 		"status":      status,
 		"ready":       status == openClawPresenceStatusOnline,
-		"transport":   transport,
+		"transport":   "websocket",
 		"session_key": sessionKey,
 		"updated_at":  now.Format(time.RFC3339),
 	}
@@ -807,14 +735,13 @@ func (h *Handler) setOpenClawRuntimePresence(agentUUID, sessionKey, transport, s
 		return model.Agent{}, err
 	}
 	if changedStatus {
-		activityText := transport + " transport " + status
+		activityText := "websocket transport " + status
 		entry := map[string]any{
 			"activity":   activityText,
 			"category":   "agent_presence",
 			"action":     status,
 			"subject_id": sessionKey,
 			"event_id":   "agent-presence:" + status + ":" + sessionKey + ":" + strconv.FormatInt(now.UnixNano(), 10),
-			"transport":  transport,
 		}
 		if trimmedReason := strings.TrimSpace(reason); trimmedReason != "" {
 			entry["reason"] = trimmedReason
@@ -884,24 +811,6 @@ func openClawPresenceFromMetadataAt(metadata map[string]any, now time.Time, stal
 		out["updated_at"] = updatedAt
 	}
 	return out
-}
-
-func openClawOnlinePresenceStale(presence map[string]any, now time.Time, staleAfter time.Duration) bool {
-	if staleAfter <= 0 || len(presence) == 0 {
-		return false
-	}
-	if now.IsZero() {
-		now = time.Now().UTC()
-	} else {
-		now = now.UTC()
-	}
-	status := strings.ToLower(strings.TrimSpace(asStringAny(presence["status"])))
-	if status != openClawPresenceStatusOnline {
-		return false
-	}
-	updatedAt := strings.TrimSpace(asStringAny(presence["updated_at"]))
-	seenAt, ok := parseOpenClawPresenceTimestamp(updatedAt)
-	return ok && now.Sub(seenAt) >= staleAfter
 }
 
 func parseOpenClawPresenceTimestamp(raw string) (time.Time, bool) {

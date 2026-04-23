@@ -2049,46 +2049,13 @@ paths:
       responses:
         '101':
           description: WebSocket upgrade accepted
-  /v1/openclaw/messages/online:
-    post:
-      summary: Mark OpenClaw runtime transport online (agent runtime)
-      description: |
-        Agent runtime route. Requires agent bearer token.
-        Explicitly marks the authenticated agent as online by updating `metadata.presence`
-        with `status=online`, `ready=true`, the provided `session_key`, and the runtime
-        transport. Also appends a system activity entry in category `agent_presence` with
-        action `online`.
-        UI/integration guidance: render the agent as online when this presence state is returned
-        from `GET /v1/agents/me` or human control-plane agent reads.
-        This is additive and does not issue or refresh the agent token.
-      security:
-        - agentAuth: []
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              properties:
-                session_key:
-                  type: string
-                  description: Optional runtime session partition key; defaults to `main`.
-                transport:
-                  type: string
-                  description: Optional runtime transport name; defaults to `http_long_poll`.
-                reason:
-                  type: string
-                  description: Optional operator/runtime reason for coming online.
-      responses:
-        '200':
-          description: Presence updated to online
   /v1/openclaw/messages/offline:
     post:
       summary: Mark OpenClaw websocket transport offline (agent runtime)
       description: |
         Agent runtime route. Requires agent bearer token.
-        Explicitly marks the authenticated agent as offline by updating `metadata.presence`
-        with `status=offline`, `ready=false`, and the provided `session_key`.
+        Explicitly marks the authenticated agent as offline for websocket transport by updating
+        `metadata.presence` with `status=offline`, `ready=false`, and the provided `session_key`.
         Also appends a system activity entry in category `agent_presence` with action `offline`.
         UI/integration guidance: render the agent as offline when this presence state is returned
         from `GET /v1/agents/me` or human control-plane agent reads.
@@ -2104,10 +2071,7 @@ paths:
               properties:
                 session_key:
                   type: string
-                  description: Optional runtime session partition key; defaults to `main`.
-                transport:
-                  type: string
-                  description: Optional runtime transport name.
+                  description: Optional websocket session partition key; defaults to `main`.
                 reason:
                   type: string
                   description: Optional operator/runtime reason for going offline.

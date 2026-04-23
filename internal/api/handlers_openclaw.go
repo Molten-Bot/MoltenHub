@@ -151,9 +151,6 @@ func (h *Handler) handleOpenClawMessageSubroutes(w http.ResponseWriter, r *http.
 	case "ws":
 		h.handleOpenClawWebSocket(w, r)
 		return
-	case "online":
-		h.handleOpenClawOnline(w, r)
-		return
 	case "offline":
 		h.handleOpenClawOffline(w, r)
 		return
