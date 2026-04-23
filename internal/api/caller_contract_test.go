@@ -52,6 +52,11 @@ func TestCallerContract_AgentRuntimeEndpointsRejectHumanHeaders(t *testing.T) {
 	}, headers)
 	requireUnauthorized(t, openclawAckResp)
 
+	openclawOnlineResp := doJSONRequest(t, router, http.MethodPost, "/v1/openclaw/messages/online", map[string]any{
+		"session_key": "main",
+	}, headers)
+	requireUnauthorized(t, openclawOnlineResp)
+
 	openclawOfflineResp := doJSONRequest(t, router, http.MethodPost, "/v1/openclaw/messages/offline", map[string]any{
 		"session_key": "main",
 	}, headers)
@@ -124,6 +129,7 @@ func TestOpenAPICallerContractSecuritySchemes(t *testing.T) {
 		{Method: http.MethodPost, Path: "/v1/openclaw/messages/ack"}:         {"agentAuth"},
 		{Method: http.MethodPost, Path: "/v1/openclaw/messages/nack"}:        {"agentAuth"},
 		{Method: http.MethodGet, Path: "/v1/openclaw/messages/{message_id}"}: {"agentAuth"},
+		{Method: http.MethodPost, Path: "/v1/openclaw/messages/online"}:      {"agentAuth"},
 		{Method: http.MethodPost, Path: "/v1/openclaw/messages/offline"}:     {"agentAuth"},
 	}
 

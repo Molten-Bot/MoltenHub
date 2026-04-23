@@ -276,6 +276,19 @@ func buildAgentManifest(agent model.Agent, cp agentControlPlaneView, now time.Ti
 			Description:          "OpenClaw JSON envelope status adapter (additive to /v1/messages/{message_id}).",
 		},
 		{
+			ID:                   "agent.messages.openclaw.online",
+			Method:               "POST",
+			Path:                 "/v1/openclaw/messages/online",
+			Auth:                 "bearer_agent",
+			RequestContentTypes:  []string{"application/json"},
+			ResponseContentTypes: []string{"application/json"},
+			ReadOnly:             false,
+			Mutating:             true,
+			Retryable:            true,
+			TrustStateGated:      false,
+			Description:          "Mark runtime transport online and update profile presence metadata.",
+		},
+		{
 			ID:                   "agent.messages.openclaw.offline",
 			Method:               "POST",
 			Path:                 "/v1/openclaw/messages/offline",
@@ -326,6 +339,7 @@ func buildAgentManifest(agent model.Agent, cp agentControlPlaneView, now time.Ti
 				"agent.messages.openclaw.ack",
 				"agent.messages.openclaw.nack",
 				"agent.messages.openclaw.status",
+				"agent.messages.openclaw.online",
 				"agent.messages.openclaw.offline",
 			},
 			Mutating:        true,
@@ -666,7 +680,7 @@ func buildAgentDiscoveryMarkdown(manifest agentManifest) string {
 	markdown = append(markdown, discoveryEndpointsHeading)
 
 	endpointLines := make([]string, 0, len(manifest.Endpoints))
-	endpointKeys := []string{"manifest", "capabilities", "skill", "profile", "publish", "pull", "ack", "nack", "status", "offline"}
+	endpointKeys := []string{"manifest", "capabilities", "skill", "profile", "publish", "pull", "ack", "nack", "status", "online", "offline"}
 	for _, key := range endpointKeys {
 		if endpoint, ok := manifest.Endpoints[key]; ok && endpoint != "" {
 			endpointLines = append(endpointLines, renderMarkdownTemplate(discoveryEndpointLine, "{{ENDPOINT_KEY}}", key, "{{ENDPOINT_VALUE}}", endpoint))
