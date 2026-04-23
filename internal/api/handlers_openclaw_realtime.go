@@ -190,11 +190,7 @@ func (h *Handler) handleOpenClawOffline(w http.ResponseWriter, r *http.Request) 
 	}
 
 	sessionKey := normalizeOpenClawSessionKey(req.SessionKey)
-	transport := strings.TrimSpace(req.Transport)
-	if transport == "" {
-		transport = "websocket"
-	}
-	agent, err := h.setOpenClawRuntimePresence(agentUUID, sessionKey, transport, openClawPresenceStatusOffline, req.Reason)
+	agent, err := h.setOpenClawWebSocketPresence(agentUUID, sessionKey, openClawPresenceStatusOffline, req.Reason)
 	if err != nil {
 		switch {
 		case errors.Is(err, store.ErrAgentNotFound):
@@ -208,9 +204,6 @@ func (h *Handler) handleOpenClawOffline(w http.ResponseWriter, r *http.Request) 
 	}
 
 	details := map[string]any{"session_key": sessionKey}
-	if transport != "" {
-		details["transport"] = transport
-	}
 	if reason := strings.TrimSpace(req.Reason); reason != "" {
 		details["reason"] = reason
 	}
@@ -776,10 +769,6 @@ func runtimeHandlerErrorForPresenceUpdate(err error) *runtimeHandlerError {
 }
 
 func (h *Handler) setOpenClawWebSocketPresence(agentUUID, sessionKey, status, reason string) (model.Agent, error) {
-	return h.setOpenClawRuntimePresence(agentUUID, sessionKey, "websocket", status, reason)
-}
-
-func (h *Handler) setOpenClawRuntimePresence(agentUUID, sessionKey, transport, status, reason string) (model.Agent, error) {
 	now := h.now().UTC()
 	agentUUID = strings.TrimSpace(agentUUID)
 	if agentUUID == "" {
@@ -790,15 +779,11 @@ func (h *Handler) setOpenClawRuntimePresence(agentUUID, sessionKey, transport, s
 		status = openClawPresenceStatusOffline
 	}
 	sessionKey = normalizeOpenClawSessionKey(sessionKey)
-	transport = strings.TrimSpace(transport)
-	if transport == "" {
-		transport = "websocket"
-	}
 
 	patch := map[string]any{
 		"status":      status,
 		"ready":       status == openClawPresenceStatusOnline,
-		"transport":   transport,
+		"transport":   "websocket",
 		"session_key": sessionKey,
 		"updated_at":  now.Format(time.RFC3339),
 	}
@@ -807,14 +792,13 @@ func (h *Handler) setOpenClawRuntimePresence(agentUUID, sessionKey, transport, s
 		return model.Agent{}, err
 	}
 	if changedStatus {
-		activityText := transport + " transport " + status
+		activityText := "websocket transport " + status
 		entry := map[string]any{
 			"activity":   activityText,
 			"category":   "agent_presence",
 			"action":     status,
 			"subject_id": sessionKey,
 			"event_id":   "agent-presence:" + status + ":" + sessionKey + ":" + strconv.FormatInt(now.UnixNano(), 10),
-			"transport":  transport,
 		}
 		if trimmedReason := strings.TrimSpace(reason); trimmedReason != "" {
 			entry["reason"] = trimmedReason

@@ -1658,12 +1658,8 @@ func (h *Handler) markStaleAgentPresenceOffline(agentUUID string, presence map[s
 		return next
 	}
 	if changedStatus {
-		activityTransport := strings.TrimSpace(asStringAny(next["transport"]))
-		if activityTransport == "" {
-			activityTransport = "runtime"
-		}
 		entry := map[string]any{
-			"activity":   activityTransport + " transport offline",
+			"activity":   "websocket transport offline",
 			"category":   "agent_presence",
 			"action":     openClawPresenceStatusOffline,
 			"subject_id": sessionKey,
