@@ -413,6 +413,35 @@ func TestOpenClawPullMarksPresenceOnline(t *testing.T) {
 	}
 }
 
+func TestOpenClawOnlineEndpointUpdatesPresence(t *testing.T) {
+	router := newTestRouter()
+	_, _, tokenA, _, _, _, _, _ := setupTrustedAgents(t, router)
+
+	resp := doJSONRequest(t, router, http.MethodPost, "/v1/openclaw/messages/online", map[string]any{
+		"session_key": "startup-main",
+		"reason":      "runtime startup",
+	}, map[string]string{"Authorization": "Bearer " + tokenA})
+	if resp.Code != http.StatusOK {
+		t.Fatalf("expected openclaw online 200, got %d %s", resp.Code, resp.Body.String())
+	}
+
+	payload := decodeJSONMap(t, resp.Body.Bytes())
+	result := requireAgentRuntimeSuccessEnvelope(t, payload)
+	presence, _ := result["presence"].(map[string]any)
+	if got, _ := presence["status"].(string); got != "online" {
+		t.Fatalf("expected presence.status=online, got %q payload=%v", got, payload)
+	}
+	if ready, ok := presence["ready"].(bool); !ok || !ready {
+		t.Fatalf("expected presence.ready=true, got %v payload=%v", presence["ready"], payload)
+	}
+	if got, _ := presence["transport"].(string); got != "http_long_poll" {
+		t.Fatalf("expected presence.transport=http_long_poll, got %q payload=%v", got, payload)
+	}
+	if got, _ := presence["session_key"].(string); got != "startup-main" {
+		t.Fatalf("expected presence.session_key=startup-main, got %q payload=%v", got, payload)
+	}
+}
+
 func TestOpenClawWebSocketPresenceOnlineThenOffline(t *testing.T) {
 	router := newTestRouter()
 	_, _, _, tokenB, _, _, _, _ := setupTrustedAgents(t, router)

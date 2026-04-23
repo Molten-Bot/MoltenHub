@@ -16,6 +16,7 @@ func agentRuntimeEndpoints(apiBase string) map[string]string {
 
 func agentManifestEndpoints(apiBase string) map[string]string {
 	endpoints := agentRuntimeEndpoints(apiBase)
+	endpoints["online"] = apiBase + "/openclaw/messages/online"
 	endpoints["offline"] = apiBase + "/openclaw/messages/offline"
 	return endpoints
 }
@@ -39,6 +40,7 @@ func openClawAdapterEndpoints(apiBase string) map[string]string {
 		"ack":     apiBase + "/openclaw/messages/ack",
 		"nack":    apiBase + "/openclaw/messages/nack",
 		"status":  apiBase + "/openclaw/messages/{message_id}",
+		"online":  apiBase + "/openclaw/messages/online",
 		"offline": apiBase + "/openclaw/messages/offline",
 	}
 }

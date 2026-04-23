@@ -49,6 +49,7 @@ type openClawPluginRegisterRequest struct {
 
 type openClawOfflineRequest struct {
 	SessionKey string `json:"session_key,omitempty"`
+	Transport  string `json:"transport,omitempty"`
 	Reason     string `json:"reason,omitempty"`
 }
 
@@ -207,6 +208,58 @@ func (h *Handler) handleOpenClawOffline(w http.ResponseWriter, r *http.Request) 
 		details["reason"] = reason
 	}
 	h.recordOpenClawAdapterUsage(agentUUID, "ws_offline", details)
+
+	out := map[string]any{
+		"agent": h.agentResponsePayload(agent),
+	}
+	if presence := h.currentAgentPresence(agent.AgentUUID, agent.Metadata); presence != nil {
+		out["presence"] = presence
+	}
+	writeAgentRuntimeSuccess(w, http.StatusOK, out)
+}
+
+func (h *Handler) handleOpenClawOnline(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeMethodNotAllowed(w)
+		return
+	}
+	if !requireJSONRequestContentType(w, r) {
+		return
+	}
+
+	agentUUID, err := h.authenticateAgent(r)
+	if err != nil {
+		writeError(w, http.StatusUnauthorized, "unauthorized", "missing or invalid bearer token")
+		return
+	}
+
+	var req openClawOfflineRequest
+	if err := decodeJSON(r, &req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_request", "invalid JSON request")
+		return
+	}
+
+	sessionKey := normalizeOpenClawSessionKey(req.SessionKey)
+	transport := strings.TrimSpace(req.Transport)
+	if transport == "" {
+		transport = "http_long_poll"
+	}
+	if heartbeatErr := h.touchAgentPresenceOnline(agentUUID, sessionKey, transport); heartbeatErr != nil {
+		writeRuntimeHandlerError(w, heartbeatErr)
+		return
+	}
+
+	agent, err := h.control.GetAgentByUUID(agentUUID)
+	if err != nil {
+		writeError(w, http.StatusNotFound, "unknown_agent", "agent_uuid is not registered")
+		return
+	}
+
+	details := map[string]any{"session_key": sessionKey, "transport": transport}
+	if reason := strings.TrimSpace(req.Reason); reason != "" {
+		details["reason"] = reason
+	}
+	h.recordOpenClawAdapterUsage(agentUUID, "online", details)
 
 	out := map[string]any{
 		"agent": h.agentResponsePayload(agent),
@@ -660,8 +713,12 @@ func (h *Handler) touchAgentPresenceOnline(agentUUID, sessionKey, transport stri
 		return nil
 	}
 	if changedStatus {
+		activityTransport := strings.TrimSpace(transport)
+		if activityTransport == "" {
+			activityTransport = "runtime"
+		}
 		entry := map[string]any{
-			"activity":   "websocket transport online",
+			"activity":   activityTransport + " transport online",
 			"category":   "agent_presence",
 			"action":     openClawPresenceStatusOnline,
 			"subject_id": normalizeOpenClawSessionKey(sessionKey),
