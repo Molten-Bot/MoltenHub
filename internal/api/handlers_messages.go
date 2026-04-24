@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"net"
 	"net/http"
 	"strings"
 	"time"
@@ -21,6 +22,7 @@ var allowedContentTypes = map[string]struct{}{
 
 const defaultMessageLease = 60 * time.Second
 const pullWaiterRecheckInterval = time.Second
+const pullTransientDequeueRetryInterval = 250 * time.Millisecond
 
 type publishRequest struct {
 	ToAgentUUID string  `json:"to_agent_uuid"`
@@ -448,23 +450,25 @@ func (h *Handler) pullForAgent(ctx context.Context, receiverAgentUUID string, ti
 
 	deadline := h.now().Add(timeout)
 	for {
-		if message, ok, err := h.queue.Dequeue(ctx, receiverAgentUUID); err != nil {
-			summary := queueRuntimeFailureSummary("dequeue", err)
-			h.setQueueRuntimeError(summary)
-			log.Printf("pull dequeue failed: receiver_agent_uuid=%s err_summary=%q", receiverAgentUUID, summary)
-			return 0, nil, &runtimeHandlerError{
-				status:  http.StatusInternalServerError,
-				code:    "store_error",
-				message: "failed to dequeue message",
+		message, ok, retry, handlerErr := h.dequeueForPull(ctx, receiverAgentUUID, deadline, "pull dequeue failed")
+		if handlerErr != nil {
+			return 0, nil, handlerErr
+		}
+		if retry {
+			if !waitForTransientDequeueRetry(ctx, deadline) {
+				if ctx.Err() != nil {
+					return 0, nil, nil
+				}
+				return http.StatusNoContent, nil, nil
 			}
-		} else if ok {
+			continue
+		}
+		if ok {
 			result, handlerErr := h.claimMessageForAgent(ctx, receiverAgentUUID, message)
 			if handlerErr != nil {
 				return 0, nil, handlerErr
 			}
 			return http.StatusOK, result, nil
-		} else {
-			h.clearQueueRuntimeError()
 		}
 
 		remaining := time.Until(deadline)
@@ -473,25 +477,28 @@ func (h *Handler) pullForAgent(ctx context.Context, receiverAgentUUID string, ti
 		}
 
 		notifyCh, cancel := h.waiters.Register(receiverAgentUUID)
-		if message, ok, err := h.queue.Dequeue(ctx, receiverAgentUUID); err != nil {
-			summary := queueRuntimeFailureSummary("dequeue", err)
-			h.setQueueRuntimeError(summary)
-			log.Printf("pull dequeue failed after waiter register: receiver_agent_uuid=%s err_summary=%q", receiverAgentUUID, summary)
+		message, ok, retry, handlerErr = h.dequeueForPull(ctx, receiverAgentUUID, deadline, "pull dequeue failed after waiter register")
+		if handlerErr != nil {
 			cancel()
-			return 0, nil, &runtimeHandlerError{
-				status:  http.StatusInternalServerError,
-				code:    "store_error",
-				message: "failed to dequeue message",
+			return 0, nil, handlerErr
+		}
+		if retry {
+			cancel()
+			if !waitForTransientDequeueRetry(ctx, deadline) {
+				if ctx.Err() != nil {
+					return 0, nil, nil
+				}
+				return http.StatusNoContent, nil, nil
 			}
-		} else if ok {
+			continue
+		}
+		if ok {
 			cancel()
 			result, handlerErr := h.claimMessageForAgent(ctx, receiverAgentUUID, message)
 			if handlerErr != nil {
 				return 0, nil, handlerErr
 			}
 			return http.StatusOK, result, nil
-		} else {
-			h.clearQueueRuntimeError()
 		}
 
 		waitInterval := remaining
@@ -514,6 +521,80 @@ func (h *Handler) pullForAgent(ctx context.Context, receiverAgentUUID string, ti
 			}
 		}
 	}
+}
+
+func (h *Handler) dequeueForPull(
+	ctx context.Context,
+	receiverAgentUUID string,
+	deadline time.Time,
+	logPrefix string,
+) (model.Message, bool, bool, *runtimeHandlerError) {
+	message, ok, err := h.queue.Dequeue(ctx, receiverAgentUUID)
+	if err == nil {
+		if !ok {
+			h.clearQueueRuntimeError()
+		}
+		return message, ok, false, nil
+	}
+
+	summary := queueRuntimeFailureSummary("dequeue", err)
+	h.setQueueRuntimeError(summary)
+	log.Printf("%s: receiver_agent_uuid=%s err_summary=%q", logPrefix, receiverAgentUUID, summary)
+	if isTransientQueueDequeueError(err) && time.Until(deadline) > 0 {
+		return model.Message{}, false, true, nil
+	}
+	return model.Message{}, false, false, &runtimeHandlerError{
+		status:  http.StatusInternalServerError,
+		code:    "store_error",
+		message: "failed to dequeue message",
+	}
+}
+
+func waitForTransientDequeueRetry(ctx context.Context, deadline time.Time) bool {
+	remaining := time.Until(deadline)
+	if remaining <= 0 {
+		return false
+	}
+	wait := pullTransientDequeueRetryInterval
+	if wait > remaining {
+		wait = remaining
+	}
+	timer := time.NewTimer(wait)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return false
+	case <-timer.C:
+		return time.Until(deadline) > 0
+	}
+}
+
+func isTransientQueueDequeueError(err error) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
+		return true
+	}
+	var netErr net.Error
+	if errors.As(err, &netErr) && (netErr.Timeout() || netErr.Temporary()) {
+		return true
+	}
+	msg := strings.ToLower(err.Error())
+	for _, marker := range []string{
+		"context deadline exceeded",
+		"client.timeout exceeded",
+		"i/o timeout",
+		"timeout awaiting response headers",
+		"connection reset",
+		"connection refused",
+		"temporary failure",
+	} {
+		if strings.Contains(msg, marker) {
+			return true
+		}
+	}
+	return false
 }
 
 func (h *Handler) handleMessageSubroutes(w http.ResponseWriter, r *http.Request) {
