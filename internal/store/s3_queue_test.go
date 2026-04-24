@@ -212,3 +212,69 @@ func TestS3QueueStore_DequeueAppliesDefaultTimeoutWithoutCallerDeadline(t *testi
 		t.Fatalf("expected fast timeout, took %s", elapsed)
 	}
 }
+
+func TestS3QueueStore_DequeueDoesNotSerializeDifferentAgents(t *testing.T) {
+	slowListStarted := make(chan struct{})
+	releaseSlowList := make(chan struct{})
+	var once sync.Once
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		path := strings.TrimPrefix(r.URL.Path, "/")
+		if path == "queue-bucket" && r.Method == http.MethodGet && r.URL.Query().Get("list-type") == "2" {
+			prefix := r.URL.Query().Get("prefix")
+			if strings.Contains(prefix, "/slow-agent/") {
+				once.Do(func() { close(slowListStarted) })
+				<-releaseSlowList
+			}
+			type listResult struct {
+				XMLName  xml.Name `xml:"ListBucketResult"`
+				Contents []struct {
+					Key string `xml:"Key"`
+				} `xml:"Contents"`
+			}
+			w.WriteHeader(http.StatusOK)
+			_ = xml.NewEncoder(w).Encode(listResult{})
+			return
+		}
+		http.NotFound(w, r)
+	}))
+	defer server.Close()
+
+	q := &s3QueueStore{
+		conn:      newTestS3Connection(t, server.Client(), server.URL, "queue-bucket"),
+		prefix:    "moltenhub-queue",
+		opTimeout: 2 * time.Second,
+	}
+
+	slowDone := make(chan error, 1)
+	go func() {
+		_, _, err := q.Dequeue(context.Background(), "slow-agent")
+		slowDone <- err
+	}()
+
+	select {
+	case <-slowListStarted:
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for slow-agent dequeue to start")
+	}
+
+	start := time.Now()
+	_, _, err := q.Dequeue(context.Background(), "fast-agent")
+	elapsed := time.Since(start)
+	if err != nil {
+		t.Fatalf("fast-agent dequeue failed: %v", err)
+	}
+	if elapsed > 250*time.Millisecond {
+		t.Fatalf("expected fast-agent dequeue not to wait for slow-agent lock, took %s", elapsed)
+	}
+
+	close(releaseSlowList)
+	select {
+	case err := <-slowDone:
+		if err != nil {
+			t.Fatalf("slow-agent dequeue failed: %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for slow-agent dequeue to finish")
+	}
+}

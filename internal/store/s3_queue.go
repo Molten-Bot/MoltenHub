@@ -26,7 +26,7 @@ type s3QueueStore struct {
 	prefix    string
 	opTimeout time.Duration
 
-	dequeueMu sync.Mutex
+	dequeueLocks sync.Map
 }
 
 func NewS3QueueStoreFromEnv() (MessageQueueStore, error) {
@@ -122,15 +122,15 @@ func (s *s3QueueStore) Enqueue(ctx context.Context, message model.Message) error
 }
 
 func (s *s3QueueStore) Dequeue(ctx context.Context, agentUUID string) (model.Message, bool, error) {
-	ctx, cancel := s.operationContext(ctx)
-	defer cancel()
-
 	if agentUUID == "" {
 		return model.Message{}, false, nil
 	}
 
-	s.dequeueMu.Lock()
-	defer s.dequeueMu.Unlock()
+	unlock := s.lockAgentDequeue(agentUUID)
+	defer unlock()
+
+	ctx, cancel := s.operationContext(ctx)
+	defer cancel()
 
 	key, ok, err := s.listOldestKey(ctx, agentUUID)
 	if err != nil {
@@ -148,6 +148,13 @@ func (s *s3QueueStore) Dequeue(ctx context.Context, agentUUID string) (model.Mes
 		return model.Message{}, false, err
 	}
 	return msg, true, nil
+}
+
+func (s *s3QueueStore) lockAgentDequeue(agentUUID string) func() {
+	value, _ := s.dequeueLocks.LoadOrStore(agentUUID, &sync.Mutex{})
+	mu := value.(*sync.Mutex)
+	mu.Lock()
+	return mu.Unlock
 }
 
 func (s *s3QueueStore) operationContext(ctx context.Context) (context.Context, context.CancelFunc) {

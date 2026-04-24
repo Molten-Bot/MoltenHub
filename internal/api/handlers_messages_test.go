@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"strings"
 	"sync"
@@ -57,6 +58,70 @@ func TestPullForAgentRechecksQueueWithoutNotifierSignal(t *testing.T) {
 	}
 }
 
+func TestPullForAgentRetriesTransientDequeueWithinWaitBudget(t *testing.T) {
+	mem := store.NewMemoryStore()
+	waiters := longpoll.NewWaiters()
+
+	receiverAgentUUID := "receiver-agent-uuid"
+	queuedMessage := model.Message{
+		MessageID:     "message-after-transient-dequeue",
+		FromAgentUUID: "sender-agent-uuid",
+		ToAgentUUID:   receiverAgentUUID,
+		ContentType:   "text/plain",
+		Payload:       "hello after transient queue timeout",
+		CreatedAt:     time.Now().UTC(),
+	}
+	if _, _, err := mem.CreateOrGetMessageRecord(queuedMessage, queuedMessage.CreatedAt); err != nil {
+		t.Fatalf("CreateOrGetMessageRecord: %v", err)
+	}
+
+	queue := &transientDequeueQueue{
+		err:     context.DeadlineExceeded,
+		message: queuedMessage,
+	}
+	h := NewHandler(mem, queue, waiters, auth.NewDevHumanAuthProvider(), "https://hub.example.com", "", "", "", "", "example.com", true, 15*time.Minute, false)
+
+	status, result, handlerErr := h.pullForAgent(context.Background(), receiverAgentUUID, time.Second)
+	if handlerErr != nil {
+		t.Fatalf("pullForAgent returned handler error: %+v", handlerErr)
+	}
+	if status != http.StatusOK {
+		t.Fatalf("expected pullForAgent status %d, got %d result=%v", http.StatusOK, status, result)
+	}
+	if got := queue.dequeueCalls(); got < 2 {
+		t.Fatalf("expected transient dequeue retry, got %d dequeue calls", got)
+	}
+
+	message, ok := extractMessage(result["message"])
+	if !ok {
+		t.Fatalf("expected result.message payload, got %v", result["message"])
+	}
+	if message.MessageID != queuedMessage.MessageID {
+		t.Fatalf("expected message_id %q, got %q", queuedMessage.MessageID, message.MessageID)
+	}
+}
+
+func TestPullForAgentDoesNotRetryPermanentDequeueFailure(t *testing.T) {
+	mem := store.NewMemoryStore()
+	waiters := longpoll.NewWaiters()
+
+	queue := &transientDequeueQueue{
+		err: errors.New("dequeue unavailable"),
+	}
+	h := NewHandler(mem, queue, waiters, auth.NewDevHumanAuthProvider(), "https://hub.example.com", "", "", "", "", "example.com", true, 15*time.Minute, false)
+
+	status, result, handlerErr := h.pullForAgent(context.Background(), "receiver-agent-uuid", time.Second)
+	if handlerErr == nil {
+		t.Fatalf("expected permanent dequeue error, got status=%d result=%v", status, result)
+	}
+	if handlerErr.status != http.StatusInternalServerError {
+		t.Fatalf("expected status 500, got %+v", handlerErr)
+	}
+	if got := queue.dequeueCalls(); got != 1 {
+		t.Fatalf("expected no retry for permanent dequeue error, got %d dequeue calls", got)
+	}
+}
+
 type stagedQueue struct {
 	mu            sync.Mutex
 	releaseOnCall int
@@ -85,6 +150,44 @@ func (q *stagedQueue) Dequeue(_ context.Context, _ string) (model.Message, bool,
 }
 
 func (q *stagedQueue) dequeueCalls() int {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	return q.calls
+}
+
+type transientDequeueQueue struct {
+	mu      sync.Mutex
+	err     error
+	calls   int
+	message model.Message
+}
+
+func (q *transientDequeueQueue) Enqueue(_ context.Context, message model.Message) error {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	q.message = message
+	return nil
+}
+
+func (q *transientDequeueQueue) Dequeue(_ context.Context, _ string) (model.Message, bool, error) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+
+	q.calls++
+	if q.err != nil {
+		err := q.err
+		q.err = nil
+		return model.Message{}, false, err
+	}
+	if strings.TrimSpace(q.message.MessageID) == "" {
+		return model.Message{}, false, nil
+	}
+	message := q.message
+	q.message = model.Message{}
+	return message, true, nil
+}
+
+func (q *transientDequeueQueue) dequeueCalls() int {
 	q.mu.Lock()
 	defer q.mu.Unlock()
 	return q.calls
