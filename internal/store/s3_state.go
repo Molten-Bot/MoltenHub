@@ -952,6 +952,9 @@ func (s *s3StateStore) buildDesiredObjects() map[string]map[string][]byte {
 	pHumans := s.prefixed("state/humans")
 	pAgents := s.prefixed("state/agents")
 	pOrgs := s.prefixed("state/orgs")
+	pArchivedHumans := s.prefixed("state/archived_humans")
+	pArchivedAgents := s.prefixed("state/archived_agents")
+	pArchivedOrgs := s.prefixed("state/archived_orgs")
 	pMemberships := s.prefixed("state/memberships")
 	pInvites := s.prefixed("state/invites")
 	pAccessKeys := s.prefixed("state/org_access_keys")
@@ -979,6 +982,15 @@ func (s *s3StateStore) buildDesiredObjects() map[string]map[string][]byte {
 	}
 	for id, org := range s.MemoryStore.orgs {
 		add(pOrgs, s.objectKey(pOrgs, escapeKeySegment(id)+".json"), org)
+	}
+	for id, human := range s.MemoryStore.archivedHumans {
+		add(pArchivedHumans, s.objectKey(pArchivedHumans, escapeKeySegment(id)+".json"), human)
+	}
+	for id, agent := range s.MemoryStore.archivedAgents {
+		add(pArchivedAgents, s.objectKey(pArchivedAgents, escapeKeySegment(id)+".json"), persistAgent(agent))
+	}
+	for id, org := range s.MemoryStore.archivedOrgs {
+		add(pArchivedOrgs, s.objectKey(pArchivedOrgs, escapeKeySegment(id)+".json"), org)
 	}
 	for id, membership := range s.MemoryStore.memberships {
 		add(pMemberships, s.objectKey(pMemberships, escapeKeySegment(id)+".json"), membership)
@@ -1057,6 +1069,9 @@ func (s *s3StateStore) persistedPrefixes() []s3KeyDescriptor {
 		{Prefix: s.prefixed("state/humans")},
 		{Prefix: s.prefixed("state/agents")},
 		{Prefix: s.prefixed("state/orgs")},
+		{Prefix: s.prefixed("state/archived_humans")},
+		{Prefix: s.prefixed("state/archived_agents")},
+		{Prefix: s.prefixed("state/archived_orgs")},
 		{Prefix: s.prefixed("state/memberships")},
 		{Prefix: s.prefixed("state/invites")},
 		{Prefix: s.prefixed("state/org_access_keys")},
@@ -1084,6 +1099,9 @@ func (s *s3StateStore) loadFromS3(ctx context.Context) error {
 	pHumans := s.prefixed("state/humans")
 	pAgents := s.prefixed("state/agents")
 	pOrgs := s.prefixed("state/orgs")
+	pArchivedHumans := s.prefixed("state/archived_humans")
+	pArchivedAgents := s.prefixed("state/archived_agents")
+	pArchivedOrgs := s.prefixed("state/archived_orgs")
 	pMemberships := s.prefixed("state/memberships")
 	pInvites := s.prefixed("state/invites")
 	pAccessKeys := s.prefixed("state/org_access_keys")
@@ -1106,6 +1124,9 @@ func (s *s3StateStore) loadFromS3(ctx context.Context) error {
 		pHumans,
 		pAgents,
 		pOrgs,
+		pArchivedHumans,
+		pArchivedAgents,
+		pArchivedOrgs,
 		pMemberships,
 		pInvites,
 		pAccessKeys,
@@ -1162,6 +1183,42 @@ func (s *s3StateStore) loadFromS3(ctx context.Context) error {
 		}
 		if strings.TrimSpace(value.OrgID) != "" {
 			loaded.orgs[value.OrgID] = value
+		}
+		return nil
+	}); err != nil {
+		return err
+	}
+	if err := s.loadTypedObjects(ctx, pArchivedHumans, func(key string, body []byte) error {
+		var value model.Human
+		if err := json.Unmarshal(body, &value); err != nil {
+			return err
+		}
+		if strings.TrimSpace(value.HumanID) != "" {
+			loaded.archivedHumans[value.HumanID] = value
+		}
+		return nil
+	}); err != nil {
+		return err
+	}
+	if err := s.loadTypedObjects(ctx, pArchivedAgents, func(key string, body []byte) error {
+		var value s3PersistAgent
+		if err := json.Unmarshal(body, &value); err != nil {
+			return err
+		}
+		if strings.TrimSpace(value.AgentUUID) != "" {
+			loaded.archivedAgents[value.AgentUUID] = value.toModel()
+		}
+		return nil
+	}); err != nil {
+		return err
+	}
+	if err := s.loadTypedObjects(ctx, pArchivedOrgs, func(key string, body []byte) error {
+		var value model.Organization
+		if err := json.Unmarshal(body, &value); err != nil {
+			return err
+		}
+		if strings.TrimSpace(value.OrgID) != "" {
+			loaded.archivedOrgs[value.OrgID] = value
 		}
 		return nil
 	}); err != nil {

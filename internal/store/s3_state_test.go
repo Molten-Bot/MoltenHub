@@ -318,6 +318,63 @@ func TestS3StateStore_LoadFromS3HydratesAuditFeed(t *testing.T) {
 	}
 }
 
+func TestS3StateStore_LoadFromS3HydratesArchivedDeletedEntities(t *testing.T) {
+	fake := newFakeS3State()
+	server := fake.server("state-bucket")
+	defer server.Close()
+
+	store := newTestS3StateStore(t, server.Client(), server.URL, "state-bucket", "moltenhub-state")
+	if err := store.loadFromS3(context.Background()); err != nil {
+		t.Fatalf("loadFromS3 empty failed: %v", err)
+	}
+
+	now := time.Date(2026, 3, 6, 10, 0, 0, 0, time.UTC)
+	id := &idGen{}
+
+	alice, err := store.UpsertHuman("dev", "alice-sub", "alice@a.test", true, now, id.Next)
+	if err != nil {
+		t.Fatalf("UpsertHuman failed: %v", err)
+	}
+	org, _, err := store.CreateOrg("org-a", "Org A", alice.HumanID, id.MustID(t), now)
+	if err != nil {
+		t.Fatalf("CreateOrg failed: %v", err)
+	}
+	agent, err := store.RegisterAgent(org.OrgID, "agent-a", nil, "agent-token-hash", alice.HumanID, now.Add(time.Minute), false)
+	if err != nil {
+		t.Fatalf("RegisterAgent failed: %v", err)
+	}
+	if err := store.DeleteOrg(org.OrgID, alice.HumanID, false, now.Add(2*time.Minute)); err != nil {
+		t.Fatalf("DeleteOrg failed: %v", err)
+	}
+
+	if !fake.hasKey("moltenhub-state/state/archived_orgs/") {
+		t.Fatalf("expected persisted archived org object after delete")
+	}
+	if !fake.hasKey("moltenhub-state/state/archived_agents/") {
+		t.Fatalf("expected persisted archived agent object after delete")
+	}
+
+	reloaded := newTestS3StateStore(t, server.Client(), server.URL, "state-bucket", "moltenhub-state")
+	if err := reloaded.loadFromS3(context.Background()); err != nil {
+		t.Fatalf("reload loadFromS3 failed: %v", err)
+	}
+
+	snapshot := reloaded.AdminSnapshot()
+	if _, ok := findArchivedSnapshotOrg(snapshot, org.OrgID); !ok {
+		t.Fatalf("expected archived org after reload, got=%v", snapshot.ArchivedOrganizations)
+	}
+	archivedAgent, ok := findArchivedSnapshotAgent(snapshot, agent.AgentUUID)
+	if !ok {
+		t.Fatalf("expected archived agent after reload, got=%v", snapshot.ArchivedAgents)
+	}
+	if archivedAgent.Status != model.StatusDeleted || archivedAgent.RevokedAt == nil {
+		t.Fatalf("expected archived agent status=deleted with revoked_at after reload, got=%+v", archivedAgent)
+	}
+	if _, ok := findAuditEvent(snapshot.ActivityFeed, "org", "delete", org.OrgID); !ok {
+		t.Fatalf("expected org/delete event after reload, got=%v", snapshot.ActivityFeed)
+	}
+}
+
 func TestS3StateStore_DoesNotPersistSecondaryIndexes(t *testing.T) {
 	fake := newFakeS3State()
 	server := fake.server("state-bucket")
