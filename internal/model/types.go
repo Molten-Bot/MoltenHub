@@ -13,6 +13,7 @@ const (
 	StatusBlocked = "blocked"
 	StatusRevoked = "revoked"
 	StatusExpired = "expired"
+	StatusDeleted = "deleted"
 
 	OrgAccessScopeListHumans = "list_humans"
 	OrgAccessScopeListAgents = "list_agents"
@@ -288,15 +289,18 @@ type OrgAccessKey struct {
 }
 
 type AdminSnapshot struct {
-	Organizations  []Organization      `json:"organizations"`
-	Humans         []Human             `json:"humans"`
-	Memberships    []Membership        `json:"memberships"`
-	Agents         []Agent             `json:"agents"`
-	OrgTrusts      []TrustEdge         `json:"org_trusts"`
-	AgentTrusts    []TrustEdge         `json:"agent_trusts"`
-	Stats          []OrgStats          `json:"stats"`
-	MessageMetrics AdminMessageMetrics `json:"message_metrics"`
-	ActivityFeed   []AuditEvent        `json:"activity_feed"`
+	Organizations         []Organization      `json:"organizations"`
+	Humans                []Human             `json:"humans"`
+	Memberships           []Membership        `json:"memberships"`
+	Agents                []Agent             `json:"agents"`
+	ArchivedOrganizations []Organization      `json:"archived_organizations,omitempty"`
+	ArchivedHumans        []Human             `json:"archived_humans,omitempty"`
+	ArchivedAgents        []Agent             `json:"archived_agents,omitempty"`
+	OrgTrusts             []TrustEdge         `json:"org_trusts"`
+	AgentTrusts           []TrustEdge         `json:"agent_trusts"`
+	Stats                 []OrgStats          `json:"stats"`
+	MessageMetrics        AdminMessageMetrics `json:"message_metrics"`
+	ActivityFeed          []AuditEvent        `json:"activity_feed"`
 }
 
 type MessageArchiveEntry struct {

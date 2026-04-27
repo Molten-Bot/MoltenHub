@@ -201,6 +201,62 @@ func TestAgentCreationAudit_PersonalAgentUsesGlobalActivityFeed(t *testing.T) {
 	}
 }
 
+func TestDeleteAgentArchivesAgentForAdminSnapshot(t *testing.T) {
+	mem := NewMemoryStore()
+	ids := &idGen{}
+	now := time.Date(2026, 3, 27, 11, 0, 0, 0, time.UTC)
+
+	alice, _, agent := seedOrgAndAgent(t, mem, ids, now, "alice", "alice@a.test", "org-a", "Org A", "agent-a")
+	if err := mem.DeleteAgent(agent.AgentUUID, alice.HumanID, now.Add(time.Minute), false); err != nil {
+		t.Fatalf("DeleteAgent failed: %v", err)
+	}
+
+	snapshot := mem.AdminSnapshot()
+	if _, ok := findSnapshotAgent(snapshot, agent.AgentUUID); ok {
+		t.Fatalf("expected deleted agent to be absent from active snapshot agents, got=%v", snapshot.Agents)
+	}
+	archived, ok := findArchivedSnapshotAgent(snapshot, agent.AgentUUID)
+	if !ok {
+		t.Fatalf("expected deleted agent in archived_agents, got=%v", snapshot.ArchivedAgents)
+	}
+	if archived.Status != model.StatusDeleted || archived.RevokedAt == nil {
+		t.Fatalf("expected archived agent status=deleted with revoked_at, got=%+v", archived)
+	}
+	if !hasStoredSystemActivity(archived, "created agent", "agent", "create") {
+		t.Fatalf("expected archived agent activity_log to retain creation activity, got metadata=%v", archived.Metadata)
+	}
+	if _, ok := findAuditEvent(snapshot.ActivityFeed, "agent", "delete", agent.AgentUUID); !ok {
+		t.Fatalf("expected agent/delete event to remain in activity_feed, got=%v", snapshot.ActivityFeed)
+	}
+}
+
+func TestDeleteOrgArchivesOrgAgentsAndKeepsActivityFeed(t *testing.T) {
+	mem := NewMemoryStore()
+	ids := &idGen{}
+	now := time.Date(2026, 3, 27, 11, 30, 0, 0, time.UTC)
+
+	alice, org, agent := seedOrgAndAgent(t, mem, ids, now, "alice", "alice@a.test", "org-a", "Org A", "agent-a")
+	if err := mem.DeleteOrg(org.OrgID, alice.HumanID, false, now.Add(time.Minute)); err != nil {
+		t.Fatalf("DeleteOrg failed: %v", err)
+	}
+
+	snapshot := mem.AdminSnapshot()
+	if _, ok := findArchivedSnapshotOrg(snapshot, org.OrgID); !ok {
+		t.Fatalf("expected deleted org in archived_organizations, got=%v", snapshot.ArchivedOrganizations)
+	}
+	if archived, ok := findArchivedSnapshotAgent(snapshot, agent.AgentUUID); !ok {
+		t.Fatalf("expected org-deleted agent in archived_agents, got=%v", snapshot.ArchivedAgents)
+	} else if archived.Status != model.StatusDeleted || archived.RevokedAt == nil {
+		t.Fatalf("expected org-deleted archived agent status=deleted with revoked_at, got=%+v", archived)
+	}
+	if _, ok := findAuditEvent(snapshot.ActivityFeed, "org", "create", org.OrgID); !ok {
+		t.Fatalf("expected org/create event to remain after delete, got=%v", snapshot.ActivityFeed)
+	}
+	if _, ok := findAuditEvent(snapshot.ActivityFeed, "org", "delete", org.OrgID); !ok {
+		t.Fatalf("expected org/delete event to remain after delete, got=%v", snapshot.ActivityFeed)
+	}
+}
+
 func findAuditEvent(events []model.AuditEvent, category, action, subjectID string) (model.AuditEvent, bool) {
 	for _, event := range events {
 		if event.Category == category && event.Action == action && event.SubjectID == subjectID {
@@ -217,6 +273,24 @@ func findSnapshotAgent(snapshot model.AdminSnapshot, agentUUID string) (model.Ag
 		}
 	}
 	return model.Agent{}, false
+}
+
+func findArchivedSnapshotAgent(snapshot model.AdminSnapshot, agentUUID string) (model.Agent, bool) {
+	for _, agent := range snapshot.ArchivedAgents {
+		if agent.AgentUUID == agentUUID {
+			return agent, true
+		}
+	}
+	return model.Agent{}, false
+}
+
+func findArchivedSnapshotOrg(snapshot model.AdminSnapshot, orgID string) (model.Organization, bool) {
+	for _, org := range snapshot.ArchivedOrganizations {
+		if org.OrgID == orgID {
+			return org, true
+		}
+	}
+	return model.Organization{}, false
 }
 
 func hasStoredSystemActivity(agent model.Agent, activity, category, action string) bool {

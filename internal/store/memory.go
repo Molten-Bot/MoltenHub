@@ -74,10 +74,12 @@ type MemoryStore struct {
 	orgByHandle map[string]string
 	// personalOrgByHuman stores one auto-provisioned personal org per human.
 	personalOrgByHuman map[string]string
+	archivedOrgs       map[string]model.Organization
 
 	humans         map[string]model.Human
 	humanByAuthKey map[string]string
 	humanByHandle  map[string]string
+	archivedHumans map[string]model.Human
 
 	memberships         map[string]model.Membership
 	membershipByOrgUser map[string]string
@@ -88,6 +90,7 @@ type MemoryStore struct {
 	orgAccessKeyByHash map[string]string
 
 	agents               map[string]model.Agent // key: agent_uuid
+	archivedAgents       map[string]model.Agent
 	agentByURI           map[string]string      // uri -> agent_uuid
 	agentTokenIdx        map[string]string      // token hash -> agent_uuid
 	orgOwnedAgentNameIdx map[string]string
@@ -130,9 +133,11 @@ func NewMemoryStore() *MemoryStore {
 		orgs:                   make(map[string]model.Organization),
 		orgByHandle:            make(map[string]string),
 		personalOrgByHuman:     make(map[string]string),
+		archivedOrgs:           make(map[string]model.Organization),
 		humans:                 make(map[string]model.Human),
 		humanByAuthKey:         make(map[string]string),
 		humanByHandle:          make(map[string]string),
+		archivedHumans:         make(map[string]model.Human),
 		memberships:            make(map[string]model.Membership),
 		membershipByOrgUser:    make(map[string]string),
 		invites:                make(map[string]model.Invite),
@@ -140,6 +145,7 @@ func NewMemoryStore() *MemoryStore {
 		orgAccessKeys:          make(map[string]model.OrgAccessKey),
 		orgAccessKeyByHash:     make(map[string]string),
 		agents:                 make(map[string]model.Agent),
+		archivedAgents:         make(map[string]model.Agent),
 		agentByURI:             make(map[string]string),
 		agentTokenIdx:          make(map[string]string),
 		orgOwnedAgentNameIdx:   make(map[string]string),
@@ -322,6 +328,10 @@ func (s *MemoryStore) DeleteOrg(orgID, actorHumanID string, isSuperAdmin bool, n
 		if agent.OrgID != orgID {
 			continue
 		}
+		agent.Status = model.StatusDeleted
+		revokedAt := now
+		agent.RevokedAt = &revokedAt
+		s.archivedAgents[agentUUID] = agent
 		if agent.OwnerHumanID != nil {
 			delete(s.humanOwnedAgentNameIdx, humanOwnedAgentNameKey(agent.OrgID, *agent.OwnerHumanID, agent.Handle))
 		} else {
@@ -411,9 +421,11 @@ func (s *MemoryStore) DeleteOrg(orgID, actorHumanID string, isSuperAdmin bool, n
 		}
 	}
 
-	delete(s.auditByOrg, orgID)
-	delete(s.statsByOrg, orgID)
-	delete(s.statsDaily, orgID)
+	s.appendAuditLocked(orgID, actorHumanID, "org", "delete", orgID, map[string]any{
+		"deleted_agents": len(deletedAgents),
+	}, now)
+	org.Metadata = copyMetadata(org.Metadata)
+	s.archivedOrgs[orgID] = org
 	delete(s.orgByHandle, normalizeOrgHandleKey(org.Handle))
 	delete(s.orgs, orgID)
 	return nil
@@ -1467,6 +1479,12 @@ func (s *MemoryStore) DeleteAgent(agentUUID, actorHumanID string, now time.Time,
 	if !isSuperAdmin && !s.canDeleteAgentLocked(agent, actorHumanID) {
 		return ErrUnauthorizedRole
 	}
+
+	archivedAgent := agent
+	archivedAgent.Status = model.StatusDeleted
+	revokedAt := now
+	archivedAgent.RevokedAt = &revokedAt
+	s.archivedAgents[agentUUID] = archivedAgent
 
 	delete(s.agentTokenIdx, agent.TokenHash)
 	if agent.OwnerHumanID != nil {
@@ -3022,13 +3040,16 @@ func (s *MemoryStore) AdminSnapshot() model.AdminSnapshot {
 	defer s.mu.RUnlock()
 
 	snapshot := model.AdminSnapshot{
-		Organizations: make([]model.Organization, 0, len(s.orgs)),
-		Humans:        make([]model.Human, 0, len(s.humans)),
-		Memberships:   make([]model.Membership, 0, len(s.memberships)),
-		Agents:        make([]model.Agent, 0, len(s.agents)),
-		OrgTrusts:     make([]model.TrustEdge, 0, len(s.orgTrusts)),
-		AgentTrusts:   make([]model.TrustEdge, 0, len(s.agentTrusts)),
-		Stats:         make([]model.OrgStats, 0, len(s.statsByOrg)),
+		Organizations:         make([]model.Organization, 0, len(s.orgs)),
+		Humans:                make([]model.Human, 0, len(s.humans)),
+		Memberships:           make([]model.Membership, 0, len(s.memberships)),
+		Agents:                make([]model.Agent, 0, len(s.agents)),
+		ArchivedOrganizations: make([]model.Organization, 0, len(s.archivedOrgs)),
+		ArchivedHumans:        make([]model.Human, 0, len(s.archivedHumans)),
+		ArchivedAgents:        make([]model.Agent, 0, len(s.archivedAgents)),
+		OrgTrusts:             make([]model.TrustEdge, 0, len(s.orgTrusts)),
+		AgentTrusts:           make([]model.TrustEdge, 0, len(s.agentTrusts)),
+		Stats:                 make([]model.OrgStats, 0, len(s.statsByOrg)),
 		MessageMetrics: model.AdminMessageMetrics{
 			Agents:        make([]model.AgentMessageMetrics, 0, len(s.agents)),
 			Humans:        make([]model.HumanMessageMetrics, 0, len(s.humans)),
@@ -3048,6 +3069,15 @@ func (s *MemoryStore) AdminSnapshot() model.AdminSnapshot {
 	}
 	for _, v := range s.agents {
 		snapshot.Agents = append(snapshot.Agents, v)
+	}
+	for _, v := range s.archivedOrgs {
+		snapshot.ArchivedOrganizations = append(snapshot.ArchivedOrganizations, v)
+	}
+	for _, v := range s.archivedHumans {
+		snapshot.ArchivedHumans = append(snapshot.ArchivedHumans, v)
+	}
+	for _, v := range s.archivedAgents {
+		snapshot.ArchivedAgents = append(snapshot.ArchivedAgents, v)
 	}
 	for _, v := range s.orgTrusts {
 		snapshot.OrgTrusts = append(snapshot.OrgTrusts, v)

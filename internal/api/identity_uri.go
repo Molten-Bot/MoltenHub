@@ -177,15 +177,33 @@ func (h *Handler) adminSnapshotPayload(snapshot model.AdminSnapshot) map[string]
 		agents = append(agents, h.agentResponsePayload(agent))
 	}
 
+	archivedOrganizations := make([]map[string]any, 0, len(snapshot.ArchivedOrganizations))
+	for _, org := range snapshot.ArchivedOrganizations {
+		archivedOrganizations = append(archivedOrganizations, h.organizationPayload(org))
+	}
+
+	archivedHumans := make([]map[string]any, 0, len(snapshot.ArchivedHumans))
+	for _, human := range snapshot.ArchivedHumans {
+		archivedHumans = append(archivedHumans, h.adminSnapshotHumanPayload(human))
+	}
+
+	archivedAgents := make([]map[string]any, 0, len(snapshot.ArchivedAgents))
+	for _, agent := range snapshot.ArchivedAgents {
+		archivedAgents = append(archivedAgents, h.agentResponsePayload(agent))
+	}
+
 	return map[string]any{
-		"organizations":   organizations,
-		"humans":          humans,
-		"memberships":     snapshot.Memberships,
-		"agents":          agents,
-		"org_trusts":      snapshot.OrgTrusts,
-		"agent_trusts":    snapshot.AgentTrusts,
-		"stats":           snapshot.Stats,
-		"message_metrics": snapshot.MessageMetrics,
-		"activity_feed":   snapshot.ActivityFeed,
+		"organizations":          organizations,
+		"humans":                 humans,
+		"memberships":            snapshot.Memberships,
+		"agents":                 agents,
+		"archived_organizations": archivedOrganizations,
+		"archived_humans":        archivedHumans,
+		"archived_agents":        archivedAgents,
+		"org_trusts":             snapshot.OrgTrusts,
+		"agent_trusts":           snapshot.AgentTrusts,
+		"stats":                  snapshot.Stats,
+		"message_metrics":        snapshot.MessageMetrics,
+		"activity_feed":          snapshot.ActivityFeed,
 	}
 }
