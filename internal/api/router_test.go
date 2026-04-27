@@ -2029,6 +2029,84 @@ func TestMyAgentBindTokenRedeemUsesRequestedHandle(t *testing.T) {
 	}
 }
 
+func TestAgentInviteBindTokenCreatesHostedPeerAndRestrictsChild(t *testing.T) {
+	router := newTestRouter()
+	aliceHumanID := currentHumanID(t, router, "alice", "alice@a.test")
+	orgID := createOrg(t, router, "alice", "alice@a.test", "Agent Invite Org")
+	hostToken, hostUUID := registerAgentWithUUID(t, router, "alice", "alice@a.test", orgID, "host-agent", aliceHumanID)
+
+	createResp := doJSONRequest(t, router, http.MethodPost, "/v1/agents/me/bind-tokens", map[string]any{}, map[string]string{
+		"Authorization": "Bearer " + hostToken,
+	})
+	if createResp.Code != http.StatusCreated {
+		t.Fatalf("create hosted bind token failed: %d %s", createResp.Code, createResp.Body.String())
+	}
+	createResult := requireAgentRuntimeSuccessEnvelope(t, decodeJSONMap(t, createResp.Body.Bytes()))
+	bindToken, _ := createResult["bind_token"].(string)
+	if bindToken == "" {
+		t.Fatalf("bind token missing")
+	}
+	if got, _ := createResult["host_agent_uuid"].(string); got != hostUUID {
+		t.Fatalf("expected host_agent_uuid %q, got %q payload=%v", hostUUID, got, createResult)
+	}
+
+	redeemResp := doJSONRequest(t, router, http.MethodPost, "/v1/agents/bind", map[string]any{
+		"bind_token": bindToken,
+		"handle":     "child-agent",
+	}, nil)
+	if redeemResp.Code != http.StatusCreated {
+		t.Fatalf("redeem hosted bind token failed: %d %s", redeemResp.Code, redeemResp.Body.String())
+	}
+	redeemResult := requireAgentRuntimeSuccessEnvelope(t, decodeJSONMap(t, redeemResp.Body.Bytes()))
+	childToken, _ := redeemResult["token"].(string)
+	childAgent, _ := redeemResult["agent"].(map[string]any)
+	childUUID, _ := childAgent["agent_uuid"].(string)
+	if childToken == "" || childUUID == "" {
+		t.Fatalf("redeem response missing child token/uuid: %v", redeemResult)
+	}
+	if got, _ := childAgent["host_agent_uuid"].(string); got != hostUUID {
+		t.Fatalf("expected child host_agent_uuid %q, got %q agent=%v", hostUUID, got, childAgent)
+	}
+
+	hostPublish := publish(t, router, hostToken, childUUID, "hello child")
+	if hostPublish.Code != http.StatusAccepted {
+		t.Fatalf("expected host publish to child accepted, got %d %s", hostPublish.Code, hostPublish.Body.String())
+	}
+	childPublish := publish(t, router, childToken, hostUUID, "hello host")
+	if childPublish.Code != http.StatusAccepted {
+		t.Fatalf("expected child publish to host accepted, got %d %s", childPublish.Code, childPublish.Body.String())
+	}
+
+	thirdToken, thirdUUID := registerAgentWithUUID(t, router, "alice", "alice@a.test", orgID, "third-agent", "")
+	trustResp := doJSONRequest(t, router, http.MethodPost, "/v1/agent-trusts", map[string]any{
+		"org_id":          orgID,
+		"agent_uuid":      childUUID,
+		"peer_agent_uuid": thirdUUID,
+	}, humanHeaders("alice", "alice@a.test"))
+	if trustResp.Code != http.StatusCreated {
+		t.Fatalf("trust child-third failed: %d %s", trustResp.Code, trustResp.Body.String())
+	}
+	childToThird := publish(t, router, childToken, thirdUUID, "blocked")
+	if childToThird.Code != http.StatusAccepted {
+		t.Fatalf("expected child publish to third to return dropped result, got %d %s", childToThird.Code, childToThird.Body.String())
+	}
+	childToThirdResult := requireAgentRuntimeSuccessEnvelope(t, decodeJSONMap(t, childToThird.Body.Bytes()))
+	if childToThirdResult["status"] != "dropped" || childToThirdResult["reason"] != "no_trust_path" {
+		t.Fatalf("expected no_trust_path drop, got %v", childToThirdResult)
+	}
+	thirdToChild := publish(t, router, thirdToken, childUUID, "blocked")
+	if thirdToChild.Code != http.StatusAccepted {
+		t.Fatalf("expected third publish to child to return dropped result, got %d %s", thirdToChild.Code, thirdToChild.Body.String())
+	}
+
+	childInvite := doJSONRequest(t, router, http.MethodPost, "/v1/agents/me/bind-tokens", map[string]any{}, map[string]string{
+		"Authorization": "Bearer " + childToken,
+	})
+	if childInvite.Code != http.StatusForbidden {
+		t.Fatalf("expected child invite forbidden, got %d %s", childInvite.Code, childInvite.Body.String())
+	}
+}
+
 func TestMyAgentBindTokenRedeemDuplicateHandleReturnsSuggestions(t *testing.T) {
 	router := newTestRouter()
 	orgID := createOrg(t, router, "alice", "alice@a.test", "Bind Duplicate")

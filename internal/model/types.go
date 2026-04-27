@@ -86,6 +86,7 @@ type Agent struct {
 	HandleFinalizedAt *time.Time     `json:"handle_finalized_at,omitempty"`
 	OrgID             string         `json:"org_id"`
 	OwnerHumanID      *string        `json:"owner_human_id,omitempty"`
+	HostAgentUUID     string         `json:"host_agent_uuid,omitempty"`
 	TokenHash         string         `json:"-"`
 	Status            string         `json:"status"`
 	Metadata          map[string]any `json:"metadata"`
@@ -131,14 +132,15 @@ type RemoteAgentTrust struct {
 }
 
 type BindToken struct {
-	BindID       string     `json:"bind_id"`
-	OrgID        string     `json:"org_id"`
-	OwnerHumanID *string    `json:"owner_human_id,omitempty"`
-	TokenHash    string     `json:"-"`
-	CreatedBy    string     `json:"created_by"`
-	CreatedAt    time.Time  `json:"created_at"`
-	ExpiresAt    time.Time  `json:"expires_at"`
-	UsedAt       *time.Time `json:"used_at,omitempty"`
+	BindID        string     `json:"bind_id"`
+	OrgID         string     `json:"org_id"`
+	OwnerHumanID  *string    `json:"owner_human_id,omitempty"`
+	HostAgentUUID string     `json:"host_agent_uuid,omitempty"`
+	TokenHash     string     `json:"-"`
+	CreatedBy     string     `json:"created_by"`
+	CreatedAt     time.Time  `json:"created_at"`
+	ExpiresAt     time.Time  `json:"expires_at"`
+	UsedAt        *time.Time `json:"used_at,omitempty"`
 }
 
 type TrustEdge struct {

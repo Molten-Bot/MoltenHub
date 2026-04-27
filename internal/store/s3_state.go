@@ -128,6 +128,7 @@ type s3PersistAgent struct {
 	HandleFinalizedAt *time.Time     `json:"handle_finalized_at,omitempty"`
 	OrgID             string         `json:"org_id"`
 	OwnerHumanID      *string        `json:"owner_human_id,omitempty"`
+	HostAgentUUID     string         `json:"host_agent_uuid,omitempty"`
 	TokenHash         string         `json:"token_hash"`
 	Status            string         `json:"status"`
 	Metadata          map[string]any `json:"metadata"`
@@ -137,14 +138,15 @@ type s3PersistAgent struct {
 }
 
 type s3PersistBindToken struct {
-	BindID       string     `json:"bind_id"`
-	OrgID        string     `json:"org_id"`
-	OwnerHumanID *string    `json:"owner_human_id,omitempty"`
-	TokenHash    string     `json:"token_hash"`
-	CreatedBy    string     `json:"created_by"`
-	CreatedAt    time.Time  `json:"created_at"`
-	ExpiresAt    time.Time  `json:"expires_at"`
-	UsedAt       *time.Time `json:"used_at,omitempty"`
+	BindID        string     `json:"bind_id"`
+	OrgID         string     `json:"org_id"`
+	OwnerHumanID  *string    `json:"owner_human_id,omitempty"`
+	HostAgentUUID string     `json:"host_agent_uuid,omitempty"`
+	TokenHash     string     `json:"token_hash"`
+	CreatedBy     string     `json:"created_by"`
+	CreatedAt     time.Time  `json:"created_at"`
+	ExpiresAt     time.Time  `json:"expires_at"`
+	UsedAt        *time.Time `json:"used_at,omitempty"`
 }
 
 type s3PersistOrgAccessKey struct {
@@ -526,6 +528,20 @@ func (s *s3StateStore) CreateBindToken(orgID string, ownerHumanID *string, actor
 	defer s.persistMu.Unlock()
 
 	bind, err := s.MemoryStore.CreateBindToken(orgID, ownerHumanID, actorHumanID, bindID, bindTokenHash, expiresAt, now, isSuperAdmin)
+	if err != nil {
+		return model.BindToken{}, err
+	}
+	if err := s.persistAll(context.Background()); err != nil {
+		return model.BindToken{}, err
+	}
+	return bind, nil
+}
+
+func (s *s3StateStore) CreateAgentInviteBindToken(hostAgentUUID, bindID, bindTokenHash string, expiresAt, now time.Time) (model.BindToken, error) {
+	s.persistMu.Lock()
+	defer s.persistMu.Unlock()
+
+	bind, err := s.MemoryStore.CreateAgentInviteBindToken(hostAgentUUID, bindID, bindTokenHash, expiresAt, now)
 	if err != nil {
 		return model.BindToken{}, err
 	}
@@ -2243,6 +2259,7 @@ func persistAgent(v model.Agent) s3PersistAgent {
 		HandleFinalizedAt: v.HandleFinalizedAt,
 		OrgID:             v.OrgID,
 		OwnerHumanID:      v.OwnerHumanID,
+		HostAgentUUID:     v.HostAgentUUID,
 		TokenHash:         v.TokenHash,
 		Status:            v.Status,
 		Metadata:          copyMetadata(v.Metadata),
@@ -2260,6 +2277,7 @@ func (v s3PersistAgent) toModel() model.Agent {
 		HandleFinalizedAt: v.HandleFinalizedAt,
 		OrgID:             v.OrgID,
 		OwnerHumanID:      v.OwnerHumanID,
+		HostAgentUUID:     v.HostAgentUUID,
 		TokenHash:         v.TokenHash,
 		Status:            v.Status,
 		Metadata:          copyMetadata(v.Metadata),
@@ -2271,27 +2289,29 @@ func (v s3PersistAgent) toModel() model.Agent {
 
 func persistBindToken(v model.BindToken) s3PersistBindToken {
 	return s3PersistBindToken{
-		BindID:       v.BindID,
-		OrgID:        v.OrgID,
-		OwnerHumanID: v.OwnerHumanID,
-		TokenHash:    v.TokenHash,
-		CreatedBy:    v.CreatedBy,
-		CreatedAt:    v.CreatedAt,
-		ExpiresAt:    v.ExpiresAt,
-		UsedAt:       v.UsedAt,
+		BindID:        v.BindID,
+		OrgID:         v.OrgID,
+		OwnerHumanID:  v.OwnerHumanID,
+		HostAgentUUID: v.HostAgentUUID,
+		TokenHash:     v.TokenHash,
+		CreatedBy:     v.CreatedBy,
+		CreatedAt:     v.CreatedAt,
+		ExpiresAt:     v.ExpiresAt,
+		UsedAt:        v.UsedAt,
 	}
 }
 
 func (v s3PersistBindToken) toModel() model.BindToken {
 	return model.BindToken{
-		BindID:       v.BindID,
-		OrgID:        v.OrgID,
-		OwnerHumanID: v.OwnerHumanID,
-		TokenHash:    v.TokenHash,
-		CreatedBy:    v.CreatedBy,
-		CreatedAt:    v.CreatedAt,
-		ExpiresAt:    v.ExpiresAt,
-		UsedAt:       v.UsedAt,
+		BindID:        v.BindID,
+		OrgID:         v.OrgID,
+		OwnerHumanID:  v.OwnerHumanID,
+		HostAgentUUID: v.HostAgentUUID,
+		TokenHash:     v.TokenHash,
+		CreatedBy:     v.CreatedBy,
+		CreatedAt:     v.CreatedAt,
+		ExpiresAt:     v.ExpiresAt,
+		UsedAt:        v.UsedAt,
 	}
 }
 
