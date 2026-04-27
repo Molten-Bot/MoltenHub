@@ -134,6 +134,7 @@ type agentControlPlaneView struct {
 	AgentID          string
 	OrgID            string
 	OwnerHumanID     string
+	HostAgentUUID    string
 	CanTalkTo        []string
 	CanTalkToURIs    []string
 	TalkablePeers    []agentTalkablePeerSummary
@@ -435,6 +436,7 @@ func agentResponsePayload(agent model.Agent) map[string]any {
 		"handle":              agent.Handle,
 		"handle_finalized_at": agent.HandleFinalizedAt,
 		"org_id":              agent.OrgID,
+		"host_agent_uuid":     agent.HostAgentUUID,
 		"status":              agent.Status,
 		"metadata":            metadata,
 		"created_by":          agent.CreatedBy,
@@ -1409,16 +1411,21 @@ func (h *Handler) buildAgentControlPlane(r *http.Request, agent model.Agent) (ag
 	if agent.OwnerHumanID != nil {
 		ownerHumanID = *agent.OwnerHumanID
 	}
+	capabilities := []string{"publish_messages", "pull_messages", "read_capabilities", "read_skill", "update_profile"}
+	if strings.TrimSpace(agent.HostAgentUUID) == "" {
+		capabilities = append(capabilities, "invite_agents")
+	}
 	return agentControlPlaneView{
 		APIBase:          h.apiBaseURL(r),
 		AgentUUID:        agent.AgentUUID,
 		AgentID:          agent.AgentID,
 		OrgID:            agent.OrgID,
 		OwnerHumanID:     ownerHumanID,
+		HostAgentUUID:    agent.HostAgentUUID,
 		CanTalkTo:        peers,
 		CanTalkToURIs:    talkableURIs,
 		TalkablePeers:    talkablePeers,
-		Capabilities:     []string{"publish_messages", "pull_messages", "read_capabilities", "read_skill", "update_profile"},
+		Capabilities:     capabilities,
 		AdvertisedSkills: parseAdvertisedSkills(agent.Metadata),
 		PeerSkillCatalog: peerSkillCatalog,
 	}, nil
@@ -1468,6 +1475,7 @@ func (h *Handler) agentControlPlanePayload(cp agentControlPlaneView) map[string]
 		"agent_id":            cp.AgentID,
 		"org_id":              cp.OrgID,
 		"owner":               owner,
+		"host_agent_uuid":     cp.HostAgentUUID,
 		"can_talk_to":         cp.CanTalkTo,
 		"can_talk_to_uris":    cp.CanTalkToURIs,
 		"talkable_peers":      cp.TalkablePeers,
@@ -2906,11 +2914,12 @@ func (h *Handler) handleCreateBindTokenCreate(w http.ResponseWriter, r *http.Req
 
 func (h *Handler) bindTokenCreateResponse(r *http.Request, bind model.BindToken, bindSecret string, includeConnectPrompt bool) map[string]any {
 	payload := map[string]any{
-		"bind_id":        bind.BindID,
-		"bind_token":     bindSecret,
-		"org_id":         bind.OrgID,
-		"owner_human_id": bind.OwnerHumanID,
-		"expires_at":     bind.ExpiresAt,
+		"bind_id":         bind.BindID,
+		"bind_token":      bindSecret,
+		"org_id":          bind.OrgID,
+		"owner_human_id":  bind.OwnerHumanID,
+		"host_agent_uuid": bind.HostAgentUUID,
+		"expires_at":      bind.ExpiresAt,
 	}
 	if includeConnectPrompt {
 		payload["connect_prompt"] = h.buildAgentConnectPrompt(r, bind, bindSecret)
@@ -2931,6 +2940,58 @@ func (h *Handler) createBindTokenWithRetry(orgID string, ownerHumanID *string, a
 		}
 		expiresAt := h.now().UTC().Add(h.bindTokenTTL)
 		bind, err := h.control.CreateBindToken(orgID, ownerHumanID, actorHumanID, bindID, auth.HashToken(bindSecret), expiresAt, h.now().UTC(), isSuperAdmin)
+		if err == nil {
+			return bind, bindSecret, nil
+		}
+		lastErr = err
+		if attempt == 0 && isRetryableStoreMutationError(err) {
+			continue
+		}
+		return model.BindToken{}, "", err
+	}
+	return model.BindToken{}, "", lastErr
+}
+
+func (h *Handler) handleAgentInviteBindTokens(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeMethodNotAllowed(w)
+		return
+	}
+	agentUUID, err := h.authenticateAgent(r)
+	if err != nil {
+		writeError(w, http.StatusUnauthorized, "unauthorized", "missing or invalid bearer token")
+		return
+	}
+	bind, bindSecret, err := h.createAgentInviteBindTokenWithRetry(agentUUID)
+	if err != nil {
+		switch {
+		case errors.Is(err, store.ErrAgentNotFound):
+			writeError(w, http.StatusNotFound, "unknown_agent", "agent_uuid is not registered")
+		case errors.Is(err, store.ErrHostedAgentRestricted):
+			writeError(w, http.StatusForbidden, "hosted_agent_restricted", "hosted agents cannot invite agents")
+		case isRetryableStoreMutationError(err):
+			writeError(w, http.StatusServiceUnavailable, "store_error", "failed to create bind token")
+		default:
+			writeError(w, http.StatusInternalServerError, "store_error", "failed to create bind token")
+		}
+		return
+	}
+	writeAgentRuntimeSuccess(w, http.StatusCreated, h.bindTokenCreateResponse(r, bind, bindSecret, true))
+}
+
+func (h *Handler) createAgentInviteBindTokenWithRetry(hostAgentUUID string) (model.BindToken, string, error) {
+	var lastErr error
+	for attempt := 0; attempt < 2; attempt++ {
+		bindSecret, err := auth.GenerateBindToken()
+		if err != nil {
+			return model.BindToken{}, "", err
+		}
+		bindID, err := h.idFactory()
+		if err != nil {
+			return model.BindToken{}, "", err
+		}
+		expiresAt := h.now().UTC().Add(h.bindTokenTTL)
+		bind, err := h.control.CreateAgentInviteBindToken(hostAgentUUID, bindID, auth.HashToken(bindSecret), expiresAt, h.now().UTC())
 		if err == nil {
 			return bind, bindSecret, nil
 		}

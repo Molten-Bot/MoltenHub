@@ -51,6 +51,7 @@ var (
 	ErrBindNotFound             = errors.New("bind token not found")
 	ErrBindExpired              = errors.New("bind token expired")
 	ErrBindUsed                 = errors.New("bind token already used")
+	ErrHostedAgentRestricted    = errors.New("hosted agent restricted")
 	ErrAgentLimitExceeded       = errors.New("agent limit exceeded")
 	ErrMessageNotFound          = errors.New("message not found")
 	ErrMessageDeliveryNotFound  = errors.New("message delivery not found")
@@ -1194,6 +1195,42 @@ func (s *MemoryStore) CreateBindToken(orgID string, ownerHumanID *string, actorH
 	return bind, nil
 }
 
+func (s *MemoryStore) CreateAgentInviteBindToken(hostAgentUUID, bindID, bindTokenHash string, expiresAt, now time.Time) (model.BindToken, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	host, ok := s.agents[strings.TrimSpace(hostAgentUUID)]
+	if !ok || host.Status == model.StatusRevoked {
+		return model.BindToken{}, ErrAgentNotFound
+	}
+	if strings.TrimSpace(host.HostAgentUUID) != "" {
+		return model.BindToken{}, ErrHostedAgentRestricted
+	}
+	if _, exists := s.bindByHash[bindTokenHash]; exists {
+		return model.BindToken{}, ErrInvalidToken
+	}
+
+	bind := model.BindToken{
+		BindID:        bindID,
+		OrgID:         host.OrgID,
+		OwnerHumanID:  host.OwnerHumanID,
+		HostAgentUUID: host.AgentUUID,
+		TokenHash:     bindTokenHash,
+		CreatedBy:     host.AgentUUID,
+		CreatedAt:     now,
+		ExpiresAt:     expiresAt,
+	}
+	s.binds[bind.BindID] = bind
+	s.bindByHash[bindTokenHash] = bind.BindID
+	if bind.OrgID != "" {
+		s.appendAuditLocked(bind.OrgID, host.AgentUUID, "agent_bind", "create", bind.BindID, map[string]any{
+			"host_agent_uuid": host.AgentUUID,
+			"expires_at":      expiresAt,
+		}, now)
+	}
+	return bind, nil
+}
+
 func (s *MemoryStore) RedeemBindToken(bindTokenHash, agentID, agentTokenHash string, now time.Time) (model.Agent, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -1263,6 +1300,13 @@ func (s *MemoryStore) RedeemBindToken(bindTokenHash, agentID, agentTokenHash str
 	if err != nil {
 		return model.Agent{}, err
 	}
+	agentTrustEdgeID := ""
+	if bind.HostAgentUUID != "" {
+		agentTrustEdgeID, err = newRandomUUID()
+		if err != nil {
+			return model.Agent{}, err
+		}
+	}
 
 	agent := model.Agent{
 		AgentUUID:         agentUUID,
@@ -1271,6 +1315,7 @@ func (s *MemoryStore) RedeemBindToken(bindTokenHash, agentID, agentTokenHash str
 		HandleFinalizedAt: nil,
 		OrgID:             bind.OrgID,
 		OwnerHumanID:      bind.OwnerHumanID,
+		HostAgentUUID:     bind.HostAgentUUID,
 		TokenHash:         agentTokenHash,
 		Status:            model.StatusActive,
 		Metadata:          defaultAgentMetadata(),
@@ -1290,6 +1335,29 @@ func (s *MemoryStore) RedeemBindToken(bindTokenHash, agentID, agentTokenHash str
 	bind.UsedAt = &used
 	s.binds[bind.BindID] = bind
 	s.appendAuditLocked(bind.OrgID, bind.CreatedBy, "agent", "create", agent.AgentUUID, agentCreationAuditDetails(agent, "bind", bind.BindID), now)
+	if bind.HostAgentUUID != "" {
+		leftID, rightID := canonicalPair(bind.HostAgentUUID, agent.AgentUUID)
+		edge := model.TrustEdge{
+			EdgeID:        agentTrustEdgeID,
+			EdgeType:      "agent",
+			LeftID:        leftID,
+			RightID:       rightID,
+			State:         model.StatusActive,
+			LeftApproved:  true,
+			RightApproved: true,
+			CreatedBy:     bind.HostAgentUUID,
+			CreatedAt:     now,
+			UpdatedAt:     now,
+		}
+		s.agentTrusts[edge.EdgeID] = edge
+		s.agentTrustByPair[pairKey(leftID, rightID)] = edge.EdgeID
+		s.appendAuditLocked(bind.OrgID, bind.HostAgentUUID, "trust_agent", "request", edge.EdgeID, map[string]any{
+			"agent_uuid":      bind.HostAgentUUID,
+			"peer_agent_uuid": agent.AgentUUID,
+			"state":           edge.State,
+			"source":          "agent_invite",
+		}, now)
+	}
 	if bind.OrgID != "" {
 		s.appendAuditLocked(bind.OrgID, bind.CreatedBy, "agent_bind", "redeem", bind.BindID, map[string]any{
 			"agent_id":   agent.AgentID,
@@ -3279,6 +3347,9 @@ func (s *MemoryStore) CanPublish(senderAgentUUID, receiverAgentUUID string) (str
 }
 
 func (s *MemoryStore) canPublishLocked(sender, receiver model.Agent) bool {
+	if !hostedAgentPairAllowed(sender, receiver) {
+		return false
+	}
 	senderOrgID := strings.TrimSpace(sender.OrgID)
 	receiverOrgID := strings.TrimSpace(receiver.OrgID)
 	if senderOrgID != "" && receiverOrgID != "" && senderOrgID != receiverOrgID {
@@ -3298,6 +3369,18 @@ func (s *MemoryStore) canPublishLocked(sender, receiver model.Agent) bool {
 	}
 	agentEdge, ok := s.agentTrusts[agentEdgeID]
 	if !ok || agentEdge.State != model.StatusActive {
+		return false
+	}
+	return true
+}
+
+func hostedAgentPairAllowed(sender, receiver model.Agent) bool {
+	senderHost := strings.TrimSpace(sender.HostAgentUUID)
+	receiverHost := strings.TrimSpace(receiver.HostAgentUUID)
+	if senderHost != "" && senderHost != receiver.AgentUUID {
+		return false
+	}
+	if receiverHost != "" && receiverHost != sender.AgentUUID {
 		return false
 	}
 	return true

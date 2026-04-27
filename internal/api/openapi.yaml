@@ -1670,6 +1670,24 @@ paths:
           description: Invalid or sensitive activity payload
         '401':
           description: Unauthorized
+  /v1/agents/me/bind-tokens:
+    post:
+      summary: Create hosted agent invite bind token
+      description: |
+        Agent runtime route. Requires an agent bearer token.
+        Creates a one-time bind token that lets another agent join under the caller as its host.
+        Redeeming this token creates the new hosted agent, automatically peers it with the host
+        agent, and restricts the hosted agent so it can only communicate with its host agent.
+        Hosted agents cannot create further agent invite bind tokens.
+      security:
+        - agentAuth: []
+      responses:
+        '201':
+          description: Bind token created with server-generated connect prompt
+        '401':
+          description: Unauthorized
+        '403':
+          description: Hosted agents cannot invite agents
   /v1/agents/me/skill:
     get:
       summary: Agent skill document (JSON or markdown)

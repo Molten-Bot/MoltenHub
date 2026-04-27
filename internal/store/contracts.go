@@ -39,6 +39,7 @@ type ControlPlaneStore interface {
 	ListOrgHumanAgents(orgID, humanID, requesterHumanID string, isSuperAdmin bool) ([]model.Agent, error)
 	RegisterAgent(orgID, agentID string, ownerHumanID *string, tokenHash, actorHumanID string, now time.Time, isSuperAdmin bool) (model.Agent, error)
 	CreateBindToken(orgID string, ownerHumanID *string, actorHumanID, bindID, bindTokenHash string, expiresAt, now time.Time, isSuperAdmin bool) (model.BindToken, error)
+	CreateAgentInviteBindToken(hostAgentUUID, bindID, bindTokenHash string, expiresAt, now time.Time) (model.BindToken, error)
 	RedeemBindToken(bindTokenHash, agentID, agentTokenHash string, now time.Time) (model.Agent, error)
 	RotateAgentToken(agentUUID, actorHumanID, tokenHash string, now time.Time, isSuperAdmin bool) error
 	RevokeAgent(agentUUID, actorHumanID string, now time.Time, isSuperAdmin bool) error
