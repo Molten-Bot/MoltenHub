@@ -118,6 +118,55 @@ func TestA2AJSONRPCSendMessageDeliversToLegacyPull(t *testing.T) {
 	}
 }
 
+func TestA2AJSONRPCSendMessageRoutesWithMessageMetadata(t *testing.T) {
+	router := newTestRouter()
+	_, _, tokenA, tokenB, _, _, _, agentUUIDB := setupTrustedAgents(t, router)
+
+	resp := doJSONRequest(t, router, http.MethodPost, "/v1/a2a", map[string]any{
+		"jsonrpc": "2.0",
+		"id":      "rpc-send-message-metadata",
+		"method":  "SendMessage",
+		"params": map[string]any{
+			"message": map[string]any{
+				"messageId": "a2a-client-msg-metadata",
+				"role":      "ROLE_USER",
+				"metadata": map[string]any{
+					"to_agent_uuid": agentUUIDB,
+				},
+				"parts": []map[string]any{{
+					"text": "hello via a2a message metadata",
+				}},
+			},
+		},
+	}, map[string]string{"Authorization": "Bearer " + tokenA})
+	if resp.Code != http.StatusOK {
+		t.Fatalf("expected JSON-RPC HTTP 200, got %d %s", resp.Code, resp.Body.String())
+	}
+	payload := decodeJSONMap(t, resp.Body.Bytes())
+	if payload["error"] != nil {
+		t.Fatalf("expected JSON-RPC success, got %v", payload)
+	}
+	result, _ := payload["result"].(map[string]any)
+	task, _ := result["task"].(map[string]any)
+	messageID, _ := task["id"].(string)
+	if messageID == "" {
+		t.Fatalf("expected task id/message id, got %v", payload)
+	}
+
+	pullResp := pull(t, router, tokenB, 0)
+	if pullResp.Code != http.StatusOK {
+		t.Fatalf("expected legacy pull 200, got %d %s", pullResp.Code, pullResp.Body.String())
+	}
+	pullPayload := decodeJSONMap(t, pullResp.Body.Bytes())
+	message, _ := pullPayload["message"].(map[string]any)
+	if message["message_id"] != messageID {
+		t.Fatalf("expected pulled message_id %q, got %v", messageID, message)
+	}
+	if message["content_type"] != "text/plain" || message["payload"] != "hello via a2a message metadata" {
+		t.Fatalf("expected legacy text/plain payload from A2A send, got %v", message)
+	}
+}
+
 func TestA2AGoSDKJSONRPCClientDeliversToLegacyPull(t *testing.T) {
 	router, server, handler := newA2ASDKTestServer(t)
 	_, _, tokenA, tokenB, _, _, _, agentUUIDB := setupTrustedAgents(t, router)
@@ -244,6 +293,46 @@ func TestA2ARESTSendMessageAndTaskStatus(t *testing.T) {
 	history, _ := statusTask["history"].([]any)
 	if len(history) != 1 {
 		t.Fatalf("expected one history message, got %v", statusTask)
+	}
+}
+
+func TestA2ARESTSendMessageRoutesWithMessageMetadata(t *testing.T) {
+	router := newTestRouter()
+	_, _, tokenA, tokenB, _, _, _, agentUUIDB := setupTrustedAgents(t, router)
+
+	sendResp := doJSONRequest(t, router, http.MethodPost, "/v1/a2a/message:send", map[string]any{
+		"message": map[string]any{
+			"messageId": "a2a-rest-msg-metadata",
+			"role":      "ROLE_USER",
+			"metadata": map[string]any{
+				"to_agent_uuid": agentUUIDB,
+			},
+			"parts": []map[string]any{{
+				"text": "hello via a2a rest message metadata",
+			}},
+		},
+	}, map[string]string{"Authorization": "Bearer " + tokenA})
+	if sendResp.Code != http.StatusOK {
+		t.Fatalf("expected REST send 200, got %d %s", sendResp.Code, sendResp.Body.String())
+	}
+	sendPayload := decodeJSONMap(t, sendResp.Body.Bytes())
+	task, _ := sendPayload["task"].(map[string]any)
+	taskID, _ := task["id"].(string)
+	if taskID == "" {
+		t.Fatalf("expected task id, got %v", sendPayload)
+	}
+
+	pullResp := pull(t, router, tokenB, 0)
+	if pullResp.Code != http.StatusOK {
+		t.Fatalf("expected legacy pull 200, got %d %s", pullResp.Code, pullResp.Body.String())
+	}
+	pullPayload := decodeJSONMap(t, pullResp.Body.Bytes())
+	message, _ := pullPayload["message"].(map[string]any)
+	if message["message_id"] != taskID {
+		t.Fatalf("expected pulled message_id %q, got %v", taskID, message)
+	}
+	if message["content_type"] != "text/plain" || message["payload"] != "hello via a2a rest message metadata" {
+		t.Fatalf("expected legacy text/plain payload from REST A2A send, got %v", message)
 	}
 }
 

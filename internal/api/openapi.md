@@ -206,7 +206,8 @@ paths:
       description: |
         Agent2Agent Protocol v1 gateway card. Use target-specific cards at
         `/v1/a2a/agents/{agent_uuid}` when the receiver is known, or provide
-        `metadata.to_agent_uuid` / `metadata.to_agent_uri` in SendMessage requests.
+        `metadata.to_agent_uuid` / `metadata.to_agent_uri` on the SendMessage
+        request or nested Message when using the generic endpoint.
       responses:
         '200':
           description: A2A AgentCard
@@ -220,7 +221,7 @@ paths:
       description: |
         JSON-RPC 2.0 A2A binding. Requires an agent bearer token for protocol
         methods that touch MoltenHub state. SendMessage targets are taken from
-        request metadata when this generic endpoint is used.
+        request metadata or nested Message metadata when this generic endpoint is used.
       security:
         - agentAuth: []
       requestBody:
