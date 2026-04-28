@@ -167,6 +167,64 @@ func TestA2AJSONRPCSendMessageRoutesWithMessageMetadata(t *testing.T) {
 	}
 }
 
+func TestA2AJSONRPCCompatMethodAliases(t *testing.T) {
+	router := newTestRouter()
+	_, _, tokenA, tokenB, _, _, _, agentUUIDB := setupTrustedAgents(t, router)
+
+	resp := doJSONRequest(t, router, http.MethodPost, "/v1/a2a", map[string]any{
+		"jsonrpc": "2.0",
+		"id":      "rpc-compat-send",
+		"method":  "message/send",
+		"params": map[string]any{
+			"message": map[string]any{
+				"messageId": "a2a-compat-msg-metadata",
+				"role":      "ROLE_USER",
+				"metadata": map[string]any{
+					"to_agent_uuid": agentUUIDB,
+				},
+				"parts": []map[string]any{{
+					"text": "hello via a2a compat message metadata",
+				}},
+			},
+		},
+	}, map[string]string{"Authorization": "Bearer " + tokenA})
+	if resp.Code != http.StatusOK {
+		t.Fatalf("expected compat JSON-RPC HTTP 200, got %d %s", resp.Code, resp.Body.String())
+	}
+	payload := decodeJSONMap(t, resp.Body.Bytes())
+	if payload["error"] != nil {
+		t.Fatalf("expected compat JSON-RPC success, got %v", payload)
+	}
+	result, _ := payload["result"].(map[string]any)
+	if result["kind"] != "task" {
+		t.Fatalf("expected compat JSON-RPC task event result, got %v", result)
+	}
+	messageID, _ := result["id"].(string)
+	if messageID == "" {
+		t.Fatalf("expected compat task id/message id, got %v", payload)
+	}
+
+	getResp := doJSONRequest(t, router, http.MethodPost, "/v1/a2a/agents/"+agentUUIDB, map[string]any{
+		"jsonrpc": "2.0",
+		"id":      "rpc-compat-get-task",
+		"method":  "tasks/get",
+		"params": map[string]any{
+			"id": messageID,
+		},
+	}, map[string]string{"Authorization": "Bearer " + tokenB})
+	if getResp.Code != http.StatusOK {
+		t.Fatalf("expected compat get task HTTP 200, got %d %s", getResp.Code, getResp.Body.String())
+	}
+	getPayload := decodeJSONMap(t, getResp.Body.Bytes())
+	if getPayload["error"] != nil {
+		t.Fatalf("expected compat get task success, got %v", getPayload)
+	}
+	gotTask, _ := getPayload["result"].(map[string]any)
+	if gotTask["id"] != messageID {
+		t.Fatalf("expected compat get task id %q, got %v", messageID, gotTask)
+	}
+}
+
 func TestA2AGoSDKJSONRPCClientDeliversToLegacyPull(t *testing.T) {
 	router, server, handler := newA2ASDKTestServer(t)
 	_, _, tokenA, tokenB, _, _, _, agentUUIDB := setupTrustedAgents(t, router)
