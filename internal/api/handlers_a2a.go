@@ -485,8 +485,12 @@ func a2aPublishRequestFromSendMessage(targetAgentUUID string, req a2aSendMessage
 		targetAgentUUID = normalizeUUID(metadataString(req.Metadata, "to_agent_uuid", "toAgentUuid", "target_agent_uuid", "targetAgentUuid"))
 		targetAgentURI = strings.TrimSpace(metadataString(req.Metadata, "to_agent_uri", "toAgentUri", "target_agent_uri", "targetAgentUri"))
 	}
+	if targetAgentUUID == "" && targetAgentURI == "" && req.Message != nil {
+		targetAgentUUID = normalizeUUID(metadataString(req.Message.Metadata, "to_agent_uuid", "toAgentUuid", "target_agent_uuid", "targetAgentUuid"))
+		targetAgentURI = strings.TrimSpace(metadataString(req.Message.Metadata, "to_agent_uri", "toAgentUri", "target_agent_uri", "targetAgentUri"))
+	}
 	if targetAgentUUID == "" && targetAgentURI == "" {
-		return publishRequest{}, a2aInvalidParams("missing_target_agent", "target agent is required; use /v1/a2a/agents/{agent_uuid} or metadata.to_agent_uuid/to_agent_uri", nil)
+		return publishRequest{}, a2aInvalidParams("missing_target_agent", "target agent is required; use /v1/a2a/agents/{agent_uuid}, request metadata.to_agent_uuid/to_agent_uri, or message metadata.to_agent_uuid/to_agent_uri", nil)
 	}
 	if targetAgentUUID != "" && !validateUUID(targetAgentUUID) {
 		return publishRequest{}, a2aInvalidParams("invalid_target_agent", "target agent UUID is invalid", nil)
