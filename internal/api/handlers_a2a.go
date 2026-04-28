@@ -38,6 +38,19 @@ const (
 )
 
 const (
+	a2aJSONRPCCompatMethodSend     = "message/send"
+	a2aJSONRPCCompatMethodStream   = "message/stream"
+	a2aJSONRPCCompatMethodGetTask  = "tasks/get"
+	a2aJSONRPCCompatMethodCancel   = "tasks/cancel"
+	a2aJSONRPCCompatMethodSub      = "tasks/resubscribe"
+	a2aJSONRPCCompatMethodPushGet  = "tasks/pushNotificationConfig/get"
+	a2aJSONRPCCompatMethodPushSet  = "tasks/pushNotificationConfig/set"
+	a2aJSONRPCCompatMethodPushList = "tasks/pushNotificationConfig/list"
+	a2aJSONRPCCompatMethodPushDel  = "tasks/pushNotificationConfig/delete"
+	a2aJSONRPCCompatMethodCard     = "agent/getAuthenticatedExtendedCard"
+)
+
+const (
 	a2aCodeParseError        = -32700
 	a2aCodeInvalidRequest    = -32600
 	a2aCodeMethodNotFound    = -32601
@@ -257,27 +270,34 @@ func (h *Handler) handleA2AJSONRPC(w http.ResponseWriter, r *http.Request, targe
 
 	var result any
 	var protocolErr *a2aProtocolError
-	switch strings.TrimSpace(req.Method) {
-	case a2aJSONRPCMethodSend:
+	method := strings.TrimSpace(req.Method)
+	switch method {
+	case a2aJSONRPCMethodSend, a2aJSONRPCCompatMethodSend:
 		result, protocolErr = h.a2aSendMessage(r.Context(), r, targetAgentUUID, req.Params)
 		if protocolErr == nil {
-			result = map[string]any{"task": result}
+			if method == a2aJSONRPCCompatMethodSend {
+				task, _ := result.(map[string]any)
+				result = a2aJSONRPCCompatEvent("task", task)
+			} else {
+				result = map[string]any{"task": result}
+			}
 		}
-	case a2aJSONRPCMethodGetTask:
+	case a2aJSONRPCMethodGetTask, a2aJSONRPCCompatMethodGetTask:
 		result, protocolErr = h.a2aGetTask(r, targetAgentUUID, req.Params)
 	case a2aJSONRPCMethodListTask:
 		result, protocolErr = h.a2aListTasks(r, targetAgentUUID, req.Params)
-	case a2aJSONRPCMethodCancel:
+	case a2aJSONRPCMethodCancel, a2aJSONRPCCompatMethodCancel:
 		result, protocolErr = h.a2aCancelTask(r, req.Params)
-	case a2aJSONRPCMethodCard:
+	case a2aJSONRPCMethodCard, a2aJSONRPCCompatMethodCard:
 		result, protocolErr = h.a2aExtendedAgentCard(r, targetAgentUUID)
-	case a2aJSONRPCMethodStream, a2aJSONRPCMethodSub:
+	case a2aJSONRPCMethodStream, a2aJSONRPCMethodSub, a2aJSONRPCCompatMethodStream, a2aJSONRPCCompatMethodSub:
 		protocolErr = a2aUnsupported("unsupported_operation", "streaming is not enabled for MoltenHub A2A adapter", nil)
 		if a2aRequestAcceptsEventStream(r) {
 			writeA2AJSONRPCSSEError(w, req.ID, protocolErr)
 			return
 		}
-	case a2aJSONRPCMethodPushGet, a2aJSONRPCMethodPushSet, a2aJSONRPCMethodPushList, a2aJSONRPCMethodPushDel:
+	case a2aJSONRPCMethodPushGet, a2aJSONRPCMethodPushSet, a2aJSONRPCMethodPushList, a2aJSONRPCMethodPushDel,
+		a2aJSONRPCCompatMethodPushGet, a2aJSONRPCCompatMethodPushSet, a2aJSONRPCCompatMethodPushList, a2aJSONRPCCompatMethodPushDel:
 		protocolErr = a2aPushUnsupported("push_notifications_not_supported", "push notifications are not enabled for MoltenHub A2A adapter", nil)
 	case "":
 		protocolErr = a2aInvalidRequest("invalid_request", "method is required", nil)
@@ -301,6 +321,15 @@ func (h *Handler) handleA2AJSONRPC(w http.ResponseWriter, r *http.Request, targe
 		ID:      req.ID,
 		Result:  result,
 	})
+}
+
+func a2aJSONRPCCompatEvent(kind string, event map[string]any) map[string]any {
+	out := cloneStringAnyMap(event)
+	if out == nil {
+		out = map[string]any{}
+	}
+	out["kind"] = kind
+	return out
 }
 
 func (h *Handler) handleA2ARESTSendMessage(w http.ResponseWriter, r *http.Request, targetAgentUUID string) {

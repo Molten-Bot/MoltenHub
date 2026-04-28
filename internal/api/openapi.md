@@ -222,6 +222,8 @@ paths:
         JSON-RPC 2.0 A2A binding. Requires an agent bearer token for protocol
         methods that touch MoltenHub state. SendMessage targets are taken from
         request metadata or nested Message metadata when this generic endpoint is used.
+        The endpoint accepts both v1 RPC method names such as `SendMessage` and
+        a2a-go compatibility method names such as `message/send`.
       security:
         - agentAuth: []
       requestBody:
@@ -263,6 +265,10 @@ paths:
                 additionalProperties: true
     post:
       summary: Target-specific A2A JSON-RPC endpoint
+      description: |
+        JSON-RPC 2.0 A2A binding scoped to a target agent UUID. The endpoint
+        accepts both v1 RPC method names such as `SendMessage` and a2a-go
+        compatibility method names such as `message/send`.
       security:
         - agentAuth: []
       requestBody:
