@@ -2236,6 +2236,9 @@ paths:
         Additive adapter over `/v1/messages/publish` for OpenClaw-compatible JSON envelopes.
         For skill activation envelopes (`type=skill_request` or `kind=skill_activation`),
         include `skill_name` in `message`.
+        Compatibility: callers may also place OpenClaw envelope fields at the top level
+        beside `to_agent_uuid`, `to_agent_uri`, and `client_msg_id`; MoltenHub treats
+        those remaining fields as `message`.
         Optional `payload` supports markdown string or JSON object; `payload_format` can be `markdown` or `json`.
         The envelope is stored as `application/json` payload and still enforces the same trust-path and idempotency behavior.
         JSON success responses include `ok: true` and `result`.
@@ -2247,7 +2250,6 @@ paths:
           application/json:
             schema:
               type: object
-              required: [message]
               properties:
                 to_agent_uuid:
                   type: string
@@ -2257,6 +2259,7 @@ paths:
                   type: string
                 message:
                   $ref: '#/components/schemas/OpenClawEnvelope'
+              additionalProperties: true
       responses:
         '202':
           description: queued, dropped, or idempotent replay

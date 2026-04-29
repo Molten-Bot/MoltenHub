@@ -123,6 +123,39 @@ func TestOpenClawPullProjectsTextPayload(t *testing.T) {
 	}
 }
 
+func TestOpenClawPublishAcceptsTopLevelEnvelope(t *testing.T) {
+	router := newTestRouter()
+	_, _, tokenA, tokenB, _, _, _, agentUUIDB := setupTrustedAgents(t, router)
+
+	publishResp := doJSONRequest(t, router, http.MethodPost, "/v1/openclaw/messages/publish", map[string]any{
+		"to_agent_uuid": agentUUIDB,
+		"kind":          "task_result",
+		"text":          "Failure: clone failed\nError details: repository not found",
+		"Failure:":      true,
+		"Error details:": map[string]any{
+			"code":    "clone_failed",
+			"message": "repository not found",
+		},
+	}, map[string]string{"Authorization": "Bearer " + tokenA})
+	if publishResp.Code != http.StatusAccepted {
+		t.Fatalf("expected openclaw top-level envelope publish 202, got %d %s", publishResp.Code, publishResp.Body.String())
+	}
+
+	pullResp := doJSONRequest(t, router, http.MethodGet, "/v1/openclaw/messages/pull?timeout_ms=1000", nil, map[string]string{"Authorization": "Bearer " + tokenB})
+	if pullResp.Code != http.StatusOK {
+		t.Fatalf("expected openclaw pull 200, got %d %s", pullResp.Code, pullResp.Body.String())
+	}
+	pullPayload := decodeJSONMap(t, pullResp.Body.Bytes())
+	pullResult := requireAgentRuntimeSuccessEnvelope(t, pullPayload)
+	if got := readStringPath(pullResult, "openclaw_message", "kind"); got != "task_result" {
+		t.Fatalf("expected top-level envelope kind to be preserved, got %q payload=%v", got, pullPayload)
+	}
+	openClawMessage, _ := pullResult["openclaw_message"].(map[string]any)
+	if failureAlias, _ := openClawMessage["Failure:"].(bool); !failureAlias {
+		t.Fatalf("expected Failure: alias in delivered OpenClaw message, got payload=%v", pullPayload)
+	}
+}
+
 func TestOpenClawPublishRequiresMessageObject(t *testing.T) {
 	router := newTestRouter()
 	_, _, tokenA, _, _, _, _, agentUUIDB := setupTrustedAgents(t, router)

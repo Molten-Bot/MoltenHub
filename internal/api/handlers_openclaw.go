@@ -43,9 +43,15 @@ func (h *Handler) handleOpenClawPublish(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	var req openClawPublishRequest
-	if err := decodeJSON(r, &req); err != nil {
+	var raw map[string]any
+	if err := decodeJSON(r, &raw); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid_request", "invalid JSON request")
+		return
+	}
+
+	req, err := parseOpenClawPublishRequest(raw)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_request", err.Error())
 		return
 	}
 	if len(req.Message) == 0 {
@@ -83,6 +89,44 @@ func (h *Handler) handleOpenClawPublish(w http.ResponseWriter, r *http.Request) 
 		"message_id": openClawMessageIDFromResult(out),
 	})
 	writeAgentRuntimeSuccess(w, http.StatusAccepted, out)
+}
+
+func parseOpenClawPublishRequest(raw map[string]any) (openClawPublishRequest, error) {
+	var req openClawPublishRequest
+	if raw == nil {
+		return req, nil
+	}
+
+	req.ToAgentUUID = strings.TrimSpace(asStringAny(raw["to_agent_uuid"]))
+	req.ToAgentURI = strings.TrimSpace(asStringAny(raw["to_agent_uri"]))
+	if rawClientMsgID, ok := raw["client_msg_id"]; ok {
+		clientMsgID := strings.TrimSpace(asStringAny(rawClientMsgID))
+		if clientMsgID == "" {
+			return req, errors.New("client_msg_id must be a string")
+		}
+		req.ClientMsgID = &clientMsgID
+	}
+
+	if rawMessage, ok := raw["message"]; ok {
+		message, ok := rawMessage.(map[string]any)
+		if !ok {
+			return req, errors.New("message must be a JSON object")
+		}
+		req.Message = message
+		return req, nil
+	}
+
+	message := make(map[string]any, len(raw))
+	for key, value := range raw {
+		switch key {
+		case "to_agent_uuid", "to_agent_uri", "client_msg_id":
+			continue
+		default:
+			message[key] = value
+		}
+	}
+	req.Message = message
+	return req, nil
 }
 
 func (h *Handler) handleOpenClawPull(w http.ResponseWriter, r *http.Request) {
