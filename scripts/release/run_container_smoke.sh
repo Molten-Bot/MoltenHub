@@ -67,8 +67,7 @@ PY
     if [[ "${attempts}" -ge 30 ]]; then
       echo "ERROR: smoke target did not become ready at ${BASE_URL}/health" >&2
       if [[ -s "${body_file}" ]]; then
-        head -c 512 "${body_file}" >&2 || true
-        echo >&2
+        echo "health response body redacted" >&2
       fi
       docker logs "${CONTAINER_NAME}" >&2 || true
       exit 1

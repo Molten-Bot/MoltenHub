@@ -71,9 +71,7 @@ while [ "$attempt" -lt "$attempt_limit" ]; do
 
   if [ "$attempt" -eq 1 ] || [ "$attempt" -eq "$attempt_limit" ]; then
     if [ -s "$tmp_body" ]; then
-      echo "response body:"
-      head -c 512 "$tmp_body"
-      printf "\n"
+      echo "response body redacted"
     fi
   fi
 

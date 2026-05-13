@@ -241,11 +241,8 @@ func (h *Handler) publishFromAgent(ctx context.Context, senderAgentUUID string, 
 				summary := stateRuntimeFailureSummary("message register", err)
 				h.setStateRuntimeError(summary)
 				log.Printf(
-					"publish register message failed: from_agent_uuid=%s to_agent_uri=%s message_id=%s err=%v",
-					senderAgentUUID,
-					req.ToAgentURI,
-					messageID,
-					err,
+					"publish register message failed: route=federated err_summary=%q",
+					summary,
 				)
 				return nil, &runtimeHandlerError{
 					status:  http.StatusInternalServerError,
@@ -412,11 +409,8 @@ func (h *Handler) publishFromAgent(ctx context.Context, senderAgentUUID string, 
 		summary := stateRuntimeFailureSummary("message register", err)
 		h.setStateRuntimeError(summary)
 		log.Printf(
-			"publish register message failed: from_agent_uuid=%s to_agent_uuid=%s message_id=%s err=%v",
-			senderAgentUUID,
-			targetAgent.AgentUUID,
-			messageID,
-			err,
+			"publish register message failed: route=local err_summary=%q",
+			summary,
 		)
 		return nil, &runtimeHandlerError{
 			status:  http.StatusInternalServerError,
@@ -434,10 +428,7 @@ func (h *Handler) publishFromAgent(ctx context.Context, senderAgentUUID string, 
 		summary := queueRuntimeFailureSummary("enqueue", err)
 		h.setQueueRuntimeError(summary)
 		log.Printf(
-			"publish enqueue failed: from_agent_uuid=%s to_agent_uuid=%s message_id=%s err_summary=%q",
-			senderAgentUUID,
-			targetAgent.AgentUUID,
-			messageID,
+			"publish enqueue failed: route=local err_summary=%q",
 			summary,
 		)
 		if errors.Is(err, store.ErrAgentNotFound) {
@@ -602,7 +593,7 @@ func (h *Handler) dequeueForPull(
 
 	summary := queueRuntimeFailureSummary("dequeue", err)
 	h.setQueueRuntimeError(summary)
-	log.Printf("%s: receiver_agent_uuid=%s err_summary=%q", logPrefix, receiverAgentUUID, summary)
+	log.Printf("%s: err_summary=%q", logPrefix, summary)
 	if isTransientQueueDequeueError(err) && time.Until(deadline) > 0 {
 		return model.Message{}, false, true, nil
 	}
@@ -903,7 +894,7 @@ func (h *Handler) requeueExpiredLeases(ctx context.Context) {
 		if err := h.queue.Enqueue(ctx, message); err != nil {
 			summary := queueRuntimeFailureSummary("requeue", err)
 			h.setQueueRuntimeError(summary)
-			log.Printf("requeue expired lease failed: message_id=%s err_summary=%q", message.MessageID, summary)
+			log.Printf("requeue expired lease failed: err_summary=%q", summary)
 			return
 		}
 		h.waiters.Notify(message.ToAgentUUID)
