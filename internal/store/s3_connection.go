@@ -175,7 +175,7 @@ func (c *s3Connection) ListObjects(ctx context.Context, prefix string, maxKeys i
 			return s3ListObjectsResult{}, nil
 		}
 		if resp.StatusCode != http.StatusOK {
-			return s3ListObjectsResult{}, fmt.Errorf("list objects status %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
+			return s3ListObjectsResult{}, s3StatusError("list objects", resp.StatusCode, body)
 		}
 
 		var parsed s3ConnectionListBucketResult
@@ -226,7 +226,7 @@ func (c *s3Connection) PutObject(ctx context.Context, key string, body []byte, c
 		defer resp.Body.Close()
 		if !isS3WriteStatus(resp.StatusCode) {
 			data, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-			return nil, fmt.Errorf("put object status %d: %s", resp.StatusCode, strings.TrimSpace(string(data)))
+			return nil, s3StatusError("put object", resp.StatusCode, data)
 		}
 		return nil, nil
 	})
@@ -252,7 +252,7 @@ func (c *s3Connection) GetObject(ctx context.Context, key string, maxBytes int64
 		}
 		if resp.StatusCode != http.StatusOK {
 			data, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-			return s3GetObjectResult{}, fmt.Errorf("get object status %d: %s", resp.StatusCode, strings.TrimSpace(string(data)))
+			return s3GetObjectResult{}, s3StatusError("get object", resp.StatusCode, data)
 		}
 		if maxBytes <= 0 {
 			maxBytes = 4 * 1024 * 1024
@@ -292,11 +292,19 @@ func (c *s3Connection) DeleteObject(ctx context.Context, key string, allowNotFou
 		}
 		if !isS3WriteStatus(resp.StatusCode) {
 			data, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-			return nil, fmt.Errorf("delete object status %d: %s", resp.StatusCode, strings.TrimSpace(string(data)))
+			return nil, s3StatusError("delete object", resp.StatusCode, data)
 		}
 		return nil, nil
 	})
 	return err
+}
+
+func s3StatusError(operation string, status int, body []byte) error {
+	detail := SanitizeErrorTextWithDetail(strings.TrimSpace(string(body)))
+	if detail == "" {
+		return fmt.Errorf("%s status %d", operation, status)
+	}
+	return fmt.Errorf("%s status %d: %s", operation, status, detail)
 }
 
 func (c *s3Connection) dispatch(ctx context.Context, exec func(context.Context) (any, error)) (any, error) {

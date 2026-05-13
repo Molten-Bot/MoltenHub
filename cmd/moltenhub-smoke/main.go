@@ -94,7 +94,7 @@ func (r *runner) stepHealth() error {
 		return err
 	}
 	if status != http.StatusOK {
-		return fmt.Errorf("expected 200, got %d payload=%v", status, payload)
+		return fmt.Errorf("expected 200, got %d payload=%v", status, cmdutil.SafePayload(payload))
 	}
 	if payload["status"] != "ok" {
 		return fmt.Errorf("expected status ok, got %v", payload["status"])
@@ -125,7 +125,7 @@ func (r *runner) stepBobCannotTakeAliceHandle() error {
 		return err
 	}
 	if status != http.StatusConflict {
-		return fmt.Errorf("expected 409, got %d payload=%v", status, payload)
+		return fmt.Errorf("expected 409, got %d payload=%v", status, cmdutil.SafePayload(payload))
 	}
 	return requireErrorCode(payload, "human_handle_exists")
 }
@@ -180,10 +180,10 @@ func (r *runner) stepAliceCreatesOrganization() error {
 		return err
 	}
 	if status != http.StatusOK {
-		return fmt.Errorf("expected /v1/me/orgs 200, got %d payload=%v", status, payload)
+		return fmt.Errorf("expected /v1/me/orgs 200, got %d payload=%v", status, cmdutil.SafePayload(payload))
 	}
 	if !membershipHasOrg(payload, orgID) {
-		return fmt.Errorf("created org %q missing from /v1/me/orgs", orgID)
+		return fmt.Errorf("created org <redacted> missing from /v1/me/orgs")
 	}
 	return nil
 }
@@ -201,7 +201,7 @@ func (r *runner) stepBobCannotTakeOrgHandle() error {
 		return err
 	}
 	if status != http.StatusConflict {
-		return fmt.Errorf("expected 409, got %d payload=%v", status, payload)
+		return fmt.Errorf("expected 409, got %d payload=%v", status, cmdutil.SafePayload(payload))
 	}
 	return requireErrorCode(payload, "org_handle_exists")
 }
@@ -254,7 +254,7 @@ func (r *runner) stepAliceDeletesOrganization() error {
 		return err
 	}
 	if status != http.StatusOK {
-		return fmt.Errorf("expected delete 200, got %d payload=%v", status, payload)
+		return fmt.Errorf("expected delete 200, got %d payload=%v", status, cmdutil.SafePayload(payload))
 	}
 	if payload["result"] != "deleted" {
 		return fmt.Errorf("expected result deleted, got %v", payload["result"])
@@ -283,7 +283,7 @@ func (r *runner) stepAgentBinds() error {
 		return err
 	}
 	if agent["status"] != "active" {
-		return fmt.Errorf("expected bound agent active, got %v payload=%v", agent["status"], agent)
+		return fmt.Errorf("expected bound agent active, got %v payload=%v", agent["status"], cmdutil.SafePayload(agent))
 	}
 	return nil
 }
@@ -322,7 +322,7 @@ func (r *runner) stepAgentDuplicateHandleRejected() error {
 		return err
 	}
 	if status != http.StatusConflict {
-		return fmt.Errorf("expected 409, got %d payload=%v", status, payload)
+		return fmt.Errorf("expected 409, got %d payload=%v", status, cmdutil.SafePayload(payload))
 	}
 	if err := requireErrorCode(payload, "agent_exists"); err != nil {
 		return err
@@ -389,7 +389,7 @@ func (r *runner) stepAgentPublishesActivities() error {
 		return err
 	}
 	if !agentActivityLogHas(httpAgent, httpActivity, "coding", "started") {
-		return fmt.Errorf("expected HTTP activity_log to include %q payload=%v", httpActivity, httpAgent)
+		return fmt.Errorf("expected HTTP activity_log to include <redacted> payload=%v", cmdutil.SafePayload(httpAgent))
 	}
 
 	conn, err := r.openRuntimeEnvelopeWebSocket(r.tokenA, fmt.Sprintf("smoke-activity-%d", time.Now().UnixNano()))
@@ -404,7 +404,7 @@ func (r *runner) stepAgentPublishesActivities() error {
 		return err
 	}
 	if !agentActivityLogHas(wsAgent, wsActivity, "marketing", "completed") {
-		return fmt.Errorf("expected websocket activity_log to include %q payload=%v", wsActivity, wsAgent)
+		return fmt.Errorf("expected websocket activity_log to include <redacted> payload=%v", cmdutil.SafePayload(wsAgent))
 	}
 	return nil
 }
@@ -415,7 +415,7 @@ func (r *runner) stepAliceRevokesFirstAgent() error {
 		return err
 	}
 	if status != http.StatusOK {
-		return fmt.Errorf("expected revoke 200, got %d payload=%v", status, payload)
+		return fmt.Errorf("expected revoke 200, got %d payload=%v", status, cmdutil.SafePayload(payload))
 	}
 
 	status, payload, err = r.requestJSON(http.MethodGet, "/v1/agents/me", cmdutil.AgentHeaders(r.tokenA), nil)
@@ -423,7 +423,7 @@ func (r *runner) stepAliceRevokesFirstAgent() error {
 		return err
 	}
 	if status != http.StatusUnauthorized {
-		return fmt.Errorf("expected revoked token 401, got %d payload=%v", status, payload)
+		return fmt.Errorf("expected revoked token 401, got %d payload=%v", status, cmdutil.SafePayload(payload))
 	}
 	return nil
 }
@@ -434,7 +434,7 @@ func (r *runner) stepAliceSeesBothAgents() error {
 		return err
 	}
 	if status != http.StatusOK {
-		return fmt.Errorf("expected /v1/me/agents 200, got %d payload=%v", status, payload)
+		return fmt.Errorf("expected /v1/me/agents 200, got %d payload=%v", status, cmdutil.SafePayload(payload))
 	}
 	agents, err := requireAgentList(payload)
 	if err != nil {
@@ -459,15 +459,15 @@ func (r *runner) stepAliceCreatesAgentTrust() error {
 		return err
 	}
 	if status != http.StatusCreated && status != http.StatusOK {
-		return fmt.Errorf("expected agent trust create 201/200, got %d payload=%v", status, payload)
+		return fmt.Errorf("expected agent trust create 201/200, got %d payload=%v", status, cmdutil.SafePayload(payload))
 	}
 	trust, ok := payload["trust"].(map[string]any)
 	if !ok {
-		return fmt.Errorf("expected trust object payload=%v", payload)
+		return fmt.Errorf("expected trust object payload=%v", cmdutil.SafePayload(payload))
 	}
 	edgeID := cmdutil.AsString(trust, "edge_id")
 	if edgeID == "" {
-		return fmt.Errorf("expected trust.edge_id payload=%v", payload)
+		return fmt.Errorf("expected trust.edge_id payload=%v", cmdutil.SafePayload(payload))
 	}
 	if cmdutil.AsString(trust, "state") == "active" {
 		return nil
@@ -478,14 +478,14 @@ func (r *runner) stepAliceCreatesAgentTrust() error {
 		return err
 	}
 	if status != http.StatusOK {
-		return fmt.Errorf("expected agent trust approve 200, got %d payload=%v", status, payload)
+		return fmt.Errorf("expected agent trust approve 200, got %d payload=%v", status, cmdutil.SafePayload(payload))
 	}
 	trust, ok = payload["trust"].(map[string]any)
 	if !ok {
-		return fmt.Errorf("expected trust object after approve payload=%v", payload)
+		return fmt.Errorf("expected trust object after approve payload=%v", cmdutil.SafePayload(payload))
 	}
 	if state := cmdutil.AsString(trust, "state"); state != "active" {
-		return fmt.Errorf("expected trust state active after approve, got %q payload=%v", state, payload)
+		return fmt.Errorf("expected trust state active after approve, got %q payload=%v", state, cmdutil.SafePayload(payload))
 	}
 	return nil
 }
@@ -496,15 +496,15 @@ func (r *runner) stepAgentInvitesHostedAgent() error {
 		return err
 	}
 	if status != http.StatusCreated {
-		return fmt.Errorf("expected hosted bind token create 201, got %d payload=%v", status, payload)
+		return fmt.Errorf("expected hosted bind token create 201, got %d payload=%v", status, cmdutil.SafePayload(payload))
 	}
 	result := runtimeResult(payload)
 	bindToken := cmdutil.AsString(result, "bind_token")
 	if bindToken == "" {
-		return fmt.Errorf("expected hosted bind_token payload=%v", payload)
+		return fmt.Errorf("expected hosted bind_token payload=%v", cmdutil.SafePayload(payload))
 	}
 	if got := cmdutil.AsString(result, "host_agent_uuid"); got != r.agentUUIDA {
-		return fmt.Errorf("expected host_agent_uuid %q, got %q payload=%v", r.agentUUIDA, got, payload)
+		return fmt.Errorf("expected host_agent_uuid <redacted>, got <redacted> payload=%v", cmdutil.SafePayload(payload))
 	}
 
 	childHandle := fmt.Sprintf("hosted-smoke-child-%d", time.Now().UnixNano())
@@ -518,10 +518,10 @@ func (r *runner) stepAgentInvitesHostedAgent() error {
 	}
 	childUUID := cmdutil.AsString(childAgent, "agent_uuid")
 	if childUUID == "" {
-		return fmt.Errorf("expected child agent_uuid payload=%v", childAgent)
+		return fmt.Errorf("expected child agent_uuid payload=%v", cmdutil.SafePayload(childAgent))
 	}
 	if got := cmdutil.AsString(childAgent, "host_agent_uuid"); got != r.agentUUIDA {
-		return fmt.Errorf("expected child host_agent_uuid %q, got %q payload=%v", r.agentUUIDA, got, childAgent)
+		return fmt.Errorf("expected child host_agent_uuid <redacted>, got <redacted> payload=%v", cmdutil.SafePayload(childAgent))
 	}
 
 	status, payload, err = r.requestJSON(http.MethodPost, "/v1/messages/publish", cmdutil.AgentHeaders(r.tokenA), map[string]any{
@@ -533,11 +533,11 @@ func (r *runner) stepAgentInvitesHostedAgent() error {
 		return err
 	}
 	if status != http.StatusAccepted {
-		return fmt.Errorf("expected host publish to child 202, got %d payload=%v", status, payload)
+		return fmt.Errorf("expected host publish to child 202, got %d payload=%v", status, cmdutil.SafePayload(payload))
 	}
 	result = runtimeResult(payload)
 	if got := cmdutil.AsString(result, "status"); got != "queued" {
-		return fmt.Errorf("expected host publish queued, got %q payload=%v", got, payload)
+		return fmt.Errorf("expected host publish queued, got %q payload=%v", got, cmdutil.SafePayload(payload))
 	}
 
 	status, payload, err = r.requestJSON(http.MethodPost, "/v1/agents/me/bind-tokens", cmdutil.AgentHeaders(childToken), map[string]any{})
@@ -545,17 +545,17 @@ func (r *runner) stepAgentInvitesHostedAgent() error {
 		return err
 	}
 	if status != http.StatusForbidden {
-		return fmt.Errorf("expected child hosted bind token create 403, got %d payload=%v", status, payload)
+		return fmt.Errorf("expected child hosted bind token create 403, got %d payload=%v", status, cmdutil.SafePayload(payload))
 	}
 	if err := requireErrorCode(payload, "hosted_agent_restricted"); err != nil {
 		return err
 	}
 	if payload["Failure:"] != true {
-		return fmt.Errorf("expected child invite failure to include Failure: field payload=%v", payload)
+		return fmt.Errorf("expected child invite failure to include Failure: field payload=%v", cmdutil.SafePayload(payload))
 	}
 	errorDetails, ok := payload["Error details:"].(map[string]any)
 	if !ok || errorDetails["code"] != "hosted_agent_restricted" {
-		return fmt.Errorf("expected Error details:.code hosted_agent_restricted payload=%v", payload)
+		return fmt.Errorf("expected Error details:.code hosted_agent_restricted payload=%v", cmdutil.SafePayload(payload))
 	}
 	return nil
 }
@@ -577,7 +577,7 @@ func (r *runner) stepA2AStorageDelivery() error {
 		return err
 	}
 	if status != http.StatusOK {
-		return fmt.Errorf("expected A2A send 200, got %d payload=%v", status, payload)
+		return fmt.Errorf("expected A2A send 200, got %d payload=%v", status, cmdutil.SafePayload(payload))
 	}
 	task, err := cmdutil.RequireObject(payload, "task")
 	if err != nil {
@@ -585,10 +585,10 @@ func (r *runner) stepA2AStorageDelivery() error {
 	}
 	taskID := cmdutil.AsString(task, "id")
 	if taskID == "" {
-		return fmt.Errorf("expected A2A task id payload=%v", payload)
+		return fmt.Errorf("expected A2A task id payload=%v", cmdutil.SafePayload(payload))
 	}
 	if got := readStringPath(task, "status", "state"); got != "TASK_STATE_SUBMITTED" {
-		return fmt.Errorf("expected A2A task state submitted, got %q payload=%v", got, payload)
+		return fmt.Errorf("expected A2A task state submitted, got %q payload=%v", got, cmdutil.SafePayload(payload))
 	}
 
 	getPath := "/v1/a2a/agents/" + url.PathEscape(r.agentUUIDB) + "/tasks/" + url.PathEscape(taskID)
@@ -597,10 +597,10 @@ func (r *runner) stepA2AStorageDelivery() error {
 		return err
 	}
 	if status != http.StatusOK {
-		return fmt.Errorf("expected A2A get task 200, got %d payload=%v", status, payload)
+		return fmt.Errorf("expected A2A get task 200, got %d payload=%v", status, cmdutil.SafePayload(payload))
 	}
 	if got := cmdutil.AsString(payload, "id"); got != taskID {
-		return fmt.Errorf("expected A2A get task id %q, got %q payload=%v", taskID, got, payload)
+		return fmt.Errorf("expected A2A get task id <redacted>, got <redacted> payload=%v", cmdutil.SafePayload(payload))
 	}
 
 	listPath := "/v1/a2a/agents/" + url.PathEscape(r.agentUUIDB) + "/tasks?contextId=" + url.QueryEscape(clientMessageID)
@@ -609,11 +609,11 @@ func (r *runner) stepA2AStorageDelivery() error {
 		return err
 	}
 	if status != http.StatusOK {
-		return fmt.Errorf("expected A2A list tasks 200, got %d payload=%v", status, payload)
+		return fmt.Errorf("expected A2A list tasks 200, got %d payload=%v", status, cmdutil.SafePayload(payload))
 	}
 	tasks, _ := payload["tasks"].([]any)
 	if len(tasks) == 0 {
-		return fmt.Errorf("expected A2A list tasks to include context %q payload=%v", clientMessageID, payload)
+		return fmt.Errorf("expected A2A list tasks to include context <redacted> payload=%v", cmdutil.SafePayload(payload))
 	}
 
 	deliveryID, receivedText, err := r.pullLegacyMessage(r.tokenB, taskID, 12*time.Second)
@@ -621,7 +621,7 @@ func (r *runner) stepA2AStorageDelivery() error {
 		return err
 	}
 	if receivedText != messageText {
-		return fmt.Errorf("expected legacy pull text %q, got %q", messageText, receivedText)
+		return fmt.Errorf("expected legacy pull text <redacted>, got <redacted>")
 	}
 	if err := r.ackLegacyDeliveryHTTP(r.tokenB, deliveryID); err != nil {
 		return err
@@ -632,10 +632,10 @@ func (r *runner) stepA2AStorageDelivery() error {
 		return err
 	}
 	if status != http.StatusOK {
-		return fmt.Errorf("expected A2A get task after ack 200, got %d payload=%v", status, payload)
+		return fmt.Errorf("expected A2A get task after ack 200, got %d payload=%v", status, cmdutil.SafePayload(payload))
 	}
 	if got := readStringPath(payload, "status", "state"); got != "TASK_STATE_COMPLETED" {
-		return fmt.Errorf("expected A2A task state completed after legacy ack, got %q payload=%v", got, payload)
+		return fmt.Errorf("expected A2A task state completed after legacy ack, got %q payload=%v", got, cmdutil.SafePayload(payload))
 	}
 
 	genericClientMessageID := fmt.Sprintf("smoke-a2a-generic-%d", time.Now().UnixNano())
@@ -656,7 +656,7 @@ func (r *runner) stepA2AStorageDelivery() error {
 		return err
 	}
 	if status != http.StatusOK {
-		return fmt.Errorf("expected generic A2A send 200, got %d payload=%v", status, payload)
+		return fmt.Errorf("expected generic A2A send 200, got %d payload=%v", status, cmdutil.SafePayload(payload))
 	}
 	genericTask, err := cmdutil.RequireObject(payload, "task")
 	if err != nil {
@@ -664,10 +664,10 @@ func (r *runner) stepA2AStorageDelivery() error {
 	}
 	genericTaskID := cmdutil.AsString(genericTask, "id")
 	if genericTaskID == "" {
-		return fmt.Errorf("expected generic A2A task id payload=%v", payload)
+		return fmt.Errorf("expected generic A2A task id payload=%v", cmdutil.SafePayload(payload))
 	}
 	if got := readStringPath(genericTask, "status", "state"); got != "TASK_STATE_SUBMITTED" {
-		return fmt.Errorf("expected generic A2A task state submitted, got %q payload=%v", got, payload)
+		return fmt.Errorf("expected generic A2A task state submitted, got %q payload=%v", got, cmdutil.SafePayload(payload))
 	}
 
 	genericDeliveryID, genericReceivedText, err := r.pullLegacyMessage(r.tokenB, genericTaskID, 12*time.Second)
@@ -675,7 +675,7 @@ func (r *runner) stepA2AStorageDelivery() error {
 		return err
 	}
 	if genericReceivedText != genericMessageText {
-		return fmt.Errorf("expected generic legacy pull text %q, got %q", genericMessageText, genericReceivedText)
+		return fmt.Errorf("expected generic legacy pull text <redacted>, got <redacted>")
 	}
 	if err := r.ackLegacyDeliveryHTTP(r.tokenB, genericDeliveryID); err != nil {
 		return err
@@ -687,10 +687,10 @@ func (r *runner) stepA2AStorageDelivery() error {
 		return err
 	}
 	if status != http.StatusOK {
-		return fmt.Errorf("expected generic A2A get task after ack 200, got %d payload=%v", status, payload)
+		return fmt.Errorf("expected generic A2A get task after ack 200, got %d payload=%v", status, cmdutil.SafePayload(payload))
 	}
 	if got := readStringPath(payload, "status", "state"); got != "TASK_STATE_COMPLETED" {
-		return fmt.Errorf("expected generic A2A task state completed after legacy ack, got %q payload=%v", got, payload)
+		return fmt.Errorf("expected generic A2A task state completed after legacy ack, got %q payload=%v", got, cmdutil.SafePayload(payload))
 	}
 	return nil
 }
@@ -701,7 +701,7 @@ func (r *runner) stepAliceRevokesBothAgents() error {
 		return err
 	}
 	if status != http.StatusOK {
-		return fmt.Errorf("expected second revoke 200, got %d payload=%v", status, payload)
+		return fmt.Errorf("expected second revoke 200, got %d payload=%v", status, cmdutil.SafePayload(payload))
 	}
 
 	status, payload, err = r.requestJSON(http.MethodGet, "/v1/agents/me", cmdutil.AgentHeaders(r.tokenB), nil)
@@ -709,7 +709,7 @@ func (r *runner) stepAliceRevokesBothAgents() error {
 		return err
 	}
 	if status != http.StatusUnauthorized {
-		return fmt.Errorf("expected second revoked token 401, got %d payload=%v", status, payload)
+		return fmt.Errorf("expected second revoked token 401, got %d payload=%v", status, cmdutil.SafePayload(payload))
 	}
 
 	status, payload, err = r.requestJSON(http.MethodGet, "/v1/me/agents", cmdutil.HumanHeaders("alice", "alice@a.test"), nil)
@@ -717,7 +717,7 @@ func (r *runner) stepAliceRevokesBothAgents() error {
 		return err
 	}
 	if status != http.StatusOK {
-		return fmt.Errorf("expected /v1/me/agents 200 after revoke, got %d payload=%v", status, payload)
+		return fmt.Errorf("expected /v1/me/agents 200 after revoke, got %d payload=%v", status, cmdutil.SafePayload(payload))
 	}
 	agents, err := requireAgentList(payload)
 	if err != nil {
@@ -745,7 +745,7 @@ func (r *runner) stepRuntimeHTTPDelivery() error {
 		return err
 	}
 	if receivedText != messageText {
-		return fmt.Errorf("expected pull text %q, got %q", messageText, receivedText)
+		return fmt.Errorf("expected pull text <redacted>, got <redacted>")
 	}
 	return r.ackRuntimeEnvelopeDeliveryHTTP(r.tokenB, deliveryID)
 }
@@ -788,26 +788,26 @@ func (r *runner) stepRetiredOpenClawCompatibilityEndpoints() error {
 			return err
 		}
 		if status != http.StatusGone {
-			return fmt.Errorf("expected retired %s endpoint 410, got %d payload=%v", check.name, status, payload)
+			return fmt.Errorf("expected retired %s endpoint 410, got %d payload=%v", check.name, status, cmdutil.SafePayload(payload))
 		}
 		if err := requireErrorCode(payload, "endpoint_retired"); err != nil {
 			return fmt.Errorf("%s: %w", check.name, err)
 		}
 		errorDetails, ok := payload["error_detail"].(map[string]any)
 		if !ok {
-			return fmt.Errorf("expected retired %s endpoint error_detail payload=%v", check.name, payload)
+			return fmt.Errorf("expected retired %s endpoint error_detail payload=%v", check.name, cmdutil.SafePayload(payload))
 		}
 		if got := cmdutil.AsString(errorDetails, "retired_endpoint"); got == "" {
-			return fmt.Errorf("expected retired %s endpoint to name retired_endpoint payload=%v", check.name, payload)
+			return fmt.Errorf("expected retired %s endpoint to name retired_endpoint payload=%v", check.name, cmdutil.SafePayload(payload))
 		}
 		if check.replacement == "" {
 			if _, ok := errorDetails["replacement_endpoint"]; ok {
-				return fmt.Errorf("did not expect retired %s endpoint replacement payload=%v", check.name, payload)
+				return fmt.Errorf("did not expect retired %s endpoint replacement payload=%v", check.name, cmdutil.SafePayload(payload))
 			}
 			continue
 		}
 		if got := cmdutil.AsString(errorDetails, "replacement_endpoint"); got != check.replacement {
-			return fmt.Errorf("expected retired %s endpoint replacement %q, got %q payload=%v", check.name, check.replacement, got, payload)
+			return fmt.Errorf("expected retired %s endpoint replacement <redacted>, got <redacted> payload=%v", check.name, cmdutil.SafePayload(payload))
 		}
 	}
 	return nil
@@ -835,7 +835,7 @@ func (r *runner) stepRuntimeWebSocketDelivery() error {
 		return err
 	}
 	if receivedText != messageText {
-		return fmt.Errorf("expected websocket delivery text %q, got %q", messageText, receivedText)
+		return fmt.Errorf("expected websocket delivery text <redacted>, got <redacted>")
 	}
 	return r.ackRuntimeEnvelopeDeliveryWS(conn, deliveryID)
 }
@@ -854,11 +854,11 @@ func (r *runner) stepRuntimeQueuedOfflineWebSocketDelivery() error {
 		return err
 	}
 	if status != http.StatusOK {
-		return fmt.Errorf("expected runtime offline 200, got %d payload=%v", status, payload)
+		return fmt.Errorf("expected runtime offline 200, got %d payload=%v", status, cmdutil.SafePayload(payload))
 	}
 	result := runtimeResult(payload)
 	if got := readStringPath(result, "presence", "status"); got != "offline" {
-		return fmt.Errorf("expected presence status offline before queued publish, got %q payload=%v", got, payload)
+		return fmt.Errorf("expected presence status offline before queued publish, got %q payload=%v", got, cmdutil.SafePayload(payload))
 	}
 
 	messageText := fmt.Sprintf("smoke-runtime-offline-queue-%d", time.Now().UnixNano())
@@ -878,7 +878,7 @@ func (r *runner) stepRuntimeQueuedOfflineWebSocketDelivery() error {
 		return err
 	}
 	if receivedText != messageText {
-		return fmt.Errorf("expected websocket delivery text %q, got %q", messageText, receivedText)
+		return fmt.Errorf("expected websocket delivery text <redacted>, got <redacted>")
 	}
 	return r.ackRuntimeEnvelopeDeliveryWS(conn, deliveryID)
 }
@@ -896,7 +896,7 @@ func (r *runner) stepRuntimePresenceHeartbeat() error {
 		return err
 	}
 	if status != http.StatusOK {
-		return fmt.Errorf("expected runtime offline 200, got %d payload=%v", status, payload)
+		return fmt.Errorf("expected runtime offline 200, got %d payload=%v", status, cmdutil.SafePayload(payload))
 	}
 
 	status, payload, err = r.requestJSON(http.MethodGet, "/v1/runtime/messages/pull?timeout_ms=0", cmdutil.AgentHeaders(r.tokenB), nil)
@@ -913,7 +913,7 @@ func (r *runner) stepRuntimePresenceHeartbeat() error {
 			}
 		}
 	default:
-		return fmt.Errorf("expected runtime pull 200/204 for heartbeat, got %d payload=%v", status, payload)
+		return fmt.Errorf("expected runtime pull 200/204 for heartbeat, got %d payload=%v", status, cmdutil.SafePayload(payload))
 	}
 
 	agent, err := r.currentAgent(r.tokenB)
@@ -922,10 +922,10 @@ func (r *runner) stepRuntimePresenceHeartbeat() error {
 	}
 	metadata, _ := agent["metadata"].(map[string]any)
 	if got := readStringPath(metadata, "presence", "status"); got != "online" {
-		return fmt.Errorf("expected presence status online after polling heartbeat, got %q payload=%v", got, agent)
+		return fmt.Errorf("expected presence status online after polling heartbeat, got %q payload=%v", got, cmdutil.SafePayload(agent))
 	}
 	if got := readStringPath(metadata, "presence", "ready"); got != "true" {
-		return fmt.Errorf("expected presence ready true after polling heartbeat, got %q payload=%v", got, agent)
+		return fmt.Errorf("expected presence ready true after polling heartbeat, got %q payload=%v", got, cmdutil.SafePayload(agent))
 	}
 	return nil
 }
@@ -942,7 +942,7 @@ func (r *runner) publishRuntimeEnvelopeMessage(token, toAgentUUID, text string) 
 		return "", err
 	}
 	if status != http.StatusAccepted {
-		return "", fmt.Errorf("expected runtime publish 202, got %d payload=%v", status, payload)
+		return "", fmt.Errorf("expected runtime publish 202, got %d payload=%v", status, cmdutil.SafePayload(payload))
 	}
 	result := runtimeResult(payload)
 	messageID := readStringPath(result, "message_id")
@@ -950,7 +950,7 @@ func (r *runner) publishRuntimeEnvelopeMessage(token, toAgentUUID, text string) 
 		messageID = readStringPath(result, "message", "message_id")
 	}
 	if messageID == "" {
-		return "", fmt.Errorf("expected runtime publish response to include message_id payload=%v", payload)
+		return "", fmt.Errorf("expected runtime publish response to include message_id payload=%v", cmdutil.SafePayload(payload))
 	}
 	return messageID, nil
 }
@@ -965,7 +965,7 @@ func (r *runner) publishAgentActivityHTTP(token, activity, category, statusText 
 		return nil, err
 	}
 	if status != http.StatusCreated {
-		return nil, fmt.Errorf("expected agent activity publish 201, got %d payload=%v", status, payload)
+		return nil, fmt.Errorf("expected agent activity publish 201, got %d payload=%v", status, cmdutil.SafePayload(payload))
 	}
 	result := runtimeResult(payload)
 	return cmdutil.RequireObject(result, "agent")
@@ -999,10 +999,10 @@ func (r *runner) publishAgentActivityWS(conn *websocket.Conn, activity, category
 			continue
 		}
 		if readStringPath(evt, "ok") != "true" {
-			return nil, fmt.Errorf("expected websocket activity response ok=true payload=%v", evt)
+			return nil, fmt.Errorf("expected websocket activity response ok=true payload=%v", cmdutil.SafePayload(evt))
 		}
 		if got := readStringPath(evt, "status"); got != "201" {
-			return nil, fmt.Errorf("expected websocket activity response status=201, got %q payload=%v", got, evt)
+			return nil, fmt.Errorf("expected websocket activity response status=201, got %q payload=%v", got, cmdutil.SafePayload(evt))
 		}
 		result := runtimeResult(evt)
 		return cmdutil.RequireObject(result, "agent")
@@ -1021,7 +1021,7 @@ func (r *runner) pullRuntimeEnvelopeMessage(token, expectedMessageID string, tim
 			continue
 		}
 		if status != http.StatusOK {
-			return "", "", fmt.Errorf("expected runtime pull 200/204, got %d payload=%v", status, payload)
+			return "", "", fmt.Errorf("expected runtime pull 200/204, got %d payload=%v", status, cmdutil.SafePayload(payload))
 		}
 
 		result := runtimeResult(payload)
@@ -1031,7 +1031,7 @@ func (r *runner) pullRuntimeEnvelopeMessage(token, expectedMessageID string, tim
 		}
 		deliveryID := readStringPath(result, "delivery", "delivery_id")
 		if deliveryID == "" {
-			return "", "", fmt.Errorf("expected runtime pull to include delivery_id payload=%v", payload)
+			return "", "", fmt.Errorf("expected runtime pull to include delivery_id payload=%v", cmdutil.SafePayload(payload))
 		}
 
 		runtimeEnvelope, err := cmdutil.RequireObject(result, "envelope")
@@ -1046,7 +1046,7 @@ func (r *runner) pullRuntimeEnvelopeMessage(token, expectedMessageID string, tim
 			return "", "", err
 		}
 	}
-	return "", "", fmt.Errorf("timed out waiting for runtime pull message_id=%q", expectedMessageID)
+	return "", "", fmt.Errorf("timed out waiting for runtime pull message_id=<redacted>")
 }
 
 func (r *runner) drainRuntimeEnvelopeQueue(token string) error {
@@ -1059,7 +1059,7 @@ func (r *runner) drainRuntimeEnvelopeQueue(token string) error {
 			return nil
 		}
 		if status != http.StatusOK {
-			return fmt.Errorf("expected runtime drain pull 200/204, got %d payload=%v", status, payload)
+			return fmt.Errorf("expected runtime drain pull 200/204, got %d payload=%v", status, cmdutil.SafePayload(payload))
 		}
 
 		result := runtimeResult(payload)
@@ -1087,7 +1087,7 @@ func (r *runner) ackRuntimeEnvelopeDeliveryHTTP(token, deliveryID string) error 
 	if status == http.StatusNotFound && cmdutil.AsString(payload, "error") == "unknown_delivery" {
 		return nil
 	}
-	return fmt.Errorf("expected runtime ack 200, got %d payload=%v", status, payload)
+	return fmt.Errorf("expected runtime ack 200, got %d payload=%v", status, cmdutil.SafePayload(payload))
 }
 
 func (r *runner) pullLegacyMessage(token, expectedMessageID string, timeout time.Duration) (string, string, error) {
@@ -1101,14 +1101,14 @@ func (r *runner) pullLegacyMessage(token, expectedMessageID string, timeout time
 			continue
 		}
 		if status != http.StatusOK {
-			return "", "", fmt.Errorf("expected legacy pull 200/204, got %d payload=%v", status, payload)
+			return "", "", fmt.Errorf("expected legacy pull 200/204, got %d payload=%v", status, cmdutil.SafePayload(payload))
 		}
 
 		result := runtimeResult(payload)
 		messageID := readStringPath(result, "message", "message_id")
 		deliveryID := readStringPath(result, "delivery", "delivery_id")
 		if deliveryID == "" {
-			return "", "", fmt.Errorf("expected legacy pull to include delivery_id payload=%v", payload)
+			return "", "", fmt.Errorf("expected legacy pull to include delivery_id payload=%v", cmdutil.SafePayload(payload))
 		}
 		if messageID == expectedMessageID {
 			return deliveryID, readStringPath(result, "message", "payload"), nil
@@ -1117,7 +1117,7 @@ func (r *runner) pullLegacyMessage(token, expectedMessageID string, timeout time
 			return "", "", err
 		}
 	}
-	return "", "", fmt.Errorf("timed out waiting for legacy pull message_id=%q", expectedMessageID)
+	return "", "", fmt.Errorf("timed out waiting for legacy pull message_id=<redacted>")
 }
 
 func (r *runner) ackLegacyDeliveryHTTP(token, deliveryID string) error {
@@ -1133,13 +1133,13 @@ func (r *runner) ackLegacyDeliveryHTTP(token, deliveryID string) error {
 	if status == http.StatusNotFound && cmdutil.AsString(payload, "error") == "unknown_delivery" {
 		return nil
 	}
-	return fmt.Errorf("expected legacy ack 200, got %d payload=%v", status, payload)
+	return fmt.Errorf("expected legacy ack 200, got %d payload=%v", status, cmdutil.SafePayload(payload))
 }
 
 func (r *runner) openRuntimeEnvelopeWebSocket(token, sessionKey string) (*websocket.Conn, error) {
 	base, err := url.Parse(r.baseURL)
 	if err != nil {
-		return nil, fmt.Errorf("parse base url %q: %w", r.baseURL, err)
+		return nil, fmt.Errorf("parse base url <redacted>: %w", err)
 	}
 	switch strings.ToLower(strings.TrimSpace(base.Scheme)) {
 	case "https":
@@ -1170,7 +1170,7 @@ func (r *runner) openRuntimeEnvelopeWebSocket(token, sessionKey string) (*websoc
 	}
 	if got := readStringPath(first, "type"); got != "session_ready" {
 		_ = conn.Close()
-		return nil, fmt.Errorf("expected websocket session_ready, got %q payload=%v", got, first)
+		return nil, fmt.Errorf("expected websocket session_ready, got %q payload=%v", got, cmdutil.SafePayload(first))
 	}
 	return conn, nil
 }
@@ -1192,7 +1192,7 @@ func (r *runner) waitForRuntimeEnvelopeWSDelivery(conn *websocket.Conn, expected
 		}
 		deliveryID := readStringPath(result, "delivery", "delivery_id")
 		if deliveryID == "" {
-			return "", "", fmt.Errorf("expected websocket delivery_id payload=%v", evt)
+			return "", "", fmt.Errorf("expected websocket delivery_id payload=%v", cmdutil.SafePayload(evt))
 		}
 
 		runtimeEnvelope, err := cmdutil.RequireObject(result, "envelope")
@@ -1207,7 +1207,7 @@ func (r *runner) waitForRuntimeEnvelopeWSDelivery(conn *websocket.Conn, expected
 			return "", "", err
 		}
 	}
-	return "", "", fmt.Errorf("timed out waiting for websocket delivery message_id=%q", expectedMessageID)
+	return "", "", fmt.Errorf("timed out waiting for websocket delivery message_id=<redacted>")
 }
 
 func (r *runner) ackRuntimeEnvelopeDeliveryWS(conn *websocket.Conn, deliveryID string) error {
@@ -1242,10 +1242,10 @@ func (r *runner) ackRuntimeEnvelopeDeliveryWS(conn *websocket.Conn, deliveryID s
 			continue
 		}
 		if readStringPath(evt, "ok") != "true" {
-			return fmt.Errorf("expected websocket ack response ok=true payload=%v", evt)
+			return fmt.Errorf("expected websocket ack response ok=true payload=%v", cmdutil.SafePayload(evt))
 		}
 		if got := readStringPath(evt, "status"); got != "200" {
-			return fmt.Errorf("expected websocket ack response status=200, got %q payload=%v", got, evt)
+			return fmt.Errorf("expected websocket ack response status=200, got %q payload=%v", got, cmdutil.SafePayload(evt))
 		}
 		return nil
 	}
@@ -1260,7 +1260,7 @@ func (r *runner) setHumanHandle(humanID, email, handle string) (map[string]any, 
 		return nil, err
 	}
 	if status != http.StatusOK {
-		return nil, fmt.Errorf("expected handle set 200, got %d payload=%v", status, payload)
+		return nil, fmt.Errorf("expected handle set 200, got %d payload=%v", status, cmdutil.SafePayload(payload))
 	}
 	return payload, nil
 }
@@ -1273,7 +1273,7 @@ func (r *runner) patchHumanMetadata(humanID, email string, metadata map[string]a
 		return nil, err
 	}
 	if status != http.StatusOK {
-		return nil, fmt.Errorf("expected human metadata patch 200, got %d payload=%v", status, payload)
+		return nil, fmt.Errorf("expected human metadata patch 200, got %d payload=%v", status, cmdutil.SafePayload(payload))
 	}
 	return payload, nil
 }
@@ -1287,7 +1287,7 @@ func (r *runner) createOrg(humanID, email, handle, displayName string) (string, 
 		return "", err
 	}
 	if status != http.StatusCreated {
-		return "", fmt.Errorf("expected org create 201, got %d payload=%v", status, payload)
+		return "", fmt.Errorf("expected org create 201, got %d payload=%v", status, cmdutil.SafePayload(payload))
 	}
 	org, err := cmdutil.RequireObject(payload, "organization")
 	if err != nil {
@@ -1304,7 +1304,7 @@ func (r *runner) patchOrgMetadata(orgID string, metadata map[string]any) (map[st
 		return nil, err
 	}
 	if status != http.StatusOK {
-		return nil, fmt.Errorf("expected org metadata patch 200, got %d payload=%v", status, payload)
+		return nil, fmt.Errorf("expected org metadata patch 200, got %d payload=%v", status, cmdutil.SafePayload(payload))
 	}
 	return payload, nil
 }
@@ -1317,7 +1317,7 @@ func (r *runner) createBindToken(orgID string) (string, error) {
 		return "", err
 	}
 	if status != http.StatusCreated {
-		return "", fmt.Errorf("expected bind token create 201, got %d payload=%v", status, payload)
+		return "", fmt.Errorf("expected bind token create 201, got %d payload=%v", status, cmdutil.SafePayload(payload))
 	}
 	return cmdutil.AsString(payload, "bind_token"), nil
 }
@@ -1331,7 +1331,7 @@ func (r *runner) redeemBindToken(bindToken, agentID string) (string, error) {
 		return "", err
 	}
 	if status != http.StatusCreated {
-		return "", fmt.Errorf("expected bind token redeem 201, got %d payload=%v", status, payload)
+		return "", fmt.Errorf("expected bind token redeem 201, got %d payload=%v", status, cmdutil.SafePayload(payload))
 	}
 	return cmdutil.AsString(payload, "token"), nil
 }
@@ -1344,7 +1344,7 @@ func (r *runner) patchAgentHandle(token, handle string) (map[string]any, error) 
 		return nil, err
 	}
 	if status != http.StatusOK {
-		return nil, fmt.Errorf("expected agent handle patch 200, got %d payload=%v", status, payload)
+		return nil, fmt.Errorf("expected agent handle patch 200, got %d payload=%v", status, cmdutil.SafePayload(payload))
 	}
 	return payload, nil
 }
@@ -1355,7 +1355,7 @@ func (r *runner) currentAgent(token string) (map[string]any, error) {
 		return nil, err
 	}
 	if status != http.StatusOK {
-		return nil, fmt.Errorf("expected /v1/agents/me 200, got %d payload=%v", status, payload)
+		return nil, fmt.Errorf("expected /v1/agents/me 200, got %d payload=%v", status, cmdutil.SafePayload(payload))
 	}
 	return cmdutil.RequireObject(payload, "agent")
 }
@@ -1368,7 +1368,7 @@ func (r *runner) patchAgentMetadata(token string, metadata map[string]any) (map[
 		return nil, err
 	}
 	if status != http.StatusOK {
-		return nil, fmt.Errorf("expected agent metadata patch 200, got %d payload=%v", status, payload)
+		return nil, fmt.Errorf("expected agent metadata patch 200, got %d payload=%v", status, cmdutil.SafePayload(payload))
 	}
 	return payload, nil
 }
@@ -1383,7 +1383,7 @@ func (r *runner) requestJSON(method, path string, headers map[string]string, bod
 
 func requireErrorCode(payload map[string]any, want string) error {
 	if payload["error"] != want {
-		return fmt.Errorf("expected error %q, got %v payload=%v", want, payload["error"], payload)
+		return fmt.Errorf("expected error %q, got %v payload=%v", want, payload["error"], cmdutil.SafePayload(payload))
 	}
 	return nil
 }
@@ -1417,11 +1417,11 @@ func requireEntityMetadata(payload map[string]any, entityKey string, want map[st
 				return nil
 			}
 		}
-		return fmt.Errorf("expected %s.metadata empty or omitted, got %v payload=%v", entityKey, got, payload)
+		return fmt.Errorf("expected %s.metadata empty or omitted, got %v payload=%v", entityKey, got, cmdutil.SafePayload(payload))
 	}
 	got, ok := entity["metadata"].(map[string]any)
 	if !ok {
-		return fmt.Errorf("expected %s.metadata object, got %T payload=%v", entityKey, entity["metadata"], payload)
+		return fmt.Errorf("expected %s.metadata object, got %T payload=%v", entityKey, entity["metadata"], cmdutil.SafePayload(payload))
 	}
 	if entityKey == "agent" {
 		normalizedWant := make(map[string]any, len(want)+1)
@@ -1483,13 +1483,13 @@ func membershipHasOrg(payload map[string]any, orgID string) bool {
 func requireAgentList(payload map[string]any) ([]map[string]any, error) {
 	raw, ok := payload["agents"].([]any)
 	if !ok {
-		return nil, fmt.Errorf("expected agents array, got %T payload=%v", payload["agents"], payload)
+		return nil, fmt.Errorf("expected agents array, got %T payload=%v", payload["agents"], cmdutil.SafePayload(payload))
 	}
 	out := make([]map[string]any, 0, len(raw))
 	for _, entry := range raw {
 		agent, ok := entry.(map[string]any)
 		if !ok {
-			return nil, fmt.Errorf("expected agent row object, got %T payload=%v", entry, payload)
+			return nil, fmt.Errorf("expected agent row object, got %T payload=%v", entry, cmdutil.SafePayload(payload))
 		}
 		out = append(out, agent)
 	}
@@ -1502,11 +1502,11 @@ func requireAgentStatus(agents []map[string]any, agentUUID, wantStatus string) e
 			continue
 		}
 		if agent["status"] != wantStatus {
-			return fmt.Errorf("expected agent %q status %q, got %v payload=%v", agentUUID, wantStatus, agent["status"], agent)
+			return fmt.Errorf("expected agent <redacted> status %q, got %v payload=%v", wantStatus, agent["status"], cmdutil.SafePayload(agent))
 		}
 		return nil
 	}
-	return fmt.Errorf("agent %q not found in list %v", agentUUID, agents)
+	return fmt.Errorf("agent <redacted> not found in list %v", cmdutil.SafePayload(map[string]any{"agents": agents}))
 }
 
 func agentActivityLogHas(agent map[string]any, activity, category, action string) bool {

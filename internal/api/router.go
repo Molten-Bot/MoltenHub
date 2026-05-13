@@ -348,22 +348,22 @@ func normalizeAllowedOrigin(raw string) (string, error) {
 	}
 	u, err := url.Parse(trimmed)
 	if err != nil {
-		return "", fmt.Errorf("invalid CORS origin %q: %w", raw, err)
+		return "", fmt.Errorf("invalid CORS origin: %w", err)
 	}
 	if u.Scheme != "http" && u.Scheme != "https" {
-		return "", fmt.Errorf("invalid CORS origin %q: scheme must be http or https", raw)
+		return "", fmt.Errorf("invalid CORS origin: scheme must be http or https")
 	}
 	if strings.TrimSpace(u.Host) == "" {
-		return "", fmt.Errorf("invalid CORS origin %q: host is required", raw)
+		return "", fmt.Errorf("invalid CORS origin: host is required")
 	}
 	if u.User != nil {
-		return "", fmt.Errorf("invalid CORS origin %q: userinfo is not allowed", raw)
+		return "", fmt.Errorf("invalid CORS origin: userinfo is not allowed")
 	}
 	if u.RawQuery != "" || u.Fragment != "" {
-		return "", fmt.Errorf("invalid CORS origin %q: query and fragment are not allowed", raw)
+		return "", fmt.Errorf("invalid CORS origin: query and fragment are not allowed")
 	}
 	if u.Path != "" && u.Path != "/" {
-		return "", fmt.Errorf("invalid CORS origin %q: path is not allowed", raw)
+		return "", fmt.Errorf("invalid CORS origin: path is not allowed")
 	}
 	return strings.ToLower(u.Scheme) + "://" + strings.ToLower(u.Host), nil
 }

@@ -133,8 +133,8 @@ func TestRequestJSONErrors(t *testing.T) {
 		defer server.Close()
 
 		_, err := RequestJSON(server.Client(), server.URL, http.MethodGet, "/", nil, nil)
-		if err == nil || !strings.Contains(err.Error(), "decode response") || !strings.Contains(err.Error(), "body=not json") {
-			t.Fatalf("expected decode response error with body, got %v", err)
+		if err == nil || !strings.Contains(err.Error(), "decode response") || strings.Contains(err.Error(), "not json") {
+			t.Fatalf("expected decode response error with redacted body, got %v", err)
 		}
 	})
 }
@@ -178,5 +178,45 @@ func TestRequireObjectAndAsString(t *testing.T) {
 	}
 	if got := AsString(payload, "other"); got != "" {
 		t.Fatalf("expected empty string for non-string value, got %q", got)
+	}
+}
+
+func TestSafePayloadRedactsValues(t *testing.T) {
+	t.Parallel()
+
+	payload := map[string]any{
+		"email":      "alice@example.com",
+		"token":      "secret-token",
+		"status":     "ok",
+		"retryable":  false,
+		"error_code": "unauthorized",
+		"items":      []any{"alice", "bob"},
+		"nested":     map[string]any{"name": "Alice"},
+	}
+	safe := SafePayload(payload)
+
+	if safe["email"] != "<redacted>" || safe["token"] != "<redacted>" || safe["status"] != "<redacted>" {
+		t.Fatalf("expected strings to be redacted, got %#v", safe)
+	}
+	if safe["retryable"] != false {
+		t.Fatalf("expected bool to be preserved, got %#v", safe)
+	}
+	if safe["items"] != "<2 items>" {
+		t.Fatalf("expected array count, got %#v", safe["items"])
+	}
+	nested, _ := safe["nested"].(map[string]any)
+	if nested["name"] != "<redacted>" {
+		t.Fatalf("expected nested value to be redacted, got %#v", nested)
+	}
+}
+
+func TestSafeRawRedactsJSONAndPlainText(t *testing.T) {
+	t.Parallel()
+
+	if got := SafeRaw(`{"token":"secret","ok":true}`); strings.Contains(got, "secret") || !strings.Contains(got, "<redacted>") {
+		t.Fatalf("expected JSON body redaction, got %q", got)
+	}
+	if got := SafeRaw("email alice@example.com"); strings.Contains(got, "alice@example.com") || !strings.Contains(got, "<redacted body len=") {
+		t.Fatalf("expected raw body redaction, got %q", got)
 	}
 }

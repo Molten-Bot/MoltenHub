@@ -53,7 +53,7 @@ func RequestJSON(client *http.Client, baseURL, method, path string, headers map[
 
 	var payload map[string]any
 	if err := json.Unmarshal(raw, &payload); err != nil {
-		return JSONResponse{}, fmt.Errorf("decode response %s %s: %w body=%s", method, path, err, trimmedRaw)
+		return JSONResponse{}, fmt.Errorf("decode response %s %s: %w body=%s", method, path, err, SafeRaw(trimmedRaw))
 	}
 	return JSONResponse{StatusCode: resp.StatusCode, Payload: payload, Raw: trimmedRaw}, nil
 }
@@ -77,7 +77,7 @@ func AgentHeaders(token string) map[string]string {
 func RequireObject(payload map[string]any, key string) (map[string]any, error) {
 	obj, ok := payload[key].(map[string]any)
 	if !ok {
-		return nil, fmt.Errorf("expected %s object, got %T payload=%v", key, payload[key], payload)
+		return nil, fmt.Errorf("expected %s object, got %T payload=%v", key, payload[key], SafePayload(payload))
 	}
 	return obj, nil
 }
@@ -86,4 +86,51 @@ func RequireObject(payload map[string]any, key string) (map[string]any, error) {
 func AsString(payload map[string]any, key string) string {
 	value, _ := payload[key].(string)
 	return value
+}
+
+// SafeRaw returns a redacted diagnostic for raw HTTP response bodies.
+func SafeRaw(raw string) string {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		return ""
+	}
+	var payload map[string]any
+	if err := json.Unmarshal([]byte(trimmed), &payload); err == nil {
+		return fmt.Sprint(SafePayload(payload))
+	}
+	return fmt.Sprintf("<redacted body len=%d>", len(trimmed))
+}
+
+// SafePayload preserves response shape for diagnostics without exposing values.
+func SafePayload(payload map[string]any) map[string]any {
+	if payload == nil {
+		return nil
+	}
+	safe, ok := safeValue(payload).(map[string]any)
+	if !ok {
+		return map[string]any{}
+	}
+	return safe
+}
+
+func safeValue(value any) any {
+	switch typed := value.(type) {
+	case map[string]any:
+		out := make(map[string]any, len(typed))
+		for key, nested := range typed {
+			out[key] = safeValue(nested)
+		}
+		return out
+	case []any:
+		return fmt.Sprintf("<%d items>", len(typed))
+	case string:
+		if typed == "" {
+			return ""
+		}
+		return "<redacted>"
+	case float64, bool, nil:
+		return typed
+	default:
+		return "<redacted>"
+	}
 }

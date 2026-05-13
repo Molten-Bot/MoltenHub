@@ -534,7 +534,7 @@ func (h *Handler) a2aPublishRequestFromSendMessage(targetAgentUUID string, req a
 	if targetAgentUUID != "" && !validateUUID(targetAgentUUID) {
 		resolvedUUID, err := h.control.ResolveAgentUUID(targetAgentUUID)
 		if err != nil {
-			return publishRequest{}, a2aInvalidParams("invalid_target_agent", "target agent ID is invalid or unknown", map[string]any{"target_agent": targetAgentUUID})
+			return publishRequest{}, a2aInvalidParams("invalid_target_agent", "target agent ID is invalid or unknown", nil)
 		}
 		targetAgentUUID = resolvedUUID
 	}
@@ -749,7 +749,7 @@ func (h *Handler) a2aCancelTaskByID(r *http.Request, taskID string) (map[string]
 		status:     "FAILED_PRECONDITION",
 		reason:     "TASK_NOT_CANCELABLE",
 		message:    "MoltenHub message tasks cannot be canceled after publish",
-		details:    map[string]any{"task_id": strings.TrimSpace(taskID), "message_status": record.Status},
+		details:    map[string]any{"message_status": record.Status},
 	}
 }
 
@@ -1773,7 +1773,7 @@ func a2aErrorFromRuntimeHandler(handlerErr *runtimeHandlerError) *a2aProtocolErr
 }
 
 func a2aErrorFromStore(code, message string, err error) *a2aProtocolError {
-	details := map[string]any{"store_error": err.Error()}
+	details := map[string]any{"store_error": store.SanitizeErrorWithDetail(err)}
 	switch {
 	case errors.Is(err, store.ErrAgentNotFound), errors.Is(err, store.ErrMessageNotFound):
 		return a2aTaskNotFound(code, message, details)

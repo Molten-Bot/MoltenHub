@@ -104,7 +104,7 @@ func (r *runner) stepHealth() error {
 			return err
 		}
 		if status != http.StatusOK {
-			return fmt.Errorf("%s health expected 200, got %d payload=%v", target.name, status, payload)
+			return fmt.Errorf("%s health expected 200, got %d payload=%v", target.name, status, cmdutil.SafePayload(payload))
 		}
 		if payload["status"] != "ok" {
 			return fmt.Errorf("%s health expected ok, got %v", target.name, payload["status"])
@@ -175,10 +175,10 @@ func (r *runner) stepCreateRemoteTrusts() error {
 		return err
 	}
 	if capStatus != http.StatusOK {
-		return fmt.Errorf("alpha capabilities expected 200, got %d payload=%v", capStatus, capPayload)
+		return fmt.Errorf("alpha capabilities expected 200, got %d payload=%v", capStatus, cmdutil.SafePayload(capPayload))
 	}
 	if !containsString(capPayload, "control_plane", "can_talk_to_uris", r.betaAgentURI) {
-		return fmt.Errorf("alpha capabilities missing beta agent URI: payload=%v", capPayload)
+		return fmt.Errorf("alpha capabilities missing beta agent URI: payload=%v", cmdutil.SafePayload(capPayload))
 	}
 	return nil
 }
@@ -203,7 +203,7 @@ func (r *runner) publishPullAck(senderBaseURL, senderToken, receiverBaseURL, rec
 		return err
 	}
 	if pubStatus != http.StatusAccepted {
-		return fmt.Errorf("publish expected 202, got %d payload=%v", pubStatus, pubPayload)
+		return fmt.Errorf("publish expected 202, got %d payload=%v", pubStatus, cmdutil.SafePayload(pubPayload))
 	}
 
 	pullStatus, pullPayload, err := r.requestJSON(receiverBaseURL, http.MethodGet, "/v1/messages/pull?timeout_ms=1000", map[string]string{
@@ -213,20 +213,20 @@ func (r *runner) publishPullAck(senderBaseURL, senderToken, receiverBaseURL, rec
 		return err
 	}
 	if pullStatus != http.StatusOK {
-		return fmt.Errorf("pull expected 200, got %d payload=%v", pullStatus, pullPayload)
+		return fmt.Errorf("pull expected 200, got %d payload=%v", pullStatus, cmdutil.SafePayload(pullPayload))
 	}
 	message, err := cmdutil.RequireObject(pullPayload, "message")
 	if err != nil {
 		return err
 	}
 	if cmdutil.AsString(message, "payload") != wantPayload {
-		return fmt.Errorf("expected payload %q, got %q", wantPayload, cmdutil.AsString(message, "payload"))
+		return fmt.Errorf("expected payload <redacted>, got <redacted>")
 	}
 	if cmdutil.AsString(message, "from_agent_uri") != fromAgentURI {
-		return fmt.Errorf("expected from_agent_uri %q, got %q", fromAgentURI, cmdutil.AsString(message, "from_agent_uri"))
+		return fmt.Errorf("expected from_agent_uri <redacted>, got <redacted>")
 	}
 	if cmdutil.AsString(message, "to_agent_uri") != toAgentURI {
-		return fmt.Errorf("expected to_agent_uri %q, got %q", toAgentURI, cmdutil.AsString(message, "to_agent_uri"))
+		return fmt.Errorf("expected to_agent_uri <redacted>, got <redacted>")
 	}
 
 	delivery, err := cmdutil.RequireObject(pullPayload, "delivery")
@@ -235,7 +235,7 @@ func (r *runner) publishPullAck(senderBaseURL, senderToken, receiverBaseURL, rec
 	}
 	deliveryID := cmdutil.AsString(delivery, "delivery_id")
 	if deliveryID == "" {
-		return fmt.Errorf("delivery_id missing from pull payload=%v", pullPayload)
+		return fmt.Errorf("delivery_id missing from pull payload=%v", cmdutil.SafePayload(pullPayload))
 	}
 	ackStatus, ackPayload, err := r.requestJSON(receiverBaseURL, http.MethodPost, "/v1/messages/ack", map[string]string{
 		"Authorization": "Bearer " + receiverToken,
@@ -244,7 +244,7 @@ func (r *runner) publishPullAck(senderBaseURL, senderToken, receiverBaseURL, rec
 		return err
 	}
 	if ackStatus != http.StatusOK {
-		return fmt.Errorf("ack expected 200, got %d payload=%v", ackStatus, ackPayload)
+		return fmt.Errorf("ack expected 200, got %d payload=%v", ackStatus, cmdutil.SafePayload(ackPayload))
 	}
 	return nil
 }
@@ -263,7 +263,7 @@ func (r *runner) createOrg(baseURL, humanID, email, handle, displayName string) 
 		return "", "", err
 	}
 	if status != http.StatusCreated {
-		return "", "", fmt.Errorf("create org expected 201, got %d payload=%v", status, payload)
+		return "", "", fmt.Errorf("create org expected 201, got %d payload=%v", status, cmdutil.SafePayload(payload))
 	}
 	org, err := cmdutil.RequireObject(payload, "organization")
 	if err != nil {
@@ -278,11 +278,11 @@ func (r *runner) createAgent(baseURL, humanID, email, orgID, handle string) (str
 		return "", "", "", err
 	}
 	if status != http.StatusCreated {
-		return "", "", "", fmt.Errorf("create bind token expected 201, got %d payload=%v", status, payload)
+		return "", "", "", fmt.Errorf("create bind token expected 201, got %d payload=%v", status, cmdutil.SafePayload(payload))
 	}
 	bindToken := cmdutil.AsString(payload, "bind_token")
 	if bindToken == "" {
-		return "", "", "", fmt.Errorf("bind_token missing from payload=%v", payload)
+		return "", "", "", fmt.Errorf("bind_token missing from payload=%v", cmdutil.SafePayload(payload))
 	}
 	status, payload, err = r.requestJSON(baseURL, http.MethodPost, "/v1/agents/bind", nil, map[string]any{
 		"bind_token": bindToken,
@@ -292,11 +292,11 @@ func (r *runner) createAgent(baseURL, humanID, email, orgID, handle string) (str
 		return "", "", "", err
 	}
 	if status != http.StatusCreated {
-		return "", "", "", fmt.Errorf("bind expected 201, got %d payload=%v", status, payload)
+		return "", "", "", fmt.Errorf("bind expected 201, got %d payload=%v", status, cmdutil.SafePayload(payload))
 	}
 	token := cmdutil.AsString(payload, "token")
 	if token == "" {
-		return "", "", "", fmt.Errorf("token missing from payload=%v", payload)
+		return "", "", "", fmt.Errorf("token missing from payload=%v", cmdutil.SafePayload(payload))
 	}
 	status, payload, err = r.requestJSON(baseURL, http.MethodPatch, "/v1/agents/me", map[string]string{
 		"Authorization": "Bearer " + token,
@@ -307,7 +307,7 @@ func (r *runner) createAgent(baseURL, humanID, email, orgID, handle string) (str
 		return "", "", "", err
 	}
 	if status != http.StatusOK {
-		return "", "", "", fmt.Errorf("finalize agent expected 200, got %d payload=%v", status, payload)
+		return "", "", "", fmt.Errorf("finalize agent expected 200, got %d payload=%v", status, cmdutil.SafePayload(payload))
 	}
 	agent, err := cmdutil.RequireObject(payload, "agent")
 	if err != nil {
@@ -327,7 +327,7 @@ func (r *runner) createPeer(baseURL, canonicalBaseURL, deliveryBaseURL string) e
 		return err
 	}
 	if status != http.StatusCreated {
-		return fmt.Errorf("create peer expected 201, got %d payload=%v", status, payload)
+		return fmt.Errorf("create peer expected 201, got %d payload=%v", status, cmdutil.SafePayload(payload))
 	}
 	return nil
 }
@@ -342,7 +342,7 @@ func (r *runner) createRemoteOrgTrust(baseURL, localOrgID, remoteOrgHandle strin
 		return err
 	}
 	if status != http.StatusCreated {
-		return fmt.Errorf("create remote org trust expected 201, got %d payload=%v", status, payload)
+		return fmt.Errorf("create remote org trust expected 201, got %d payload=%v", status, cmdutil.SafePayload(payload))
 	}
 	return nil
 }
@@ -357,7 +357,7 @@ func (r *runner) createRemoteAgentTrust(baseURL, localAgentUUID, remoteAgentURI 
 		return err
 	}
 	if status != http.StatusCreated {
-		return fmt.Errorf("create remote agent trust expected 201, got %d payload=%v", status, payload)
+		return fmt.Errorf("create remote agent trust expected 201, got %d payload=%v", status, cmdutil.SafePayload(payload))
 	}
 	return nil
 }

@@ -67,7 +67,7 @@ func ParseStorageStartupMode(raw string) (StorageStartupMode, error) {
 	case storageStartupModeDegradedRaw, storageStartupModeFallbackRaw, storageStartupModeFallbackAlt1, storageStartupModeFallbackAlt2:
 		return StorageStartupModeDegraded, nil
 	default:
-		return "", fmt.Errorf("unsupported %s %q (expected strict or degraded)", storageStartupModeEnv, raw)
+		return "", fmt.Errorf("unsupported %s value (expected strict or degraded)", storageStartupModeEnv)
 	}
 }
 
@@ -85,10 +85,10 @@ func configuredBackendsFromEnv() (string, string, error) {
 		queueBackend = defaultQueueBackend
 	}
 	if stateBackend != "memory" && stateBackend != "s3" {
-		return "", "", fmt.Errorf("unsupported state backend %q", stateBackend)
+		return "", "", fmt.Errorf("unsupported state backend")
 	}
 	if queueBackend != "memory" && queueBackend != "s3" {
-		return "", "", fmt.Errorf("unsupported queue backend %q", queueBackend)
+		return "", "", fmt.Errorf("unsupported queue backend")
 	}
 	return stateBackend, queueBackend, nil
 }
@@ -106,7 +106,7 @@ func NewStoresFromEnvWithMode(mode StorageStartupMode) (ControlPlaneStore, Messa
 		return nil, nil, DefaultStorageHealthStatus(), err
 	}
 	if mode != StorageStartupModeStrict && mode != StorageStartupModeDegraded {
-		return nil, nil, DefaultStorageHealthStatus(), fmt.Errorf("unsupported storage startup mode %q", mode)
+		return nil, nil, DefaultStorageHealthStatus(), fmt.Errorf("unsupported storage startup mode")
 	}
 
 	health := StorageHealthStatus{
@@ -134,7 +134,7 @@ func NewStoresFromEnvWithMode(mode StorageStartupMode) (ControlPlaneStore, Messa
 		}
 		if stateErr != nil {
 			health.State.Healthy = false
-			health.State.Error = stateErr.Error()
+			health.State.Error = SanitizeErrorWithDetail(stateErr)
 			if mode == StorageStartupModeStrict {
 				return nil, nil, health, stateErr
 			}
@@ -156,7 +156,7 @@ func NewStoresFromEnvWithMode(mode StorageStartupMode) (ControlPlaneStore, Messa
 		}
 		if queueErr != nil {
 			health.Queue.Healthy = false
-			health.Queue.Error = queueErr.Error()
+			health.Queue.Error = SanitizeErrorWithDetail(queueErr)
 			if mode == StorageStartupModeStrict {
 				return nil, nil, health, queueErr
 			}

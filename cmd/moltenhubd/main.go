@@ -56,7 +56,7 @@ func main() {
 	enableLocalCORS := envBool("MOLTENHUB_ENABLE_LOCAL_CORS", false)
 	allowedCORSOrigins, err := api.ParseCORSAllowedOrigins(os.Getenv("MOLTENHUB_CORS_ALLOWED_ORIGINS"))
 	if err != nil {
-		log.Fatalf("CORS allowed origins configuration error: %v", err)
+		log.Fatalf("CORS allowed origins configuration error")
 	}
 	bootstrap := newBootstrapHandler(
 		storageStartupMode,
@@ -99,14 +99,14 @@ func main() {
 
 	listener, err := net.Listen("tcp", addr)
 	if err != nil {
-		log.Fatalf("listen failed: %v", err)
+		log.Fatalf("listen failed")
 	}
 
 	go func() {
 		setStartupPhase("storage_hydrate")
 		controlStore, queueStore, storageHealth, storeErr := store.NewStoresFromEnvWithMode(storageStartupMode)
 		if storeErr != nil {
-			log.Fatalf("storage backend configuration error: %v", storeErr)
+			log.Fatalf("storage backend configuration error: %s", store.SanitizeErrorWithDetail(storeErr))
 		}
 		bootstrap.SetStartupStorageHealth(storageHealth)
 		if storageHealth.OverallStatus() != "ok" {
@@ -114,9 +114,9 @@ func main() {
 				"storage backend degraded: mode=%s state_backend=%s state_error=%q queue_backend=%s queue_error=%q",
 				storageHealth.StartupMode,
 				storageHealth.State.Backend,
-				storageHealth.State.Error,
+				store.SanitizeErrorTextWithDetail(storageHealth.State.Error),
 				storageHealth.Queue.Backend,
-				storageHealth.Queue.Error,
+				store.SanitizeErrorTextWithDetail(storageHealth.Queue.Error),
 			)
 		}
 
@@ -167,11 +167,11 @@ func main() {
 		log.Printf("moltenhub runtime ready total_ms=%d phase_durations_ms=%v", totalMS, phaseDurationsMS)
 	}()
 
-	log.Printf("moltenhub listening on %s", listener.Addr().String())
+	log.Printf("moltenhub listening")
 	log.Printf("local CORS enabled: %t", enableLocalCORS)
 	log.Printf("configured CORS origins: %d", len(allowedCORSOrigins))
 	if err := server.Serve(listener); err != nil && err != http.ErrServerClosed {
-		log.Fatalf("server failed: %v", err)
+		log.Fatalf("server failed")
 	}
 }
 

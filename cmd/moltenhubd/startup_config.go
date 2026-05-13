@@ -52,15 +52,39 @@ func diagnosticLogValue(name, value string) string {
 		return trimmed
 	}
 
-	sensitiveHints := []string{"SECRET", "TOKEN", "KEY", "PASSWORD", "PRIVATE", "BEARER"}
 	upperName := strings.ToUpper(strings.TrimSpace(name))
+	visibleConfig := map[string]struct{}{
+		"HUMAN_AUTH_PROVIDER":                        {},
+		"MOLTENHUB_STORAGE_STARTUP_MODE":             {},
+		"MOLTENHUB_STATE_BACKEND":                    {},
+		"MOLTENHUB_QUEUE_BACKEND":                    {},
+		"MOLTENHUB_UI_DEV_MODE":                      {},
+		"MOLTENHUB_ENABLE_LOCAL_CORS":                {},
+		"MOLTENHUB_HEADLESS_MODE":                    {},
+		"SUPER_ADMIN_REVIEW_MODE":                    {},
+		"BIND_TOKEN_TTL_MINUTES":                     {},
+		"MOLTENHUB_MAX_METADATA_BYTES":               {},
+		"MOLTENHUB_STATE_S3_REGION":                  {},
+		"MOLTENHUB_QUEUE_S3_REGION":                  {},
+		"MOLTENHUB_STATE_S3_PATH_STYLE":              {},
+		"MOLTENHUB_QUEUE_S3_PATH_STYLE":              {},
+		"MOLTENHUB_S3_HYDRATION_TIMEOUT_SEC":         {},
+		"MOLTENHUB_S3_HYDRATION_LIST_CONCURRENCY":    {},
+		"MOLTENHUB_S3_HYDRATION_GET_CONCURRENCY":     {},
+		"MOLTENHUB_S3_PRESENCE_PERSIST_INTERVAL_SEC": {},
+	}
+	if _, ok := visibleConfig[upperName]; ok {
+		return trimmed
+	}
+
+	sensitiveHints := []string{"SECRET", "TOKEN", "KEY", "PASSWORD", "PRIVATE", "BEARER", "EMAIL", "ADDR", "URL", "ORIGIN", "HOST", "BUCKET", "PREFIX"}
 	for _, hint := range sensitiveHints {
 		if strings.Contains(upperName, hint) {
 			return "<redacted>"
 		}
 	}
 
-	return trimmed
+	return "<redacted>"
 }
 
 func collectLaunchDiagnostics(lookup func(string) (string, bool)) ([]launchDiagnostic, error) {

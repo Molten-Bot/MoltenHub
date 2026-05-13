@@ -205,10 +205,10 @@ func (r runner) probeOnce(senderBaseURL, senderToken, receiverBaseURL, receiverT
 	}
 	publishMS := time.Since(start).Milliseconds()
 	if pubStatus != http.StatusAccepted {
-		return latencySample{}, fmt.Errorf("publish expected 202 got %d body=%s", pubStatus, pubRaw)
+		return latencySample{}, fmt.Errorf("publish expected 202 got %d body=%s", pubStatus, cmdutil.SafeRaw(pubRaw))
 	}
 	if runtimeStatus(pubPayload) == "dropped" {
-		return latencySample{}, fmt.Errorf("publish dropped reason=%q body=%s", cmdutil.AsString(pubPayload, "reason"), pubRaw)
+		return latencySample{}, fmt.Errorf("publish dropped reason=%q body=%s", cmdutil.AsString(pubPayload, "reason"), cmdutil.SafeRaw(pubRaw))
 	}
 
 	pullPath := fmt.Sprintf("/messages/pull?timeout_ms=%d", r.pullTimeoutMS)
@@ -220,14 +220,14 @@ func (r runner) probeOnce(senderBaseURL, senderToken, receiverBaseURL, receiverT
 	}
 	endToEndMS := time.Since(start).Milliseconds()
 	if pullStatus != http.StatusOK {
-		return latencySample{}, fmt.Errorf("pull expected 200 got %d body=%s", pullStatus, pullRaw)
+		return latencySample{}, fmt.Errorf("pull expected 200 got %d body=%s", pullStatus, cmdutil.SafeRaw(pullRaw))
 	}
 	message, err := cmdutil.RequireObject(pullPayload, "message")
 	if err != nil {
 		return latencySample{}, err
 	}
 	if got := cmdutil.AsString(message, "payload"); got != payload {
-		return latencySample{}, fmt.Errorf("payload mismatch got=%q want=%q", got, payload)
+		return latencySample{}, fmt.Errorf("payload mismatch got=<redacted> want=<redacted>")
 	}
 	delivery, err := cmdutil.RequireObject(pullPayload, "delivery")
 	if err != nil {
@@ -235,7 +235,7 @@ func (r runner) probeOnce(senderBaseURL, senderToken, receiverBaseURL, receiverT
 	}
 	deliveryID := cmdutil.AsString(delivery, "delivery_id")
 	if deliveryID == "" {
-		return latencySample{}, fmt.Errorf("delivery_id missing in pull payload=%v", pullPayload)
+		return latencySample{}, fmt.Errorf("delivery_id missing in pull payload=%v", cmdutil.SafePayload(pullPayload))
 	}
 
 	ackStart := time.Now()
@@ -249,7 +249,7 @@ func (r runner) probeOnce(senderBaseURL, senderToken, receiverBaseURL, receiverT
 	}
 	ackMS := time.Since(ackStart).Milliseconds()
 	if ackStatus != http.StatusOK {
-		return latencySample{}, fmt.Errorf("ack expected 200 got %d body=%s", ackStatus, ackRaw)
+		return latencySample{}, fmt.Errorf("ack expected 200 got %d body=%s", ackStatus, cmdutil.SafeRaw(ackRaw))
 	}
 
 	return latencySample{

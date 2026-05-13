@@ -147,6 +147,9 @@ func TestDiagnosticLogValueRedactsSensitiveValues(t *testing.T) {
 	if got := diagnosticLogValue("SUPABASE_ANON_KEY", "secret-value"); got != "<redacted>" {
 		t.Fatalf("expected sensitive config to be redacted, got %q", got)
 	}
+	if got := diagnosticLogValue("DEV_LOGIN_HUMAN_EMAIL", "alice@example.com"); got != "<redacted>" {
+		t.Fatalf("expected PII config to be redacted, got %q", got)
+	}
 	if got := diagnosticLogValue("HUMAN_AUTH_PROVIDER", "supabase"); got != "supabase" {
 		t.Fatalf("expected non-sensitive config to remain visible, got %q", got)
 	}
