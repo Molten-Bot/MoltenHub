@@ -66,7 +66,7 @@ func parseAdvertisedSkills(metadata map[string]any) []agentSkillSummary {
 	skillsByName := map[string]agentSkillSummary{}
 	for _, item := range items {
 		rawName, _ := item["name"].(string)
-		name, valid := normalizeSkillName(rawName)
+		name, valid := model.NormalizeAgentSkillName(rawName)
 		if !valid {
 			continue
 		}
@@ -155,7 +155,7 @@ func parseSkillParameterList(raw any) []agentSkillParameter {
 	}
 	out := make([]agentSkillParameter, 0, len(items))
 	for _, item := range items {
-		name, ok := normalizeSkillParameterName(asStringValue(item["name"]))
+		name, ok := model.NormalizeAgentSkillParameterName(asStringValue(item["name"]))
 		if !ok {
 			continue
 		}
@@ -206,11 +206,11 @@ func validateSkillActivationRequest(receiver model.Agent, contentType, payload s
 		return nil
 	}
 
-	skillName, _ := normalizeSkillName(asStringValue(envelope["skill_name"]))
+	skillName, _ := model.NormalizeAgentSkillName(asStringValue(envelope["skill_name"]))
 	skillsByName := parseAdvertisedSkillsByName(receiver.Metadata)
 	skill, ok := skillsByName[skillName]
 	if !ok {
-		return skillValidationRuntimeError([]string{"receiver does not advertise skill " + strconvQuote(skillName)})
+		return skillValidationRuntimeError([]string{"receiver does not advertise skill " + model.QuoteString(skillName)})
 	}
 	if skill.Parameters == nil {
 		return nil
@@ -242,7 +242,7 @@ func validateSkillActivationPayload(skill agentSkillSummary, rawPayload any, pay
 			if len(params.Required) == 0 && rawPayload == nil {
 				return nil
 			}
-			return []string{"skill " + strconvQuote(skill.Name) + " requires a JSON object payload"}
+			return []string{"skill " + model.QuoteString(skill.Name) + " requires a JSON object payload"}
 		}
 		provided := map[string]string{}
 		for key, value := range payload {
@@ -256,7 +256,7 @@ func validateSkillActivationPayload(skill agentSkillSummary, rawPayload any, pay
 		}
 		errors := validateParameterKeysAndSecrets(provided, params, marshalForSecretScan(payload))
 		if payloadFormat != "" && payloadFormat != "json" {
-			errors = append(errors, "payload_format must be json for skill "+strconvQuote(skill.Name))
+			errors = append(errors, "payload_format must be json for skill "+model.QuoteString(skill.Name))
 		}
 		return sortValidationErrors(errors)
 	case "markdown":
@@ -265,15 +265,15 @@ func validateSkillActivationPayload(skill agentSkillSummary, rawPayload any, pay
 			if len(params.Required) == 0 && rawPayload == nil {
 				return nil
 			}
-			return []string{"skill " + strconvQuote(skill.Name) + " requires a markdown string payload"}
+			return []string{"skill " + model.QuoteString(skill.Name) + " requires a markdown string payload"}
 		}
 		provided := parseMarkdownParameterPayload(body)
 		errors := validateParameterKeysAndSecrets(provided, params, body)
 		if len(provided) == 0 && (len(params.Required) > 0 || len(params.Optional) > 0) {
-			errors = append(errors, "markdown payload must use `parameter: value` lines for skill "+strconvQuote(skill.Name))
+			errors = append(errors, "markdown payload must use `parameter: value` lines for skill "+model.QuoteString(skill.Name))
 		}
 		if payloadFormat != "" && payloadFormat != "markdown" {
-			errors = append(errors, "payload_format must be markdown for skill "+strconvQuote(skill.Name))
+			errors = append(errors, "payload_format must be markdown for skill "+model.QuoteString(skill.Name))
 		}
 		return sortValidationErrors(errors)
 	default:
@@ -291,7 +291,7 @@ func validateParameterKeysAndSecrets(provided map[string]string, params *agentSk
 	for _, item := range params.Optional {
 		allowed[item.Name] = struct{}{}
 	}
-	errors := validateSkillParameterPayloadKeys(provided, required, allowed)
+	errors := model.ValidateSkillParameterPayloadKeys(provided, required, allowed)
 	if strings.TrimSpace(rawText) != "" && containsLikelySecretPayload(rawText) {
 		errors = append(errors, "payload contains forbidden secret-like content")
 	}
@@ -310,7 +310,7 @@ func parseMarkdownParameterPayload(markdown string) map[string]string {
 		if len(parts) != 2 {
 			continue
 		}
-		name, ok := normalizeSkillParameterName(strings.Trim(strings.TrimSpace(parts[0]), "`"))
+		name, ok := model.NormalizeAgentSkillParameterName(strings.Trim(strings.TrimSpace(parts[0]), "`"))
 		if !ok {
 			continue
 		}
@@ -356,21 +356,6 @@ func sortValidationErrors(errors []string) []string {
 	return errors
 }
 
-func validateSkillParameterPayloadKeys(provided map[string]string, required []string, allowed map[string]struct{}) []string {
-	errors := []string{}
-	for _, name := range required {
-		if strings.TrimSpace(provided[name]) == "" {
-			errors = append(errors, "missing required parameter "+strconvQuote(name))
-		}
-	}
-	for name := range provided {
-		if _, ok := allowed[name]; !ok {
-			errors = append(errors, "unknown parameter "+strconvQuote(name))
-		}
-	}
-	return errors
-}
-
 func skillValidationRuntimeError(details []string) *runtimeHandlerError {
 	return &runtimeHandlerError{
 		status:  400,
@@ -381,45 +366,6 @@ func skillValidationRuntimeError(details []string) *runtimeHandlerError {
 			"validation_errors": details,
 		},
 	}
-}
-
-func strconvQuote(value string) string {
-	body, _ := json.Marshal(value)
-	return string(body)
-}
-
-func normalizeSkillName(raw string) (string, bool) {
-	normalized := strings.ToLower(strings.TrimSpace(raw))
-	if len(normalized) < 2 || len(normalized) > 64 {
-		return "", false
-	}
-	for _, ch := range normalized {
-		switch {
-		case ch >= 'a' && ch <= 'z':
-		case ch >= '0' && ch <= '9':
-		case ch == '-', ch == '_', ch == '.':
-		default:
-			return "", false
-		}
-	}
-	return normalized, true
-}
-
-func normalizeSkillParameterName(raw string) (string, bool) {
-	normalized := strings.ToLower(strings.TrimSpace(raw))
-	if len(normalized) < 1 || len(normalized) > 64 {
-		return "", false
-	}
-	for _, ch := range normalized {
-		switch {
-		case ch >= 'a' && ch <= 'z':
-		case ch >= '0' && ch <= '9':
-		case ch == '-', ch == '_', ch == '.':
-		default:
-			return "", false
-		}
-	}
-	return normalized, true
 }
 
 func asStringValue(value any) string {

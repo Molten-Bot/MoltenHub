@@ -2337,7 +2337,7 @@ func normalizeAndValidateAgentSkillsMetadata(metadata map[string]any, key string
 	entriesByName := map[string]map[string]any{}
 	for _, entry := range entries {
 		rawName, _ := entry["name"].(string)
-		name, ok := normalizeAgentSkillName(rawName)
+		name, ok := model.NormalizeAgentSkillName(rawName)
 		if !ok {
 			return nil, true, ErrInvalidAgentSkills
 		}
@@ -2376,23 +2376,6 @@ func normalizeAndValidateAgentSkillsMetadata(metadata map[string]any, key string
 		normalized = append(normalized, entriesByName[name])
 	}
 	return normalized, true, nil
-}
-
-func normalizeAgentSkillName(raw string) (string, bool) {
-	normalized := strings.ToLower(strings.TrimSpace(raw))
-	if len(normalized) < 2 || len(normalized) > 64 {
-		return "", false
-	}
-	for _, ch := range normalized {
-		switch {
-		case ch >= 'a' && ch <= 'z':
-		case ch >= '0' && ch <= '9':
-		case ch == '-', ch == '_', ch == '.':
-		default:
-			return "", false
-		}
-	}
-	return normalized, true
 }
 
 func agentTypeFromMetadata(metadata map[string]any) string {

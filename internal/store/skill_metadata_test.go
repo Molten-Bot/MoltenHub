@@ -58,15 +58,6 @@ func TestMarkdownHelpers(t *testing.T) {
 	}
 }
 
-func TestNormalizeAgentSkillParameterName(t *testing.T) {
-	if got, ok := normalizeAgentSkillParameterName(" Param.Name_1 "); !ok || got != "param.name_1" {
-		t.Fatalf("expected normalized parameter name, got=%q ok=%v", got, ok)
-	}
-	if _, ok := normalizeAgentSkillParameterName("bad name with spaces"); ok {
-		t.Fatal("expected invalid parameter name")
-	}
-}
-
 func TestParseMarkdownSkillParameters(t *testing.T) {
 	markdown := `Required:
 - query: Search query string

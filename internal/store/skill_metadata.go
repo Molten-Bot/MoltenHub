@@ -1,10 +1,11 @@
 package store
 
 import (
-	"fmt"
 	"regexp"
 	"sort"
 	"strings"
+
+	"moltenhub/internal/model"
 )
 
 var markdownSkillParameterLinePattern = regexp.MustCompile("^-\\s*(?:`([^`]+)`|\\*\\*([^*]+)\\*\\*|([a-zA-Z0-9_.-]+))\\s*:\\s*(.+)$")
@@ -143,17 +144,7 @@ func containsLikelySecret(value string) bool {
 }
 
 func validateSkillParameterPayloadKeys(provided map[string]string, required []string, allowed map[string]struct{}) []string {
-	errors := []string{}
-	for _, name := range required {
-		if strings.TrimSpace(provided[name]) == "" {
-			errors = append(errors, fmt.Sprintf("missing required parameter %q", name))
-		}
-	}
-	for name := range provided {
-		if _, ok := allowed[name]; !ok {
-			errors = append(errors, fmt.Sprintf("unknown parameter %q", name))
-		}
-	}
+	errors := model.ValidateSkillParameterPayloadKeys(provided, required, allowed)
 	sort.Strings(errors)
 	return errors
 }
@@ -200,7 +191,7 @@ func parseMarkdownSkillParameters(markdown string) ([]map[string]any, []map[stri
 			return nil, nil, ErrInvalidAgentSkills
 		}
 		name := firstNonEmpty(match[1], match[2], match[3])
-		normalizedName, ok := normalizeAgentSkillParameterName(name)
+		normalizedName, ok := model.NormalizeAgentSkillParameterName(name)
 		if !ok {
 			return nil, nil, ErrInvalidAgentSkills
 		}
@@ -299,7 +290,7 @@ func normalizeSkillParameterList(raw any) ([]map[string]any, error) {
 		if !ok {
 			return nil, ErrInvalidAgentSkills
 		}
-		name, ok := normalizeAgentSkillParameterName(stringValue(entry["name"]))
+		name, ok := model.NormalizeAgentSkillParameterName(stringValue(entry["name"]))
 		if !ok {
 			return nil, ErrInvalidAgentSkills
 		}
@@ -347,21 +338,4 @@ func firstNonEmpty(values ...string) string {
 		}
 	}
 	return ""
-}
-
-func normalizeAgentSkillParameterName(raw string) (string, bool) {
-	normalized := strings.ToLower(strings.TrimSpace(raw))
-	if len(normalized) < 1 || len(normalized) > 64 {
-		return "", false
-	}
-	for _, ch := range normalized {
-		switch {
-		case ch >= 'a' && ch <= 'z':
-		case ch >= '0' && ch <= '9':
-		case ch == '-', ch == '_', ch == '.':
-		default:
-			return "", false
-		}
-	}
-	return normalized, true
 }
