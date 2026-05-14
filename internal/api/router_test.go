@@ -29,6 +29,27 @@ func newTestRouter() http.Handler {
 	return NewRouter(h)
 }
 
+type testClock struct {
+	mu  sync.Mutex
+	now time.Time
+}
+
+func newTestClock(now time.Time) *testClock {
+	return &testClock{now: now}
+}
+
+func (c *testClock) Now() time.Time {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.now
+}
+
+func (c *testClock) Add(d time.Duration) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.now = c.now.Add(d)
+}
+
 func TestHandlerWiringWithInterfaceStores(t *testing.T) {
 	mem := store.NewMemoryStore()
 	var control store.ControlPlaneStore = mem
@@ -1539,8 +1560,8 @@ func TestOrgInvitesForHumanOmitsExpiredInvites(t *testing.T) {
 	st := store.NewMemoryStore()
 	waiters := longpoll.NewWaiters()
 	h := NewHandler(st, st, waiters, auth.NewDevHumanAuthProvider(), "https://hub.example.com", "", "", "", "", "example.com", true, 15*time.Minute, false)
-	now := time.Date(2026, 3, 3, 10, 0, 0, 0, time.UTC)
-	h.now = func() time.Time { return now }
+	clock := newTestClock(time.Date(2026, 3, 3, 10, 0, 0, 0, time.UTC))
+	h.now = clock.Now
 	router := NewRouter(h)
 
 	orgID := createOrg(t, router, "alice", "alice@a.test", "Org Invite Expiry")
@@ -1553,7 +1574,7 @@ func TestOrgInvitesForHumanOmitsExpiredInvites(t *testing.T) {
 		t.Fatalf("create invite failed: %d %s", createResp.Code, createResp.Body.String())
 	}
 
-	now = now.Add(48 * time.Hour)
+	clock.Add(48 * time.Hour)
 	listResp := doJSONRequest(t, router, http.MethodGet, "/v1/org-invites", nil, humanHeaders("bob", "bob@b.test"))
 	if listResp.Code != http.StatusOK {
 		t.Fatalf("list org invites failed: %d %s", listResp.Code, listResp.Body.String())
@@ -2839,8 +2860,8 @@ func TestExpiredLeaseRequeuesOnNextPull(t *testing.T) {
 	mem := store.NewMemoryStore()
 	waiters := longpoll.NewWaiters()
 	h := NewHandler(mem, mem, waiters, auth.NewDevHumanAuthProvider(), "https://hub.example.com", "", "", "", "", "example.com", true, 15*time.Minute, false)
-	now := time.Date(2026, 3, 10, 12, 0, 0, 0, time.UTC)
-	h.now = func() time.Time { return now }
+	clock := newTestClock(time.Date(2026, 3, 10, 12, 0, 0, 0, time.UTC))
+	h.now = clock.Now
 	router := NewRouter(h)
 
 	_, _, tokenA, tokenB, _, _, _, agentUUIDB := setupTrustedAgents(t, router)
@@ -2856,7 +2877,7 @@ func TestExpiredLeaseRequeuesOnNextPull(t *testing.T) {
 		t.Fatalf("expected first pull 200, got %d %s", firstPull.Code, firstPull.Body.String())
 	}
 
-	now = now.Add(defaultMessageLease + time.Second)
+	clock.Add(defaultMessageLease + time.Second)
 
 	secondPull := pull(t, router, tokenB, 0)
 	if secondPull.Code != http.StatusOK {
@@ -3189,8 +3210,8 @@ func TestBindTokenExpires(t *testing.T) {
 	st := store.NewMemoryStore()
 	waiters := longpoll.NewWaiters()
 	h := NewHandler(st, st, waiters, auth.NewDevHumanAuthProvider(), "https://hub.example.com", "", "", "", "", "example.com", true, 15*time.Minute, false)
-	now := time.Date(2026, 3, 3, 10, 0, 0, 0, time.UTC)
-	h.now = func() time.Time { return now }
+	clock := newTestClock(time.Date(2026, 3, 3, 10, 0, 0, 0, time.UTC))
+	h.now = clock.Now
 	router := NewRouter(h)
 
 	orgID := createOrg(t, router, "alice", "alice@a.test", "Org A")
@@ -3204,7 +3225,7 @@ func TestBindTokenExpires(t *testing.T) {
 		t.Fatalf("bind token missing")
 	}
 
-	now = now.Add(16 * time.Minute)
+	clock.Add(16 * time.Minute)
 	redeemResp := doJSONRequest(t, router, http.MethodPost, "/v1/agents/bind", map[string]string{
 		"hub_url":    "https://hub.qa.example.com",
 		"bind_token": bindToken,
