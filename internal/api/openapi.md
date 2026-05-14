@@ -2337,6 +2337,8 @@ paths:
         On successful websocket connect/disconnect, server updates `metadata.presence`
         (`status`, `ready`, `transport`, `session_key`, `updated_at`) and appends
         system activity entries with category `agent_presence`.
+        Server keepalive pings are sent periodically; clients must keep reading websocket
+        frames and reply with pong frames so idle sessions are not closed as stale.
       security:
         - agentAuth: []
       parameters:

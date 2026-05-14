@@ -624,6 +624,132 @@ func TestRuntimeWebSocketUpgradeWithGzipAcceptEncoding(t *testing.T) {
 	}
 }
 
+func TestRuntimeWebSocketKeepaliveSendsPing(t *testing.T) {
+	withRuntimeWebSocketKeepaliveForTest(t, 25*time.Millisecond, 500*time.Millisecond)
+
+	router := newTestRouter()
+	_, _, _, tokenB, _, _, _, _ := setupTrustedAgents(t, router)
+
+	server := httptest.NewServer(router)
+	defer server.Close()
+
+	wsURL := strings.Replace(server.URL, "http://", "ws://", 1) + "/v1/runtime/messages/ws?session_key=keepalive-ping"
+	headers := http.Header{}
+	headers.Set("Authorization", "Bearer "+tokenB)
+
+	conn, _, err := websocket.DefaultDialer.Dial(wsURL, headers)
+	if err != nil {
+		t.Fatalf("expected websocket dial to succeed, got err=%v", err)
+	}
+	defer conn.Close()
+
+	ready := readWSMessage(t, conn, 5*time.Second)
+	if got := readStringPath(ready, "type"); got != "session_ready" {
+		t.Fatalf("expected initial ws message type=session_ready, got %q payload=%v", got, ready)
+	}
+
+	pingSeen := make(chan struct{}, 1)
+	conn.SetPingHandler(func(appData string) error {
+		select {
+		case pingSeen <- struct{}{}:
+		default:
+		}
+		return conn.WriteControl(websocket.PongMessage, []byte(appData), time.Now().Add(time.Second))
+	})
+	if err := conn.SetReadDeadline(time.Time{}); err != nil {
+		t.Fatalf("failed to clear read deadline: %v", err)
+	}
+
+	readerDone := make(chan error, 1)
+	go func() {
+		for {
+			if _, _, err := conn.NextReader(); err != nil {
+				readerDone <- err
+				return
+			}
+		}
+	}()
+
+	select {
+	case <-pingSeen:
+	case err := <-readerDone:
+		t.Fatalf("websocket closed before keepalive ping was observed: %v", err)
+	case <-time.After(time.Second):
+		t.Fatalf("timed out waiting for server websocket keepalive ping")
+	}
+
+	_ = conn.Close()
+	select {
+	case <-readerDone:
+	case <-time.After(time.Second):
+		t.Fatalf("reader did not exit after websocket close")
+	}
+}
+
+func TestRuntimeWebSocketKeepaliveClosesWithoutPong(t *testing.T) {
+	withRuntimeWebSocketKeepaliveForTest(t, 25*time.Millisecond, 200*time.Millisecond)
+
+	router := newTestRouter()
+	_, _, _, tokenB, _, _, _, _ := setupTrustedAgents(t, router)
+
+	server := httptest.NewServer(router)
+	defer server.Close()
+
+	wsURL := strings.Replace(server.URL, "http://", "ws://", 1) + "/v1/runtime/messages/ws?session_key=keepalive-timeout"
+	headers := http.Header{}
+	headers.Set("Authorization", "Bearer "+tokenB)
+
+	conn, _, err := websocket.DefaultDialer.Dial(wsURL, headers)
+	if err != nil {
+		t.Fatalf("expected websocket dial to succeed, got err=%v", err)
+	}
+	defer conn.Close()
+
+	ready := readWSMessage(t, conn, 5*time.Second)
+	if got := readStringPath(ready, "type"); got != "session_ready" {
+		t.Fatalf("expected initial ws message type=session_ready, got %q payload=%v", got, ready)
+	}
+
+	pingSeen := make(chan struct{}, 1)
+	conn.SetPingHandler(func(string) error {
+		select {
+		case pingSeen <- struct{}{}:
+		default:
+		}
+		return nil
+	})
+	if err := conn.SetReadDeadline(time.Time{}); err != nil {
+		t.Fatalf("failed to clear read deadline: %v", err)
+	}
+
+	readerDone := make(chan error, 1)
+	go func() {
+		for {
+			if _, _, err := conn.NextReader(); err != nil {
+				readerDone <- err
+				return
+			}
+		}
+	}()
+
+	select {
+	case <-pingSeen:
+	case err := <-readerDone:
+		t.Fatalf("websocket closed before keepalive ping was observed: %v", err)
+	case <-time.After(time.Second):
+		t.Fatalf("timed out waiting for server websocket keepalive ping")
+	}
+
+	select {
+	case err := <-readerDone:
+		if err == nil {
+			t.Fatalf("expected websocket read error after missing pong")
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatalf("timed out waiting for websocket close after missing pong")
+	}
+}
+
 func TestRuntimeWebSocketActivityCommand(t *testing.T) {
 	router := newTestRouter()
 	_, _, tokenA, _, _, _, _, _ := setupTrustedAgents(t, router)
@@ -1201,6 +1327,18 @@ func requireNoOpenClawMessageAlias(t *testing.T, result map[string]any, payload 
 	if _, ok := result["openclaw_message"]; ok {
 		t.Fatalf("did not expect retired openclaw_message alias payload=%v", payload)
 	}
+}
+
+func withRuntimeWebSocketKeepaliveForTest(t *testing.T, pingInterval, pongWait time.Duration) {
+	t.Helper()
+	oldPingInterval := runtimeEnvelopeWebSocketPingInterval
+	oldPongWait := runtimeEnvelopeWebSocketPongWait
+	runtimeEnvelopeWebSocketPingInterval = pingInterval
+	runtimeEnvelopeWebSocketPongWait = pongWait
+	t.Cleanup(func() {
+		runtimeEnvelopeWebSocketPingInterval = oldPingInterval
+		runtimeEnvelopeWebSocketPongWait = oldPongWait
+	})
 }
 
 func readWSMessage(t *testing.T, conn *websocket.Conn, timeout time.Duration) map[string]any {

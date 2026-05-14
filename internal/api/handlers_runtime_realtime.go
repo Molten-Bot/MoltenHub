@@ -23,6 +23,12 @@ const (
 	runtimePresenceStatusOnline                = "online"
 	runtimePresenceStatusOffline               = "offline"
 	runtimePresenceOfflineAfter                = 2 * time.Hour
+	runtimeEnvelopeWebSocketWriteWait          = 10 * time.Second
+)
+
+var (
+	runtimeEnvelopeWebSocketPongWait     = 75 * time.Second
+	runtimeEnvelopeWebSocketPingInterval = 25 * time.Second
 )
 
 var (
@@ -139,10 +145,11 @@ func (h *Handler) handleRuntimeEnvelopeWebSocket(w http.ResponseWriter, r *http.
 		return
 	}
 	defer conn.Close()
+	configureRuntimeEnvelopeWebSocketKeepalive(conn)
 
 	sessionKey := normalizeRuntimeSessionKey(r.URL.Query().Get("session_key"))
 	if _, err := h.setRuntimeWebSocketPresence(agentUUID, sessionKey, runtimePresenceStatusOnline, ""); err != nil {
-		_ = conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
+		_ = conn.SetWriteDeadline(time.Now().Add(runtimeEnvelopeWebSocketWriteWait))
 		_ = conn.WriteJSON(runtimeEnvelopeWSErrorFromRuntime("", runtimeHandlerErrorForPresenceUpdate(err)))
 		return
 	}
@@ -158,12 +165,13 @@ func (h *Handler) handleRuntimeEnvelopeWebSocket(w http.ResponseWriter, r *http.
 	writeEvent := func(event map[string]any) bool {
 		writeMu.Lock()
 		defer writeMu.Unlock()
-		_ = conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
+		_ = conn.SetWriteDeadline(time.Now().Add(runtimeEnvelopeWebSocketWriteWait))
 		if err := conn.WriteJSON(event); err != nil {
 			return false
 		}
 		return true
 	}
+	keepaliveDone := startRuntimeEnvelopeWebSocketKeepalive(ctx, conn, &writeMu, cancel)
 
 	h.recordRuntimeEnvelopeAdapterUsage(agentUUID, adapterName, "ws_connect", map[string]any{"session_key": sessionKey})
 
@@ -246,6 +254,7 @@ func (h *Handler) handleRuntimeEnvelopeWebSocket(w http.ResponseWriter, r *http.
 
 	cancel()
 	<-deliveryDone
+	<-keepaliveDone
 }
 
 func (h *Handler) handleRuntimeEnvelopeWSCommand(
@@ -506,6 +515,53 @@ func normalizeRuntimeSessionKey(raw string) string {
 		}
 	}
 	return candidate
+}
+
+func configureRuntimeEnvelopeWebSocketKeepalive(conn *websocket.Conn) {
+	if conn == nil || runtimeEnvelopeWebSocketPongWait <= 0 {
+		return
+	}
+	_ = conn.SetReadDeadline(time.Now().Add(runtimeEnvelopeWebSocketPongWait))
+	conn.SetPongHandler(func(string) error {
+		return conn.SetReadDeadline(time.Now().Add(runtimeEnvelopeWebSocketPongWait))
+	})
+}
+
+func startRuntimeEnvelopeWebSocketKeepalive(
+	ctx context.Context,
+	conn *websocket.Conn,
+	writeMu *sync.Mutex,
+	cancel context.CancelFunc,
+) <-chan struct{} {
+	done := make(chan struct{})
+	if conn == nil || writeMu == nil || runtimeEnvelopeWebSocketPingInterval <= 0 {
+		close(done)
+		return done
+	}
+
+	ticker := time.NewTicker(runtimeEnvelopeWebSocketPingInterval)
+	go func() {
+		defer close(done)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				writeMu.Lock()
+				err := conn.WriteControl(websocket.PingMessage, nil, time.Now().Add(runtimeEnvelopeWebSocketWriteWait))
+				writeMu.Unlock()
+				if err != nil {
+					if cancel != nil {
+						cancel()
+					}
+					_ = conn.Close()
+					return
+				}
+			}
+		}
+	}()
+	return done
 }
 
 func runtimeEnvelopeMessageIDFromResult(result map[string]any) string {
