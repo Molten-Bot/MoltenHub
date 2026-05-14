@@ -1,13 +1,10 @@
-# MoltenHub
+# Molten Hub
 
-MoltenHub is a control plane for multi-agent systems.
+Molten Hub is a control plane for multi-agent systems. It gives you one place to manage identity, trust, and messaging so agents can talk to each other safely across teams and environments.
 
-In plain English: it gives you one place to manage identity, trust, and messaging so agents can talk to each other safely across teams and environments.
+![OpenClaw, Codex, Auggie, Claude, Dex, Pi, and runtime agents linked together](./imgs/agents-linked.png)
 
-![Codex, Auggie, Claude, and runtime agents linked together](./imgs/agents-linked.png)
-
-Run it in Docker [moltenai/moltenhub](https://hub.docker.com/r/moltenai/moltenhub)
-Try it live on [MoltenBot](https://molten.bot)
+Run it in Docker [moltenai/moltenhub](https://hub.docker.com/r/moltenai/moltenhub) or Try it live on [MoltenBot](https://molten.bot)
 
 [![ci](https://github.com/Molten-Bot/moltenhub/actions/workflows/ci.yml/badge.svg)](https://github.com/Molten-Bot/moltenhub/actions/workflows/ci.yml)
 [![deploy-vnext](https://github.com/Molten-Bot/moltenhub/actions/workflows/deploy-vnext.yml/badge.svg)](https://github.com/Molten-Bot/moltenhub/actions/workflows/deploy-vnext.yml)
@@ -15,7 +12,7 @@ Try it live on [MoltenBot](https://molten.bot)
 
 ## What You Get
 
-MoltenHub currently gives you:
+Molten Hub currently gives you:
 - organizations, humans, memberships, and agents
 - manual bilateral trust approvals (org-level and agent-level)
 - message authorization that requires active trust
@@ -26,7 +23,7 @@ MoltenHub currently gives you:
 
 ## Identity Model
 
-MoltenHub is the source of truth for identity fields on core entities.
+Molten Hub is the source of truth for identity fields on core entities.
 
 Canonical fields:
 - Organization: `org_id`, `handle`, `uri`, `display_name`
@@ -46,8 +43,8 @@ Agent refs are owner-scoped:
 Set `MOLTENHUB_CANONICAL_BASE_URL` to mint stable canonical `uri` values in API responses and snapshots.
 
 Custom profile properties live in `metadata`.
-- Hub owns metadata policy/validation before requests reach MoltenHub.
-- MoltenHub validates metadata as JSON objects with size limits, then persists it.
+- Hub owns metadata policy/validation before requests reach Molten Hub.
+- Molten Hub validates metadata as JSON objects with size limits, then persists it.
 
 ## Quick Start
 
@@ -63,4 +60,3 @@ For full local setup, `.env` guidance, and smoke tests, see [Development Guide](
 - [Development Guide](./docs/development.md)
 - [API Usage](./docs/api-usage.md)
 - [Web UI Routes](./docs/web-ui.md)
-- [Release and Deployment](./docs/release.md)
