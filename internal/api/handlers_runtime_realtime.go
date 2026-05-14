@@ -518,12 +518,13 @@ func normalizeRuntimeSessionKey(raw string) string {
 }
 
 func configureRuntimeEnvelopeWebSocketKeepalive(conn *websocket.Conn) {
-	if conn == nil || runtimeEnvelopeWebSocketPongWait <= 0 {
+	pongWait := runtimeEnvelopeWebSocketPongWait
+	if conn == nil || pongWait <= 0 {
 		return
 	}
-	_ = conn.SetReadDeadline(time.Now().Add(runtimeEnvelopeWebSocketPongWait))
+	_ = conn.SetReadDeadline(time.Now().Add(pongWait))
 	conn.SetPongHandler(func(string) error {
-		return conn.SetReadDeadline(time.Now().Add(runtimeEnvelopeWebSocketPongWait))
+		return conn.SetReadDeadline(time.Now().Add(pongWait))
 	})
 }
 
@@ -534,12 +535,13 @@ func startRuntimeEnvelopeWebSocketKeepalive(
 	cancel context.CancelFunc,
 ) <-chan struct{} {
 	done := make(chan struct{})
-	if conn == nil || writeMu == nil || runtimeEnvelopeWebSocketPingInterval <= 0 {
+	pingInterval := runtimeEnvelopeWebSocketPingInterval
+	if conn == nil || writeMu == nil || pingInterval <= 0 {
 		close(done)
 		return done
 	}
 
-	ticker := time.NewTicker(runtimeEnvelopeWebSocketPingInterval)
+	ticker := time.NewTicker(pingInterval)
 	go func() {
 		defer close(done)
 		defer ticker.Stop()
