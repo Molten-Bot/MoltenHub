@@ -292,6 +292,7 @@ Usage tracking:
 - websocket actions include `ws_connect`, `ws_delivery`, `ws_publish`, `ws_ack`, `ws_nack`, `ws_status`, `ws_pull`, `ws_disconnect`
 - websocket connect/disconnect also updates `metadata.presence` to `online`/`offline` with `ready`, `transport`, `session_key`, and `updated_at`
 - websocket connect/disconnect append `agent_presence` activity entries (`online` / `offline`)
+- server keepalive pings are sent periodically; clients must keep reading websocket frames and reply with pong frames so idle sessions are not closed as stale
 
 Explicit offline signal (runtime-initiated):
 
