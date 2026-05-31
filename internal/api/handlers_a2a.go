@@ -1020,7 +1020,7 @@ func a2aTaskStatusCandidatesFromMessage(message map[string]any) []map[string]any
 			continue
 		}
 		if data, _ := part["data"].(map[string]any); a2aLooksLikeTaskStatusPayload(data) {
-			candidates = append(candidates, data)
+			candidates = append(candidates, a2aTaskStatusCandidateWithMessageFields(data, message))
 		}
 		text := strings.TrimSpace(asStringAny(part["text"]))
 		if text == "" || !strings.HasPrefix(text, "{") {
@@ -1028,10 +1028,28 @@ func a2aTaskStatusCandidatesFromMessage(message map[string]any) []map[string]any
 		}
 		var candidate map[string]any
 		if err := json.Unmarshal([]byte(text), &candidate); err == nil && a2aLooksLikeTaskStatusPayload(candidate) {
-			candidates = append(candidates, candidate)
+			candidates = append(candidates, a2aTaskStatusCandidateWithMessageFields(candidate, message))
 		}
 	}
 	return candidates
+}
+
+func a2aTaskStatusCandidateWithMessageFields(candidate, message map[string]any) map[string]any {
+	if len(candidate) == 0 {
+		return candidate
+	}
+	out := cloneStringAnyMap(candidate)
+	if strings.TrimSpace(a2aTaskStatusCandidateTaskID(out)) == "" {
+		if taskID := strings.TrimSpace(asStringAny(message["taskId"])); taskID != "" {
+			out["task_id"] = taskID
+		}
+	}
+	if strings.TrimSpace(a2aTaskStatusCandidateContextID(out)) == "" {
+		if contextID := strings.TrimSpace(asStringAny(message["contextId"])); contextID != "" {
+			out["context_id"] = contextID
+		}
+	}
+	return out
 }
 
 func a2aLooksLikeTaskStatusPayload(payload map[string]any) bool {
@@ -1079,10 +1097,7 @@ func a2aTaskStatusFromCandidate(candidate map[string]any, fallbackMessageID, fal
 		fallbackMessageID,
 	)
 	contextID := firstA2AString(
-		statusUpdate["contextId"],
-		statusUpdate["context_id"],
-		candidate["a2a_context_id"],
-		candidate["context_id"],
+		a2aTaskStatusCandidateContextID(candidate),
 		fallbackContextID,
 	)
 	if message := a2aStatusMessage(candidate, status, fallbackMessageID, contextID, taskID); len(message) > 0 {
@@ -1476,6 +1491,16 @@ func a2aTaskStatusCandidateTaskID(candidate map[string]any) string {
 		candidate["a2a_task_id"],
 		candidate["task_id"],
 		candidate["hub_task_id"],
+	)
+}
+
+func a2aTaskStatusCandidateContextID(candidate map[string]any) string {
+	statusUpdate, _ := candidate["statusUpdate"].(map[string]any)
+	return firstA2AString(
+		statusUpdate["contextId"],
+		statusUpdate["context_id"],
+		candidate["a2a_context_id"],
+		candidate["context_id"],
 	)
 }
 
