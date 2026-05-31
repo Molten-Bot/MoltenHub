@@ -829,6 +829,33 @@ func TestA2AGetTaskCorrelatesStatusUpdateByEnvelopeMessageTaskID(t *testing.T) {
 	}
 }
 
+func TestA2ATaskStatusPayloadReferencesEnvelopeMessageTaskID(t *testing.T) {
+	payload := `{
+		"protocol":"a2a.adapter",
+		"message":{
+			"messageId":"status-message",
+			"contextId":"status-context",
+			"taskId":"task-123",
+			"role":"ROLE_AGENT",
+			"parts":[{
+				"mediaType":"application/json",
+				"data":{
+					"type":"task_status_update",
+					"a2a_state":"TASK_STATE_WORKING",
+					"message":"running"
+				}
+			}]
+		}
+	}`
+
+	if !a2aTaskStatusPayloadReferencesTask(payload, "task-123") {
+		t.Fatalf("expected status payload to reference envelope message taskId")
+	}
+	if a2aTaskStatusPayloadReferencesTask(payload, "other-task") {
+		t.Fatalf("expected status payload not to reference unrelated task id")
+	}
+}
+
 func TestRuntimePublishVisibleAsA2ATaskWithDispatcherCorrelation(t *testing.T) {
 	router := newTestRouter()
 	_, _, tokenA, tokenB, _, _, _, agentUUIDB := setupTrustedAgents(t, router)

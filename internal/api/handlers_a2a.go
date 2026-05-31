@@ -1475,7 +1475,16 @@ func a2aTaskStatusPayloadReferencesTask(payload, taskID string) bool {
 	if taskID == "" {
 		return false
 	}
-	for _, candidate := range a2aTaskStatusCandidates(payload) {
+	candidates := a2aTaskStatusCandidates(payload)
+	if len(candidates) == 0 {
+		return false
+	}
+	if msg := a2aEnvelopeMessage(payload); msg != nil {
+		if strings.TrimSpace(a2aReadStringPath(msg, "taskId")) == taskID {
+			return true
+		}
+	}
+	for _, candidate := range candidates {
 		if a2aTaskStatusCandidateTaskID(candidate) == taskID {
 			return true
 		}
