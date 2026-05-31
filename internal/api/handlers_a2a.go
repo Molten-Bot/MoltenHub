@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -648,11 +649,12 @@ func (h *Handler) a2aGetTaskByID(r *http.Request, targetAgentUUID, taskID string
 	if !a2aCanSeeRecord(callerAgentUUID, targetAgentUUID, record.Message) {
 		return nil, a2aUnauthorized("forbidden", "task is not visible to this agent", nil)
 	}
+	correlatedRecords := h.a2aCorrelatedTaskStatusRecords(callerAgentUUID, targetAgentUUID, record.Message.MessageID)
 	h.recordA2AAdapterUsage(callerAgentUUID, "get_task", map[string]any{
 		"message_id":        record.Message.MessageID,
 		"target_agent_uuid": targetAgentUUID,
 	})
-	return h.a2aTaskFromRecord(record, historyLength), nil
+	return h.a2aTaskFromRecordWithCorrelatedStatus(record, historyLength, correlatedRecords), nil
 }
 
 func (h *Handler) a2aListTasks(r *http.Request, targetAgentUUID string, raw json.RawMessage) (map[string]any, *a2aProtocolError) {
@@ -934,6 +936,55 @@ func (h *Handler) a2aTaskFromRecord(record model.MessageRecord, historyLength *i
 	return task
 }
 
+func (h *Handler) a2aTaskFromRecordWithCorrelatedStatus(record model.MessageRecord, historyLength *int, correlatedRecords []model.MessageRecord) map[string]any {
+	task := h.a2aTaskFromRecord(record, historyLength)
+	if len(correlatedRecords) == 0 {
+		return task
+	}
+
+	if latest := latestA2AStatusRecord(correlatedRecords); latest != nil {
+		contextID := a2aContextIDFromRecord(*latest)
+		if status := a2aTaskStatusFromPayload(latest.Message.Payload, latest.Message.MessageID, contextID, latest.UpdatedAt); len(status) > 0 {
+			task["status"] = status
+		}
+	}
+
+	if historyLength != nil && *historyLength == 0 {
+		return task
+	}
+
+	contextID := a2aContextIDFromRecord(record)
+	history := []map[string]any{h.a2aMessageFromRecord(record, contextID)}
+	for _, correlated := range correlatedRecords {
+		history = append(history, h.a2aMessageFromRecord(correlated, a2aContextIDFromRecord(correlated)))
+	}
+	task["history"] = trimA2AHistory(history, historyLength)
+	return task
+}
+
+func latestA2AStatusRecord(records []model.MessageRecord) *model.MessageRecord {
+	if len(records) == 0 {
+		return nil
+	}
+	latest := records[0]
+	for _, record := range records[1:] {
+		if record.UpdatedAt.After(latest.UpdatedAt) {
+			latest = record
+		}
+	}
+	return &latest
+}
+
+func trimA2AHistory(history []map[string]any, historyLength *int) []map[string]any {
+	if historyLength == nil || *historyLength >= len(history) {
+		return history
+	}
+	if *historyLength <= 0 {
+		return nil
+	}
+	return history[len(history)-*historyLength:]
+}
+
 func a2aTaskStatusFromPayload(payload, fallbackMessageID, fallbackContextID string, fallbackUpdatedAt time.Time) map[string]any {
 	for _, candidate := range a2aTaskStatusCandidates(payload) {
 		if status := a2aTaskStatusFromCandidate(candidate, fallbackMessageID, fallbackContextID, fallbackUpdatedAt); len(status) > 0 {
@@ -969,7 +1020,7 @@ func a2aTaskStatusCandidatesFromMessage(message map[string]any) []map[string]any
 			continue
 		}
 		if data, _ := part["data"].(map[string]any); a2aLooksLikeTaskStatusPayload(data) {
-			candidates = append(candidates, data)
+			candidates = append(candidates, a2aTaskStatusCandidateWithMessageFields(data, message))
 		}
 		text := strings.TrimSpace(asStringAny(part["text"]))
 		if text == "" || !strings.HasPrefix(text, "{") {
@@ -977,10 +1028,28 @@ func a2aTaskStatusCandidatesFromMessage(message map[string]any) []map[string]any
 		}
 		var candidate map[string]any
 		if err := json.Unmarshal([]byte(text), &candidate); err == nil && a2aLooksLikeTaskStatusPayload(candidate) {
-			candidates = append(candidates, candidate)
+			candidates = append(candidates, a2aTaskStatusCandidateWithMessageFields(candidate, message))
 		}
 	}
 	return candidates
+}
+
+func a2aTaskStatusCandidateWithMessageFields(candidate, message map[string]any) map[string]any {
+	if len(candidate) == 0 {
+		return candidate
+	}
+	out := cloneStringAnyMap(candidate)
+	if strings.TrimSpace(a2aTaskStatusCandidateTaskID(out)) == "" {
+		if taskID := strings.TrimSpace(asStringAny(message["taskId"])); taskID != "" {
+			out["task_id"] = taskID
+		}
+	}
+	if strings.TrimSpace(a2aTaskStatusCandidateContextID(out)) == "" {
+		if contextID := strings.TrimSpace(asStringAny(message["contextId"])); contextID != "" {
+			out["context_id"] = contextID
+		}
+	}
+	return out
 }
 
 func a2aLooksLikeTaskStatusPayload(payload map[string]any) bool {
@@ -1028,10 +1097,7 @@ func a2aTaskStatusFromCandidate(candidate map[string]any, fallbackMessageID, fal
 		fallbackMessageID,
 	)
 	contextID := firstA2AString(
-		statusUpdate["contextId"],
-		statusUpdate["context_id"],
-		candidate["a2a_context_id"],
-		candidate["context_id"],
+		a2aTaskStatusCandidateContextID(candidate),
 		fallbackContextID,
 	)
 	if message := a2aStatusMessage(candidate, status, fallbackMessageID, contextID, taskID); len(message) > 0 {
@@ -1380,6 +1446,62 @@ func (h *Handler) a2aVisibleMessageRecords(callerAgentUUID, targetAgentUUID stri
 		records = append(records, record)
 	}
 	return records
+}
+
+func (h *Handler) a2aCorrelatedTaskStatusRecords(callerAgentUUID, targetAgentUUID, taskID string) []model.MessageRecord {
+	taskID = strings.TrimSpace(taskID)
+	if taskID == "" {
+		return nil
+	}
+	records := h.a2aVisibleMessageRecords(callerAgentUUID, targetAgentUUID)
+	correlated := make([]model.MessageRecord, 0)
+	for _, record := range records {
+		if record.Message.MessageID == taskID {
+			continue
+		}
+		if !a2aTaskStatusPayloadReferencesTask(record.Message.Payload, taskID) {
+			continue
+		}
+		correlated = append(correlated, record)
+	}
+	sort.SliceStable(correlated, func(i, j int) bool {
+		return correlated[i].UpdatedAt.Before(correlated[j].UpdatedAt)
+	})
+	return correlated
+}
+
+func a2aTaskStatusPayloadReferencesTask(payload, taskID string) bool {
+	taskID = strings.TrimSpace(taskID)
+	if taskID == "" {
+		return false
+	}
+	for _, candidate := range a2aTaskStatusCandidates(payload) {
+		if a2aTaskStatusCandidateTaskID(candidate) == taskID {
+			return true
+		}
+	}
+	return false
+}
+
+func a2aTaskStatusCandidateTaskID(candidate map[string]any) string {
+	statusUpdate, _ := candidate["statusUpdate"].(map[string]any)
+	return firstA2AString(
+		statusUpdate["taskId"],
+		statusUpdate["task_id"],
+		candidate["a2a_task_id"],
+		candidate["task_id"],
+		candidate["hub_task_id"],
+	)
+}
+
+func a2aTaskStatusCandidateContextID(candidate map[string]any) string {
+	statusUpdate, _ := candidate["statusUpdate"].(map[string]any)
+	return firstA2AString(
+		statusUpdate["contextId"],
+		statusUpdate["context_id"],
+		candidate["a2a_context_id"],
+		candidate["context_id"],
+	)
 }
 
 func a2aCanSeeRecord(callerAgentUUID, targetAgentUUID string, message model.Message) bool {
