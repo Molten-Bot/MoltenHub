@@ -644,6 +644,132 @@ func TestA2ATaskFromStatusUpdateMessageUsesStatusPayload(t *testing.T) {
 	}
 }
 
+func TestA2AGetTaskOverlaysCorrelatedStatusUpdate(t *testing.T) {
+	router := newTestRouter()
+	_, _, tokenA, tokenB, _, _, agentUUIDA, agentUUIDB := setupTrustedAgents(t, router)
+
+	metadataPatch := doJSONRequest(t, router, http.MethodPatch, "/v1/agents/me/metadata", map[string]any{
+		"metadata": map[string]any{
+			"skills": []map[string]any{{
+				"name":        "code_for_me",
+				"description": "Run a coding task.",
+			}},
+		},
+	}, map[string]string{"Authorization": "Bearer " + tokenB})
+	if metadataPatch.Code != http.StatusOK {
+		t.Fatalf("metadata patch failed: %d %s", metadataPatch.Code, metadataPatch.Body.String())
+	}
+
+	pubResp := doJSONRequest(t, router, http.MethodPost, "/v1/runtime/messages/publish", map[string]any{
+		"to_agent_uuid": agentUUIDB,
+		"client_msg_id": "forum-release-1",
+		"message": map[string]any{
+			"type":           "skill_request",
+			"skill_name":     "code_for_me",
+			"payload_format": "json",
+			"payload": map[string]any{
+				"repo":   "git@github.com:Molten-Bot/forum.git",
+				"prompt": "ship release progress",
+			},
+		},
+	}, map[string]string{"Authorization": "Bearer " + tokenA})
+	if pubResp.Code != http.StatusAccepted {
+		t.Fatalf("expected runtime publish 202, got %d %s", pubResp.Code, pubResp.Body.String())
+	}
+	pubPayload := decodeJSONMap(t, pubResp.Body.Bytes())
+	result, _ := pubPayload["result"].(map[string]any)
+	taskID, _ := result["message_id"].(string)
+	if taskID == "" {
+		t.Fatalf("expected message_id, got %v", pubPayload)
+	}
+
+	sendResp := doJSONRequest(t, router, http.MethodPost, "/v1/a2a/agents/"+agentUUIDA+"/message:send", map[string]any{
+		"message": map[string]any{
+			"messageId": "code-status-checks-running",
+			"contextId": "forum-release-1",
+			"taskId":    taskID,
+			"role":      "ROLE_AGENT",
+			"parts": []map[string]any{{
+				"mediaType": "application/json",
+				"data": map[string]any{
+					"protocol":       "a2a.v1",
+					"type":           "task_status_update",
+					"request_id":     "forum-release-1",
+					"status":         "working",
+					"a2a_state":      "TASK_STATE_WORKING",
+					"task_state":     "TASK_STATE_WORKING",
+					"message":        "GitHub Actions running.",
+					"a2a_task_id":    taskID,
+					"a2a_context_id": "forum-release-1",
+					"details": map[string]any{
+						"stage":        "checks",
+						"stage_status": "running",
+					},
+					"statusUpdate": map[string]any{
+						"taskId":    taskID,
+						"contextId": "forum-release-1",
+						"status": map[string]any{
+							"state": "TASK_STATE_WORKING",
+							"message": map[string]any{
+								"messageId": "code-status-checks-running-message",
+								"contextId": "forum-release-1",
+								"taskId":    taskID,
+								"role":      "ROLE_AGENT",
+								"parts": []map[string]any{{
+									"text": "GitHub Actions running.",
+								}},
+							},
+						},
+						"metadata": map[string]any{
+							"stage":        "checks",
+							"stage_status": "running",
+						},
+					},
+				},
+			}},
+		},
+	}, map[string]string{"Authorization": "Bearer " + tokenB})
+	if sendResp.Code != http.StatusOK {
+		t.Fatalf("expected A2A status send 200, got %d %s", sendResp.Code, sendResp.Body.String())
+	}
+
+	taskResp := doJSONRequest(t, router, http.MethodGet, "/v1/a2a/agents/"+agentUUIDB+"/tasks/"+taskID, nil, map[string]string{
+		"Authorization": "Bearer " + tokenA,
+	})
+	if taskResp.Code != http.StatusOK {
+		t.Fatalf("expected A2A get task 200, got %d %s", taskResp.Code, taskResp.Body.String())
+	}
+	task := decodeJSONMap(t, taskResp.Body.Bytes())
+	if got := readStringPath(task, "status", "state"); got != "TASK_STATE_WORKING" {
+		t.Fatalf("expected correlated task state TASK_STATE_WORKING, got %q task=%v", got, task)
+	}
+	status, _ := task["status"].(map[string]any)
+	message, _ := status["message"].(map[string]any)
+	parts, _ := message["parts"].([]any)
+	part, _ := parts[0].(map[string]any)
+	if got := part["text"]; got != "GitHub Actions running." {
+		t.Fatalf("expected correlated status text, got %v task=%v", got, task)
+	}
+	history, _ := task["history"].([]any)
+	if len(history) < 2 {
+		t.Fatalf("expected original message and correlated status in history, got %v", task)
+	}
+
+	noHistoryResp := doJSONRequest(t, router, http.MethodGet, "/v1/a2a/agents/"+agentUUIDB+"/tasks/"+taskID+"?historyLength=0", nil, map[string]string{
+		"Authorization": "Bearer " + tokenA,
+	})
+	if noHistoryResp.Code != http.StatusOK {
+		t.Fatalf("expected A2A get task without history 200, got %d %s", noHistoryResp.Code, noHistoryResp.Body.String())
+	}
+	noHistoryTask := decodeJSONMap(t, noHistoryResp.Body.Bytes())
+	if got := readStringPath(noHistoryTask, "status", "state"); got != "TASK_STATE_WORKING" {
+		t.Fatalf("expected correlated task state without history TASK_STATE_WORKING, got %q task=%v", got, noHistoryTask)
+	}
+	if _, ok := noHistoryTask["history"]; ok {
+		t.Fatalf("expected historyLength=0 to omit history, got %v", noHistoryTask)
+	}
+}
+
 func TestRuntimePublishVisibleAsA2ATaskWithDispatcherCorrelation(t *testing.T) {
 	router := newTestRouter()
 	_, _, tokenA, tokenB, _, _, _, agentUUIDB := setupTrustedAgents(t, router)
