@@ -218,7 +218,7 @@ func validateSkillActivationRequest(receiver model.Agent, contentType, payload s
 
 	errors := validateSkillActivationPayload(skill, envelope["payload"], asStringValue(envelope["payload_format"]))
 	if len(errors) > 0 {
-		return skillValidationRuntimeError(errors)
+		return skillValidationRuntimeErrorForSkill(skill, errors)
 	}
 	return nil
 }
@@ -357,15 +357,113 @@ func sortValidationErrors(errors []string) []string {
 }
 
 func skillValidationRuntimeError(details []string) *runtimeHandlerError {
+	return skillValidationRuntimeErrorWithExtras(details, nil)
+}
+
+func skillValidationRuntimeErrorForSkill(skill agentSkillSummary, details []string) *runtimeHandlerError {
+	extras := map[string]any{}
+	if strings.TrimSpace(skill.Name) != "" {
+		extras["skill_name"] = skill.Name
+	}
+	if contract := skillParametersContract(skill.Parameters); len(contract) > 0 {
+		extras["skill_parameters"] = contract
+		extras["payload_format"] = contract["format"]
+		extras["required_parameters"] = skillParameterNames(skill.Parameters.Required)
+		extras["optional_parameters"] = skillParameterNames(skill.Parameters.Optional)
+		extras["allowed_parameters"] = skillAllowedParameterNames(skill.Parameters)
+	}
+	return skillValidationRuntimeErrorWithExtras(details, extras)
+}
+
+func skillValidationRuntimeErrorWithExtras(details []string, extras map[string]any) *runtimeHandlerError {
+	payload := map[string]any{
+		"failure":           true,
+		"validation_errors": details,
+	}
+	for key, value := range extras {
+		if strings.TrimSpace(key) == "" {
+			continue
+		}
+		payload[key] = value
+	}
 	return &runtimeHandlerError{
 		status:  400,
 		code:    "invalid_skill_request",
 		message: "skill activation validation failed",
-		extras: map[string]any{
-			"failure":           true,
-			"validation_errors": details,
-		},
+		extras:  payload,
 	}
+}
+
+func skillParametersContract(params *agentSkillParameters) map[string]any {
+	if params == nil {
+		return nil
+	}
+	out := map[string]any{
+		"format":        params.Format,
+		"secret_policy": params.SecretPolicy,
+		"allowed":       skillAllowedParameterNames(params),
+	}
+	if len(params.Required) > 0 {
+		out["required"] = cloneSkillParameterList(params.Required)
+	}
+	if len(params.Optional) > 0 {
+		out["optional"] = cloneSkillParameterList(params.Optional)
+	}
+	if params.Schema != nil {
+		out["schema"] = cloneSkillParameterSchema(params.Schema)
+	}
+	return out
+}
+
+func cloneSkillParameterList(in []agentSkillParameter) []map[string]string {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]map[string]string, 0, len(in))
+	for _, item := range in {
+		out = append(out, map[string]string{
+			"name":        item.Name,
+			"description": item.Description,
+		})
+	}
+	return out
+}
+
+func skillParameterNames(in []agentSkillParameter) []string {
+	if len(in) == 0 {
+		return []string{}
+	}
+	out := make([]string, 0, len(in))
+	for _, item := range in {
+		if item.Name != "" {
+			out = append(out, item.Name)
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
+func skillAllowedParameterNames(params *agentSkillParameters) []string {
+	if params == nil {
+		return []string{}
+	}
+	seen := map[string]struct{}{}
+	for _, item := range params.Required {
+		if item.Name != "" {
+			seen[item.Name] = struct{}{}
+		}
+	}
+	for _, item := range params.Optional {
+		if item.Name != "" {
+			seen[item.Name] = struct{}{}
+		}
+	}
+	out := make([]string, 0, len(seen))
+	for name := range seen {
+		out = append(out, name)
+	}
+	sort.Strings(out)
+	return out
 }
 
 func asStringValue(value any) string {

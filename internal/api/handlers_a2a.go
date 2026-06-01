@@ -896,6 +896,7 @@ func a2aSkillsFromAgentMetadata(metadata map[string]any) []map[string]any {
 		}
 		if skill.Parameters != nil {
 			item["examples"] = []string{"Send a skill_request JSON envelope for " + skill.Name}
+			item["parameters"] = skillParametersContract(skill.Parameters)
 		}
 		out = append(out, item)
 	}
