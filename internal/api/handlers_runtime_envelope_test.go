@@ -455,6 +455,92 @@ func TestRuntimePublishSkillActivationRejectsInvalidPayloadType(t *testing.T) {
 	}
 }
 
+func TestRuntimePublishSkillActivationErrorIncludesParameterContract(t *testing.T) {
+	router := newTestRouter()
+	_, _, tokenA, tokenB, _, _, _, agentUUIDB := setupTrustedAgents(t, router)
+
+	metadataPatch := doJSONRequest(t, router, http.MethodPatch, "/v1/agents/me/metadata", map[string]any{
+		"metadata": map[string]any{
+			"skills": []map[string]any{{
+				"name":        "code_for_me",
+				"description": "Run a coding task.",
+				"parameters": map[string]any{
+					"optional": []map[string]any{
+						{"name": "repos", "description": "One or more Git repository URLs."},
+						{"name": "prompt", "description": "Requested ad hoc code change."},
+						{"name": "targetsubdir", "description": "Repository subdirectory."},
+						{"name": "reviewers", "description": "GitHub reviewers."},
+					},
+					"secret_policy": "forbidden",
+				},
+			}},
+		},
+	}, map[string]string{"Authorization": "Bearer " + tokenB})
+	if metadataPatch.Code != http.StatusOK {
+		t.Fatalf("metadata patch failed: %d %s", metadataPatch.Code, metadataPatch.Body.String())
+	}
+
+	resp := doJSONRequest(t, router, http.MethodPost, "/v1/runtime/messages/publish", map[string]any{
+		"to_agent_uuid": agentUUIDB,
+		"message": map[string]any{
+			"type":           "skill_request",
+			"skill_name":     "code_for_me",
+			"payload_format": "json",
+			"payload": map[string]any{
+				"repos":        []string{"git@github.com:Molten-Bot/forum.git"},
+				"targetsubdir": ".",
+				"reviewers":    []string{"jefking"},
+				"project":      map[string]any{"id": "forum"},
+				"release":      map[string]any{"number": 4},
+				"prompt":       "ship release progress",
+			},
+		},
+	}, map[string]string{"Authorization": "Bearer " + tokenA})
+	if resp.Code != http.StatusBadRequest {
+		t.Fatalf("expected runtime publish validation failure 400, got %d %s", resp.Code, resp.Body.String())
+	}
+	payload := decodeJSONMap(t, resp.Body.Bytes())
+	if got, _ := payload["error"].(string); got != "invalid_skill_request" {
+		t.Fatalf("expected invalid_skill_request, got %q payload=%v", got, payload)
+	}
+	if !runtimeHasStringContaining(payload["validation_errors"], `unknown parameter "project"`) ||
+		!runtimeHasStringContaining(payload["validation_errors"], `unknown parameter "release"`) {
+		t.Fatalf("expected project and release unknown parameter errors, got %v", payload["validation_errors"])
+	}
+	if got, _ := payload["skill_name"].(string); got != "code_for_me" {
+		t.Fatalf("expected skill_name=code_for_me, got %q payload=%v", got, payload)
+	}
+	if got, _ := payload["payload_format"].(string); got != "json" {
+		t.Fatalf("expected payload_format=json, got %q payload=%v", got, payload)
+	}
+	allowed := a2aStringSet(payload["allowed_parameters"])
+	for _, name := range []string{"prompt", "repos", "reviewers", "targetsubdir"} {
+		if !allowed[name] {
+			t.Fatalf("expected allowed_parameters to include %q, got %v", name, payload["allowed_parameters"])
+		}
+	}
+	errorDetail, _ := payload["error_detail"].(map[string]any)
+	detailContract, _ := errorDetail["skill_parameters"].(map[string]any)
+	if detailContract == nil {
+		t.Fatalf("expected error_detail.skill_parameters, got %v", errorDetail)
+	}
+	detailAllowed := a2aStringSet(detailContract["allowed"])
+	if !detailAllowed["repos"] || !detailAllowed["prompt"] {
+		t.Fatalf("expected error_detail skill contract to include repos and prompt, got %v", detailContract)
+	}
+}
+
+func runtimeHasStringContaining(raw any, want string) bool {
+	items, _ := raw.([]any)
+	for _, item := range items {
+		value, _ := item.(string)
+		if strings.Contains(value, want) {
+			return true
+		}
+	}
+	return false
+}
+
 func TestRuntimeWebSocketDeliveryAndAckFlow(t *testing.T) {
 	router := newTestRouter()
 	_, _, tokenA, tokenB, _, _, _, agentUUIDB := setupTrustedAgents(t, router)

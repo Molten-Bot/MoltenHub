@@ -72,6 +72,97 @@ func TestA2AAgentCardAdvertisesJSONRPCAndREST(t *testing.T) {
 	}
 }
 
+func TestA2AAgentCardIncludesSkillParameterContract(t *testing.T) {
+	router := newTestRouter()
+	_, _, _, tokenB, _, _, _, agentUUIDB := setupTrustedAgents(t, router)
+
+	metadataPatch := doJSONRequest(t, router, http.MethodPatch, "/v1/agents/me/metadata", map[string]any{
+		"metadata": map[string]any{
+			"skills": []map[string]any{{
+				"name":        "weather_lookup",
+				"description": "Get current weather for a location.",
+				"parameters": map[string]any{
+					"required": []map[string]any{
+						{"name": "location", "description": "City or postal code."},
+					},
+					"optional": []map[string]any{
+						{"name": "units", "description": "metric or imperial."},
+					},
+					"secret_policy": "forbidden",
+				},
+			}},
+		},
+	}, map[string]string{"Authorization": "Bearer " + tokenB})
+	if metadataPatch.Code != http.StatusOK {
+		t.Fatalf("metadata patch failed: %d %s", metadataPatch.Code, metadataPatch.Body.String())
+	}
+
+	resp := doJSONRequest(t, router, http.MethodGet, "/v1/a2a/agents/"+agentUUIDB+"/agent-card", nil, nil)
+	if resp.Code != http.StatusOK {
+		t.Fatalf("expected agent card 200, got %d %s", resp.Code, resp.Body.String())
+	}
+	card := decodeJSONMap(t, resp.Body.Bytes())
+	skills, _ := card["skills"].([]any)
+	var weather map[string]any
+	for _, raw := range skills {
+		item, _ := raw.(map[string]any)
+		if item["id"] == "weather_lookup" {
+			weather = item
+			break
+		}
+	}
+	if weather == nil {
+		t.Fatalf("expected weather_lookup skill in card, got %v", card["skills"])
+	}
+	params, _ := weather["parameters"].(map[string]any)
+	if params == nil {
+		t.Fatalf("expected skill parameters in A2A card, got %v", weather)
+	}
+	if got := params["format"]; got != "json" {
+		t.Fatalf("expected parameters.format=json, got %v params=%v", got, params)
+	}
+	if got := params["secret_policy"]; got != "forbidden" {
+		t.Fatalf("expected parameters.secret_policy=forbidden, got %v params=%v", got, params)
+	}
+	allowed := a2aStringSet(params["allowed"])
+	if !allowed["location"] || !allowed["units"] {
+		t.Fatalf("expected allowed parameters to include location and units, got %v", params["allowed"])
+	}
+	required := a2aParameterNameSet(params["required"])
+	if !required["location"] {
+		t.Fatalf("expected required parameter location, got %v", params["required"])
+	}
+	optional := a2aParameterNameSet(params["optional"])
+	if !optional["units"] {
+		t.Fatalf("expected optional parameter units, got %v", params["optional"])
+	}
+}
+
+func a2aStringSet(raw any) map[string]bool {
+	out := map[string]bool{}
+	items, _ := raw.([]any)
+	for _, item := range items {
+		value, _ := item.(string)
+		if value != "" {
+			out[value] = true
+		}
+	}
+	return out
+}
+
+func a2aParameterNameSet(raw any) map[string]bool {
+	out := map[string]bool{}
+	items, _ := raw.([]any)
+	for _, item := range items {
+		param, _ := item.(map[string]any)
+		name, _ := param["name"].(string)
+		if name != "" {
+			out[name] = true
+		}
+	}
+	return out
+}
+
 func TestA2AJSONRPCSendMessageDeliversToLegacyPull(t *testing.T) {
 	router := newTestRouter()
 	_, _, tokenA, tokenB, _, _, _, agentUUIDB := setupTrustedAgents(t, router)
